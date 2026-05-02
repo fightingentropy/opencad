@@ -141,7 +141,15 @@ export function MenuBar({ onShowBom, onShowAbout }: { onShowBom: () => void; onS
 const zoomExtents = () => {
   const state = useStore.getState();
   const sheet = state.project.sheets[state.project.activeSheetId];
-  state.setViewport({ x: sheet.width / 2, y: sheet.height / 2, zoom: 2 });
+  if (!sheet) return;
+  // Best-effort canvas size: fall back to window if we can't query the canvas.
+  const canvas = document.querySelector('canvas.canvas-2d') as HTMLCanvasElement | null;
+  const w = canvas?.clientWidth ?? window.innerWidth - 500;
+  const h = canvas?.clientHeight ?? window.innerHeight - 200;
+  // Lazy import to avoid a cycle between MenuBar -> store
+  import('../lib/fit').then(({ fitViewportToSheet }) => {
+    state.setViewport(fitViewportToSheet(sheet, w, h));
+  });
 };
 
 function MenuButton({
