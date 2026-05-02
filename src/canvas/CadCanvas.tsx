@@ -41,6 +41,7 @@ export function CadCanvas() {
 
   const sheet = project.sheets[project.activeSheetId];
   const activeLayerId = project.activeLayerId;
+  const hasFitOnceRef = useRef(false);
 
   // Resize observer
   useLayoutEffect(() => {
@@ -57,6 +58,20 @@ export function CadCanvas() {
     setDpr(window.devicePixelRatio || 1);
     return () => ro.disconnect();
   }, []);
+
+  // Auto-fit page to visible canvas on first real measurement so the drawing
+  // fills the available area instead of showing a small portion of the page.
+  useEffect(() => {
+    if (hasFitOnceRef.current) return;
+    if (size.w < 100 || size.h < 100) return;
+    if (!sheet) return;
+    const padding = 40;
+    const zx = (size.w - padding * 2) / sheet.width;
+    const zy = (size.h - padding * 2) / sheet.height;
+    const zoom = Math.max(0.3, Math.min(zx, zy));
+    setViewport({ x: sheet.width / 2, y: sheet.height / 2, zoom });
+    hasFitOnceRef.current = true;
+  }, [size.w, size.h, sheet, setViewport]);
 
   // Render loop
   useEffect(() => {

@@ -2,10 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Panel3D } from './Panel3D';
 import { useStore } from '../state/store';
 
-export function Panel3DContainer() {
+interface Props { width?: number }
+
+export function Panel3DContainer({ width = 320 }: Props) {
   const project = useStore((s) => s.project);
   const ref = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState({ w: 360, h: 600 });
+  const [size, setSize] = useState({ w: width, h: 600 });
 
   useEffect(() => {
     if (!ref.current) return;
@@ -21,7 +23,7 @@ export function Panel3DContainer() {
   }, []);
 
   return (
-    <div ref={ref} className="canvas-3d">
+    <div ref={ref} className="canvas-3d" style={{ width, flexShrink: 0 }}>
       <Panel3D project={project} width={size.w} height={size.h} />
       <div className="canvas-3d-overlay">
         3D Panel View • drag to orbit • scroll to zoom
