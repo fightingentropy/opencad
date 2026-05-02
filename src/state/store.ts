@@ -134,7 +134,7 @@ const initialEditor = (): EditorState => ({
   cursor: { x: 0, y: 0 },
   cursorSnap: null,
   ortho: false,
-  show3D: true,
+  viewMode: 'split',
   commandHistory: [],
   statusMessage: 'Welcome to OpenCAD Electrical',
 });
@@ -183,7 +183,7 @@ interface Store {
   setDrafting: (d: EditorState['drafting']) => void;
   setPendingSymbol: (id: string | null) => void;
   setOrtho: (b: boolean) => void;
-  setShow3D: (b: boolean) => void;
+  setViewMode: (m: '2d' | 'split' | '3d') => void;
   setStatus: (s: string) => void;
   setSnap: (s: Partial<EditorState['snap']>) => void;
 
@@ -483,7 +483,7 @@ export const useStore = create<Store>((set, get) => ({
       editor: { ...s.editor, pendingSymbol: id, tool: id ? 'symbol' : s.editor.tool },
     })),
   setOrtho: (b) => set((s) => ({ editor: { ...s.editor, ortho: b } })),
-  setShow3D: (b) => set((s) => ({ editor: { ...s.editor, show3D: b } })),
+  setViewMode: (m) => set((s) => ({ editor: { ...s.editor, viewMode: m } })),
   setStatus: (msg) => set((s) => ({ editor: { ...s.editor, statusMessage: msg } })),
   setSnap: (snap) => set((s) => ({ editor: { ...s.editor, snap: { ...s.editor.snap, ...snap } } })),
 

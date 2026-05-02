@@ -305,7 +305,8 @@ export interface EditorState {
   // ortho mode constrains drawing to 0/90
   ortho: boolean;
   // show 3D panel preview side-by-side
-  show3D: boolean;
+  // 2D-only, split (2D + 3D), or 3D-only
+  viewMode: '2d' | 'split' | '3d';
   // command line history
   commandHistory: string[];
   statusMessage: string;

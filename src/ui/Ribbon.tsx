@@ -42,10 +42,10 @@ export function Ribbon() {
   const setTool = useStore((s) => s.setTool);
   const ortho = useStore((s) => s.editor.ortho);
   const snap = useStore((s) => s.editor.snap);
-  const show3D = useStore((s) => s.editor.show3D);
+  const viewMode = useStore((s) => s.editor.viewMode);
   const setOrtho = useStore((s) => s.setOrtho);
   const setSnap = useStore((s) => s.setSnap);
-  const setShow3D = useStore((s) => s.setShow3D);
+  const setViewMode = useStore((s) => s.setViewMode);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
   const past = useStore((s) => s.past.length);
@@ -116,7 +116,19 @@ export function Ribbon() {
 
       <div className="ribbon-group">
         <div className="ribbon-buttons">
-          <button className={`tool-btn${show3D ? ' active' : ''}`} onClick={() => setShow3D(!show3D)} title="Toggle 3D panel">
+          <button className={`tool-btn${viewMode === '2d' ? ' active' : ''}`} onClick={() => setViewMode('2d')} title="2D schematic only">
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2"><rect x="3" y="5" width="18" height="14"/><path d="M7 9l4 4 6-6"/></svg>
+            </span>
+            <span className="label">2D</span>
+          </button>
+          <button className={`tool-btn${viewMode === 'split' ? ' active' : ''}`} onClick={() => setViewMode('split')} title="Split view (2D + 3D)">
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2"><rect x="3" y="5" width="18" height="14"/><line x1="12" y1="5" x2="12" y2="19"/></svg>
+            </span>
+            <span className="label">Split</span>
+          </button>
+          <button className={`tool-btn${viewMode === '3d' ? ' active' : ''}`} onClick={() => setViewMode('3d')} title="3D panel only">
             <span className="icon">
               <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg>
             </span>
