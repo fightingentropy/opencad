@@ -1230,7 +1230,6 @@ function makeOrbitControls(
   let lastY = 0;
 
   const onMouseDown = (e: MouseEvent) => {
-    domElement.setPointerCapture?.(0);
     if (e.button === 0) {
       isRotating = true;
     } else if (e.button === 2) {
