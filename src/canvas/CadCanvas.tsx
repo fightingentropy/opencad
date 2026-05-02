@@ -391,6 +391,120 @@ export function CadCanvas() {
     setViewport(zoomAtPoint(editor.viewport, sp, size.w, size.h, factor));
   };
 
+  // ---------- Touch events (mobile) ----------
+  const touchRef = useRef<{
+    mode: 'tap' | 'pan' | 'pinch';
+    startX: number;
+    startY: number;
+    startTime: number;
+    startViewport: typeof editor.viewport;
+    startPinchDist: number;
+    startPinchCenter: { x: number; y: number };
+    moved: boolean;
+  } | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      const t = e.touches[0];
+      touchRef.current = {
+        mode: 'tap',
+        startX: t.clientX,
+        startY: t.clientY,
+        startTime: Date.now(),
+        startViewport: { ...editor.viewport },
+        startPinchDist: 0,
+        startPinchCenter: { x: 0, y: 0 },
+        moved: false,
+      };
+    } else if (e.touches.length === 2) {
+      e.preventDefault();
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const cx = (t1.clientX + t2.clientX) / 2;
+      const cy = (t1.clientY + t2.clientY) / 2;
+      const d = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      touchRef.current = {
+        mode: 'pinch',
+        startX: cx,
+        startY: cy,
+        startTime: Date.now(),
+        startViewport: { ...editor.viewport },
+        startPinchDist: d,
+        startPinchCenter: { x: cx, y: cy },
+        moved: false,
+      };
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    const st = touchRef.current;
+    if (!st) return;
+    e.preventDefault();
+    if (e.touches.length === 1 && (st.mode === 'tap' || st.mode === 'pan')) {
+      const t = e.touches[0];
+      const dx = t.clientX - st.startX;
+      const dy = t.clientY - st.startY;
+      if (!st.moved && Math.hypot(dx, dy) < 8) return;
+      st.mode = 'pan';
+      st.moved = true;
+      const v = st.startViewport;
+      setViewport({
+        ...v,
+        x: v.x - dx / v.zoom,
+        y: v.y + dy / v.zoom,
+      });
+    } else if (e.touches.length === 2 && st.mode === 'pinch') {
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const cx = (t1.clientX + t2.clientX) / 2;
+      const cy = (t1.clientY + t2.clientY) / 2;
+      const d = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      const factor = d / Math.max(1, st.startPinchDist);
+      const newZoom = Math.max(0.05, Math.min(200, st.startViewport.zoom * factor));
+      // Keep pinch start centroid stationary; also apply pan delta of centroid
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const sw = size.w;
+      const sh = size.h;
+      const sv = st.startViewport;
+      const startCxLocal = st.startPinchCenter.x - rect.left;
+      const startCyLocal = st.startPinchCenter.y - rect.top;
+      const worldX = (startCxLocal - sw / 2) / sv.zoom + sv.x;
+      const worldY = -(startCyLocal - sh / 2) / sv.zoom + sv.y;
+      const curCxLocal = cx - rect.left;
+      const curCyLocal = cy - rect.top;
+      setViewport({
+        zoom: newZoom,
+        x: worldX - (curCxLocal - sw / 2) / newZoom,
+        y: worldY + (curCyLocal - sh / 2) / newZoom,
+      });
+      st.moved = true;
+    }
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const st = touchRef.current;
+    if (!st) return;
+    if (st.mode === 'tap' && !st.moved) {
+      // Treat as a click — synthesize a mousedown handler call
+      const fakeEvent = {
+        button: 0,
+        clientX: st.startX,
+        clientY: st.startY,
+        shiftKey: false,
+        stopPropagation: () => {},
+        preventDefault: () => {},
+      } as unknown as React.MouseEvent;
+      handleMouseDown(fakeEvent);
+      // For one-shot tools that don't need a drag, also fire mouseUp so
+      // marquee state etc. resets cleanly.
+      handleMouseUp(fakeEvent);
+    }
+    if (e.touches.length === 0) {
+      touchRef.current = null;
+    }
+  };
+
   // Rotate selection or pending symbol on R
   const handleKeyDown = (e: KeyboardEvent) => {
     const target = e.target as HTMLElement;
@@ -512,6 +626,11 @@ export function CadCanvas() {
         onMouseLeave={() => { setHover(null); setPanning(false); setMarquee(null); setDraggingSelection(null); }}
         onWheel={handleWheel}
         onContextMenu={(e) => e.preventDefault()}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
+        style={{ touchAction: 'none' }}
         tabIndex={0}
       />
       <CoordReadout />

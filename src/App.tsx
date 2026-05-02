@@ -13,10 +13,12 @@ import { Panel3DContainer } from './three/Panel3DContainer';
 import { createSampleProject } from './sample';
 
 const STORED_3D_WIDTH_KEY = 'opencad.panel3dWidth';
+const MOBILE_BREAKPOINT = 900;
 
 export function App() {
   const setProject = useStore((s) => s.setProject);
   const show3D = useStore((s) => s.editor.show3D);
+  const setShow3D = useStore((s) => s.setShow3D);
   const [bomOpen, setBomOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [bootstrapped, setBootstrapped] = useState(false);
@@ -25,6 +27,36 @@ export function App() {
     return Number.isFinite(stored) && stored >= 200 ? stored : 320;
   });
   const [resizing, setResizing] = useState(false);
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' && window.innerWidth < MOBILE_BREAKPOINT
+  );
+  const [leftOpen, setLeftOpen] = useState(false);
+  const [rightOpen, setRightOpen] = useState(false);
+
+  // Track viewport size for mobile breakpoint
+  useEffect(() => {
+    const onResize = () => {
+      const m = window.innerWidth < MOBILE_BREAKPOINT;
+      setIsMobile(m);
+      if (!m) {
+        setLeftOpen(false);
+        setRightOpen(false);
+      }
+    };
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, []);
+
+  // Auto-hide 3D viewer on mobile by default (saves screen space)
+  useEffect(() => {
+    if (isMobile && show3D) setShow3D(false);
+    // Only react when crossing the breakpoint, not on every show3D change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile]);
 
   // Load sample project on first mount so the app demos immediately
   useEffect(() => {
@@ -66,15 +98,32 @@ export function App() {
     };
   }, [resizing, panel3DWidth]);
 
+  const zoomBy = (factor: number) => {
+    const v = useStore.getState().editor.viewport;
+    useStore.getState().setViewport({
+      ...v,
+      zoom: Math.max(0.05, Math.min(200, v.zoom * factor)),
+    });
+  };
+  const fitToPage = () => {
+    const sheet = useStore.getState().project.sheets[useStore.getState().project.activeSheetId];
+    if (!sheet) return;
+    useStore.getState().setViewport({
+      x: sheet.width / 2,
+      y: sheet.height / 2,
+      zoom: 2,
+    });
+  };
+
   return (
     <div className="app" style={resizing ? { cursor: 'col-resize', userSelect: 'none' } : undefined}>
       <MenuBar onShowBom={() => setBomOpen(true)} onShowAbout={() => setAboutOpen(true)} />
       <Ribbon />
-      <LeftPanel />
+      <LeftPanel open={leftOpen} />
       <div className="main">
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
           <CadCanvas />
-          {show3D && (
+          {show3D && !isMobile && (
             <>
               <div
                 className="splitter"
@@ -84,11 +133,38 @@ export function App() {
               <Panel3DContainer width={panel3DWidth} />
             </>
           )}
+          {show3D && isMobile && <Panel3DContainer width={0} />}
         </div>
         <SheetTabs />
       </div>
-      <RightPanel />
+      <RightPanel open={rightOpen} />
       <StatusBar />
+
+      {/* Mobile-only floating buttons */}
+      {isMobile && (leftOpen || rightOpen) && (
+        <div
+          className="drawer-backdrop"
+          onClick={() => { setLeftOpen(false); setRightOpen(false); }}
+        />
+      )}
+      {isMobile && (
+        <>
+          <button
+            className="mobile-fab fab-left"
+            onClick={() => { setLeftOpen(!leftOpen); setRightOpen(false); }}
+            title="Symbols & Layers"
+          >☰</button>
+          <button
+            className="mobile-fab fab-right"
+            onClick={() => { setRightOpen(!rightOpen); setLeftOpen(false); }}
+            title="Properties"
+          >ⓘ</button>
+          <button className="mobile-fab fab-zoomin" onClick={() => zoomBy(1.25)} title="Zoom in">＋</button>
+          <button className="mobile-fab fab-zoomout" onClick={() => zoomBy(0.8)} title="Zoom out">−</button>
+          <button className="mobile-fab fab-fit" onClick={fitToPage} title="Fit page" style={{ fontSize: 16 }}>⊡</button>
+        </>
+      )}
+
       {bomOpen && <BomModal onClose={() => setBomOpen(false)} />}
       {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
     </div>

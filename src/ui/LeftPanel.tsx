@@ -3,9 +3,9 @@ import { useStore } from '../state/store';
 import { CATEGORY_LABELS, searchSymbols, renderSymbolPreview, symbolsByCategory } from '../symbols';
 import type { SymbolCategory, Layer } from '../types';
 
-export function LeftPanel() {
+export function LeftPanel({ open = false }: { open?: boolean } = {}) {
   return (
-    <div className="left-panel">
+    <div className={`left-panel${open ? ' open' : ''}`}>
       <SymbolLibrary />
       <Layers />
     </div>

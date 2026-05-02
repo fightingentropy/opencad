@@ -3,9 +3,9 @@ import { useStore } from '../state/store';
 import { getSymbol } from '../symbols';
 import type { Entity } from '../types';
 
-export function RightPanel() {
+export function RightPanel({ open = false }: { open?: boolean } = {}) {
   return (
-    <div className="right-panel">
+    <div className={`right-panel${open ? ' open' : ''}`}>
       <Properties />
       <ProjectInfo />
     </div>
