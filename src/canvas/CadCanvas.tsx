@@ -16,6 +16,7 @@ export function CadCanvas() {
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [dpr, setDpr] = useState(window.devicePixelRatio || 1);
   const [panning, setPanning] = useState(false);
+  const [spaceHeld, setSpaceHeld] = useState(false);
   const [marquee, setMarquee] = useState<{ a: Vec2; b: Vec2 } | null>(null);
   const [draggingSelection, setDraggingSelection] = useState<{
     start: Vec2;
@@ -233,8 +234,8 @@ export function CadCanvas() {
     setContextMenu(null);
     canvasRef.current?.focus();
 
-    // Middle mouse or Space = pan
-    if (e.button === 1 || (e.button === 0 && editor.tool === 'pan')) {
+    // Middle mouse, Pan tool, or Space-held + LMB = pan
+    if (e.button === 1 || (e.button === 0 && (editor.tool === 'pan' || spaceHeld))) {
       setPanning(true);
       return;
     }
@@ -382,9 +383,29 @@ export function CadCanvas() {
   };
 
   const handleWheel = (e: React.WheelEvent) => {
-    const factor = e.deltaY > 0 ? 0.85 : 1.15;
-    const sp = eventToScreen(e);
-    setViewport(zoomAtPoint(editor.viewport, sp, size.w, size.h, factor));
+    // Heuristic: trackpads report pixel-level deltas (deltaMode=0) and
+    // ctrlKey is set on macOS pinch-to-zoom. Mouse wheels typically use
+    // deltaMode=1 (lines) with much larger magnitudes. We treat:
+    //   - ctrl/meta + wheel  = zoom (pinch on Mac, ctrl+wheel on PC)
+    //   - line/page mode     = zoom (mouse wheel)
+    //   - pixel mode         = pan  (trackpad two-finger scroll)
+    const isPinch = e.ctrlKey || e.metaKey;
+    const isMouseWheel = e.deltaMode === 1 || e.deltaMode === 2;
+    if (isPinch || isMouseWheel) {
+      const dy = e.deltaY;
+      const factor = dy > 0 ? Math.pow(0.85, Math.min(3, Math.abs(dy) / 50 + 1))
+                            : Math.pow(1.15, Math.min(3, Math.abs(dy) / 50 + 1));
+      const sp = eventToScreen(e);
+      setViewport(zoomAtPoint(editor.viewport, sp, size.w, size.h, factor));
+    } else {
+      // pixel-mode trackpad scroll: pan
+      const v = editor.viewport;
+      setViewport({
+        ...v,
+        x: v.x + e.deltaX / v.zoom,
+        y: v.y - e.deltaY / v.zoom,
+      });
+    }
   };
 
   // ---------- Touch events (mobile) ----------
@@ -506,6 +527,27 @@ export function CadCanvas() {
     const target = e.target as HTMLElement;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
 
+    // Spacebar: hold to pan with LMB drag
+    if (e.code === 'Space') {
+      e.preventDefault();
+      setSpaceHeld(true);
+      return;
+    }
+
+    // Arrow keys pan the viewport (Shift = larger step)
+    if (e.key.startsWith('Arrow')) {
+      e.preventDefault();
+      const v = editor.viewport;
+      const step = (e.shiftKey ? 80 : 30) / v.zoom;
+      const next = { ...v };
+      if (e.key === 'ArrowLeft') next.x -= step;
+      if (e.key === 'ArrowRight') next.x += step;
+      if (e.key === 'ArrowUp') next.y += step;
+      if (e.key === 'ArrowDown') next.y -= step;
+      setViewport(next);
+      return;
+    }
+
     if (e.key === 'Escape') {
       setDrafting(null);
       clearSelection();
@@ -606,16 +648,27 @@ export function CadCanvas() {
     setSelection(newIds);
   };
 
+  const handleKeyUp = (e: KeyboardEvent) => {
+    if (e.code === 'Space') {
+      setSpaceHeld(false);
+      setPanning(false);
+    }
+  };
+
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keyup', handleKeyUp);
+      return window.removeEventListener('keydown', handleKeyDown);
+    };
   });
 
   return (
     <div ref={wrapperRef} className="canvas-container" style={{ flex: 1, position: 'relative' }}>
       <canvas
         ref={canvasRef}
-        className={`canvas-2d tool-${editor.tool}${panning ? ' panning' : ''}`}
+        className={`canvas-2d tool-${spaceHeld ? 'pan' : editor.tool}${panning ? ' panning' : ''}`}
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
@@ -669,7 +722,7 @@ function CommandHint() {
   return (
     <div className="canvas-overlay">
       Tool: {tool.toUpperCase()} {drafting ? `(${drafting.points.length} pt)` : ''}
-      {status ? ` • ${status}` : ''}
+      {status ? ` • ${status}` : ' • Hold Space + drag to pan, or use arrow keys'}
     </div>
   );
 }

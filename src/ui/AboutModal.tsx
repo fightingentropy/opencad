@@ -49,6 +49,9 @@ export function AboutModal({ onClose }: { onClose: () => void }) {
                 ['⌘A', 'Select all'],
                 ['⌘D', 'Duplicate selection'],
                 ['Mouse wheel', 'Zoom in / out'],
+                ['Trackpad 2-finger', 'Pan'],
+                ['Space + drag', 'Pan (any device)'],
+                ['Arrow keys', 'Pan (Shift = larger step)'],
                 ['Middle drag', 'Pan'],
                 ['Right click', 'Context menu / commit drafting'],
               ].map(([key, desc]) => (
