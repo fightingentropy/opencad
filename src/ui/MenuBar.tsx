@@ -117,7 +117,9 @@ export function MenuBar({ onShowBom, onShowAbout }: { onShowBom: () => void; onS
       </MenuButton>
       <MenuButton label="View" open={openMenu === 'view'} onClick={click('view')}>
         <MenuOpt label="Zoom Extents" onClick={action(() => zoomExtents())} hint="" />
-        <MenuOpt label="Toggle 3D Panel" onClick={action(() => useStore.getState().setShow3D(!useStore.getState().editor.show3D))} hint="" />
+        <MenuOpt label="2D Only" onClick={action(() => useStore.getState().setViewMode('2d'))} hint="" />
+        <MenuOpt label="Split View" onClick={action(() => useStore.getState().setViewMode('split'))} hint="" />
+        <MenuOpt label="3D Only" onClick={action(() => useStore.getState().setViewMode('3d'))} hint="" />
         <MenuOpt label="Toggle Ortho" onClick={action(() => useStore.getState().setOrtho(!useStore.getState().editor.ortho))} hint="F8" />
         <MenuOpt label="Toggle Snap" onClick={action(() => useStore.getState().setSnap({ enabled: !useStore.getState().editor.snap.enabled }))} hint="F9" />
         <MenuOpt label="Toggle Grid" onClick={action(() => useStore.getState().setSnap({ grid: !useStore.getState().editor.snap.grid }))} hint="F7" />
