@@ -142,9 +142,97 @@ const populatePowerSchematic = (
   add(p, sheetId, symbol(symLayer, 'gnd-earth', x2 + 30, yMotor - 4, 0, 'PE', 'Protective earth'));
   add(p, sheetId, wire(wireLayer, [{ x: x2, y: yMotor - 16 }, { x: x2 + 30, y: yMotor + 1 }], 'PE', 'PE'));
 
+  // ==== A second branch on the right: spare conveyor M2 ====
+  const m2x1 = 220, m2x2 = 260, m2x3 = 300;
+  add(p, sheetId, text(annLayer, m2x1 - 6, yTop + 10, 'L1'));
+  add(p, sheetId, text(annLayer, m2x2 - 6, yTop + 10, 'L2'));
+  add(p, sheetId, text(annLayer, m2x3 - 6, yTop + 10, 'L3'));
+
+  add(p, sheetId, symbol(symLayer, 'breaker-3p', 260, 200, 0, 'CB2', 'Branch breaker', '3RV2011-1JA10', '10A', 'Siemens'));
+  add(p, sheetId, wire(wireLayer, [{ x: m2x1, y: yTop }, { x: m2x1, y: 210 }], '5L1', 'L1'));
+  add(p, sheetId, wire(wireLayer, [{ x: m2x2, y: yTop }, { x: m2x2, y: 210 }], '5L2', 'L2'));
+  add(p, sheetId, wire(wireLayer, [{ x: m2x3, y: yTop }, { x: m2x3, y: 210 }], '5L3', 'L3'));
+  add(p, sheetId, wire(wireLayer, [{ x: 254, y: 190 }, { x: m2x1, y: 175 }], '6L1', 'L1'));
+  add(p, sheetId, wire(wireLayer, [{ x: 260, y: 190 }, { x: m2x2, y: 175 }], '6L2', 'L2'));
+  add(p, sheetId, wire(wireLayer, [{ x: 266, y: 190 }, { x: m2x3, y: 175 }], '6L3', 'L3'));
+
+  add(p, sheetId, symbol(symLayer, 'breaker-3p', 260, 160, 0, 'KM2', 'Pump contactor', '3RT2017-1BB42', '12A', 'Siemens'));
+  add(p, sheetId, wire(wireLayer, [{ x: 254, y: 150 }, { x: m2x1, y: 135 }], '7L1', 'L1'));
+  add(p, sheetId, wire(wireLayer, [{ x: 260, y: 150 }, { x: m2x2, y: 135 }], '7L2', 'L2'));
+  add(p, sheetId, wire(wireLayer, [{ x: 266, y: 150 }, { x: m2x3, y: 135 }], '7L3', 'L3'));
+
+  add(p, sheetId, symbol(symLayer, 'overload-coil', m2x1, 120, 0, 'F3', 'Overload', '3RU2116-1HB0', '6A', 'Siemens'));
+  add(p, sheetId, symbol(symLayer, 'overload-coil', m2x2, 120, 0, 'F3'));
+  add(p, sheetId, symbol(symLayer, 'overload-coil', m2x3, 120, 0, 'F3'));
+  add(p, sheetId, wire(wireLayer, [{ x: m2x1, y: 114 }, { x: m2x1, y: 95 }], 'U1', 'L1'));
+  add(p, sheetId, wire(wireLayer, [{ x: m2x2, y: 114 }, { x: m2x2, y: 95 }], 'V1', 'L2'));
+  add(p, sheetId, wire(wireLayer, [{ x: m2x3, y: 114 }, { x: m2x3, y: 95 }], 'W1', 'L3'));
+
+  add(p, sheetId, symbol(symLayer, 'motor-1ph', m2x2, 75, 0, 'M2', 'Cooling pump', '1LA7080-4AA60', '0.75 kW', 'Siemens'));
+  add(p, sheetId, wire(wireLayer, [{ x: m2x2 - 5, y: 89 }, { x: m2x1, y: 95 }]));
+  add(p, sheetId, wire(wireLayer, [{ x: m2x2 + 5, y: 89 }, { x: m2x3, y: 95 }]));
+
+  // ==== Parts schedule panel on the far right ====
+  const tx0 = 320, tx1 = 420;
+  const ty0 = 60, ty1 = 240;
+  add(p, sheetId, {
+    id: newEntityId(),
+    kind: 'rectangle',
+    layerId: annLayer,
+    visible: true,
+    locked: false,
+    a: { x: tx0, y: ty0 },
+    b: { x: tx1, y: ty1 },
+  });
+  // Header
+  add(p, sheetId, text(annLayer, tx0 + 4, ty1 - 6, 'PARTS SCHEDULE', 4));
+  add(p, sheetId, {
+    id: newEntityId(),
+    kind: 'line',
+    layerId: annLayer,
+    visible: true,
+    locked: false,
+    a: { x: tx0, y: ty1 - 10 },
+    b: { x: tx1, y: ty1 - 10 },
+  });
+  // Column headers
+  add(p, sheetId, text(annLayer, tx0 + 2, ty1 - 16, 'TAG', 2.6));
+  add(p, sheetId, text(annLayer, tx0 + 16, ty1 - 16, 'DESCRIPTION', 2.6));
+  add(p, sheetId, text(annLayer, tx0 + 60, ty1 - 16, 'PART No.', 2.6));
+  add(p, sheetId, text(annLayer, tx0 + 86, ty1 - 16, 'QTY', 2.6));
+  add(p, sheetId, {
+    id: newEntityId(),
+    kind: 'line',
+    layerId: annLayer,
+    visible: true,
+    locked: false,
+    a: { x: tx0, y: ty1 - 20 },
+    b: { x: tx1, y: ty1 - 20 },
+  });
+  // Rows
+  const rows: [string, string, string, string][] = [
+    ['QM1', 'Main Disconnect', 'NSX160F', '1'],
+    ['CB1', 'Main Breaker 5A', '3RV2011-1FA10', '1'],
+    ['CB2', 'Branch Breaker 10A', '3RV2011-1JA10', '1'],
+    ['KM1', 'Conveyor Contactor', '3RT2024-1BB40', '1'],
+    ['KM2', 'Pump Contactor', '3RT2017-1BB42', '1'],
+    ['F2', 'Overload 3A', '3RU2116-1DB0', '1'],
+    ['F3', 'Overload 6A', '3RU2116-1HB0', '1'],
+    ['M1', 'Conveyor Motor 3kW', '1LE1003-0EB42', '1'],
+    ['M2', 'Cooling Pump 0.75kW', '1LA7080-4AA60', '1'],
+    ['PE', 'Ground Terminal', '8WH1000-0AF00', '4'],
+  ];
+  rows.forEach(([t, d, pn, q], i) => {
+    const yr = ty1 - 26 - i * 7;
+    add(p, sheetId, text(annLayer, tx0 + 2, yr, t, 2.4));
+    add(p, sheetId, text(annLayer, tx0 + 16, yr, d, 2.4));
+    add(p, sheetId, text(annLayer, tx0 + 60, yr, pn, 2.4));
+    add(p, sheetId, text(annLayer, tx0 + 88, yr, q, 2.4));
+  });
+
   // Title
-  add(p, sheetId, text(annLayer, 20, 240, 'POWER SCHEMATIC — MOTOR STARTER', 5));
-  add(p, sheetId, text(annLayer, 20, 232, '400V 50Hz Three-Phase', 3));
+  add(p, sheetId, text(annLayer, 20, 240, 'POWER SCHEMATIC — DUAL MOTOR STARTER', 5));
+  add(p, sheetId, text(annLayer, 20, 232, '400V 50Hz Three-Phase + Single-Phase Auxiliary', 3));
 };
 
 const populateControlSchematic = (
