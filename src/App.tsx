@@ -17,8 +17,8 @@ const MOBILE_BREAKPOINT = 900;
 
 export function App() {
   const setProject = useStore((s) => s.setProject);
-  const show3D = useStore((s) => s.editor.show3D);
-  const setShow3D = useStore((s) => s.setShow3D);
+  const viewMode = useStore((s) => s.editor.viewMode);
+  const setViewMode = useStore((s) => s.setViewMode);
   const [bomOpen, setBomOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [bootstrapped, setBootstrapped] = useState(false);
@@ -51,10 +51,9 @@ export function App() {
     };
   }, []);
 
-  // Auto-hide 3D viewer on mobile by default (saves screen space)
+  // Default to 2D-only on mobile (split is too cramped on phones)
   useEffect(() => {
-    if (isMobile && show3D) setShow3D(false);
-    // Only react when crossing the breakpoint, not on every show3D change.
+    if (isMobile && viewMode === 'split') setViewMode('2d');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile]);
 
@@ -122,18 +121,16 @@ export function App() {
       <LeftPanel open={leftOpen} />
       <div className="main">
         <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-          <CadCanvas />
-          {show3D && !isMobile && (
-            <>
-              <div
-                className="splitter"
-                onMouseDown={() => setResizing(true)}
-                title="Drag to resize 3D panel"
-              />
-              <Panel3DContainer width={panel3DWidth} />
-            </>
+          {viewMode !== '3d' && <CadCanvas />}
+          {viewMode === 'split' && !isMobile && (
+            <div
+              className="splitter"
+              onMouseDown={() => setResizing(true)}
+              title="Drag to resize 3D panel"
+            />
           )}
-          {show3D && isMobile && <Panel3DContainer width={0} />}
+          {viewMode === 'split' && !isMobile && <Panel3DContainer width={panel3DWidth} />}
+          {viewMode === '3d' && <Panel3DContainer fillParent />}
         </div>
         <SheetTabs />
       </div>
