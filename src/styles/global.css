@@ -873,3 +873,197 @@ input[type=color] {
 .command-bar .prompt {
   color: var(--text-mute);
 }
+
+/* Mobile FABs (hidden on desktop) */
+.mobile-fab {
+  display: none;
+}
+
+/* ============================================================
+   RESPONSIVE — phones and small tablets
+   ============================================================ */
+@media (max-width: 900px) {
+  .app {
+    grid-template-rows: 36px 60px 1fr 22px;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "menu"
+      "ribbon"
+      "main"
+      "status";
+  }
+
+  .menu-bar {
+    padding: 0 8px;
+    font-size: 12px;
+  }
+  .menu-brand { margin-right: 8px; }
+  .menu-info { display: none; }
+
+  .ribbon {
+    padding: 4px 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ribbon-group {
+    padding: 0 6px;
+    min-width: auto;
+  }
+  .ribbon-group-label { display: none; }
+  .tool-btn {
+    padding: 4px 6px;
+    min-width: 38px;
+  }
+  .tool-btn .label {
+    font-size: 9px;
+  }
+  .tool-btn .icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* Side panels become slide-in drawers */
+  .left-panel,
+  .right-panel {
+    position: fixed;
+    top: 96px; /* menu + ribbon */
+    bottom: 22px; /* status */
+    width: min(86vw, 320px);
+    z-index: 40;
+    box-shadow: var(--shadow-lg);
+    transition: transform 0.22s ease;
+    border-left: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+  .left-panel {
+    left: 0;
+    transform: translateX(-105%);
+  }
+  .right-panel {
+    right: 0;
+    transform: translateX(105%);
+  }
+  .left-panel.open { transform: translateX(0); }
+  .right-panel.open { transform: translateX(0); }
+
+  /* Backdrop when drawer open */
+  .drawer-backdrop {
+    position: fixed;
+    inset: 96px 0 22px 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 35;
+    backdrop-filter: blur(2px);
+  }
+
+  /* Hide the 3D viewer + splitter by default on mobile (toggle still works) */
+  .canvas-3d {
+    width: 100% !important;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+  .splitter { display: none; }
+
+  /* When 3D is shown on mobile, stack vertically */
+  .main > div:first-child {
+    flex-direction: column !important;
+  }
+
+  /* Floating buttons */
+  .mobile-fab {
+    display: flex;
+    position: fixed;
+    z-index: 30;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-3);
+    border: 1px solid var(--border-light);
+    box-shadow: var(--shadow);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 20px;
+  }
+  .mobile-fab:active {
+    background: var(--bg-4);
+    transform: scale(0.95);
+  }
+  .mobile-fab.fab-left {
+    left: 10px;
+    bottom: 38px;
+  }
+  .mobile-fab.fab-right {
+    right: 10px;
+    bottom: 38px;
+  }
+  .mobile-fab.fab-zoomin {
+    right: 10px;
+    bottom: 92px;
+  }
+  .mobile-fab.fab-zoomout {
+    right: 10px;
+    bottom: 144px;
+  }
+  .mobile-fab.fab-fit {
+    right: 10px;
+    bottom: 196px;
+  }
+
+  /* Status bar tighter */
+  .status-bar {
+    font-size: 10px;
+    gap: 6px;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .status-section {
+    padding: 0 4px;
+    flex-shrink: 0;
+  }
+
+  /* Canvas overlays */
+  .coord-readout {
+    font-size: 9px;
+    padding: 3px 6px;
+  }
+  .canvas-overlay {
+    font-size: 9px;
+    padding: 3px 6px;
+  }
+
+  /* Sheet tabs scrollable */
+  .sheet-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sheet-tab {
+    flex-shrink: 0;
+    padding: 0 10px;
+    font-size: 10px;
+  }
+
+  /* Symbol grid - smaller tiles */
+  .symbol-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 3px;
+    padding: 4px;
+  }
+  .symbol-tile-preview { width: 44px; height: 44px; }
+  .symbol-tile-name { font-size: 9px; height: 18px; }
+
+  /* Modals fill more screen */
+  .modal {
+    min-width: 90vw !important;
+    max-width: 96vw !important;
+  }
+}
+
+/* Very small phones */
+@media (max-width: 420px) {
+  .menu-item { padding: 4px 6px; font-size: 11px; }
+  .tool-btn { min-width: 34px; }
+  .tool-btn .label { display: none; }
+  .symbol-grid { grid-template-columns: repeat(2, 1fr); }
+}
