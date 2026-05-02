@@ -6,6 +6,7 @@ import { computeSnap } from '../lib/snap';
 import { findEntityAt, findEntitiesInRect } from '../lib/hittest';
 import { onToolClick, onToolCommit } from './tools';
 import { getSymbol } from '../symbols';
+import { fitViewportToSheet } from '../lib/fit';
 import type { Vec2 } from '../types';
 import { sub, add } from '../lib/math';
 
@@ -41,7 +42,7 @@ export function CadCanvas() {
 
   const sheet = project.sheets[project.activeSheetId];
   const activeLayerId = project.activeLayerId;
-  const hasFitOnceRef = useRef(false);
+  const lastFittedSheetIdRef = useRef<string | null>(null);
 
   // Resize observer
   useLayoutEffect(() => {
@@ -59,19 +60,14 @@ export function CadCanvas() {
     return () => ro.disconnect();
   }, []);
 
-  // Auto-fit page to visible canvas on first real measurement so the drawing
-  // fills the available area instead of showing a small portion of the page.
+  // Auto-fit drawing extents to canvas on first measurement and on sheet change.
   useEffect(() => {
-    if (hasFitOnceRef.current) return;
-    if (size.w < 100 || size.h < 100) return;
     if (!sheet) return;
-    const padding = 40;
-    const zx = (size.w - padding * 2) / sheet.width;
-    const zy = (size.h - padding * 2) / sheet.height;
-    const zoom = Math.max(0.3, Math.min(zx, zy));
-    setViewport({ x: sheet.width / 2, y: sheet.height / 2, zoom });
-    hasFitOnceRef.current = true;
-  }, [size.w, size.h, sheet, setViewport]);
+    if (size.w < 100 || size.h < 100) return;
+    if (lastFittedSheetIdRef.current === sheet.id) return;
+    lastFittedSheetIdRef.current = sheet.id;
+    setViewport(fitViewportToSheet(sheet, size.w, size.h));
+  }, [sheet, size.w, size.h, setViewport]);
 
   // Render loop
   useEffect(() => {

@@ -105,12 +105,14 @@ export function App() {
     });
   };
   const fitToPage = () => {
-    const sheet = useStore.getState().project.sheets[useStore.getState().project.activeSheetId];
+    const state = useStore.getState();
+    const sheet = state.project.sheets[state.project.activeSheetId];
     if (!sheet) return;
-    useStore.getState().setViewport({
-      x: sheet.width / 2,
-      y: sheet.height / 2,
-      zoom: 2,
+    const canvas = document.querySelector('canvas.canvas-2d') as HTMLCanvasElement | null;
+    const w = canvas?.clientWidth ?? window.innerWidth - 500;
+    const h = canvas?.clientHeight ?? window.innerHeight - 200;
+    import('./lib/fit').then(({ fitViewportToSheet }) => {
+      state.setViewport(fitViewportToSheet(sheet, w, h));
     });
   };
 
