@@ -339,8 +339,8 @@ const drawEntity = (
       const y = Math.min(e.a.y, e.b.y);
       const w = Math.abs(e.b.x - e.a.x);
       const h = Math.abs(e.b.y - e.a.y);
-      if ((e as any).fill) {
-        ctx.fillStyle = (e as any).fill;
+      if (e.fill) {
+        ctx.fillStyle = e.fill;
         ctx.fillRect(x, y, w, h);
       }
       ctx.strokeRect(x, y, w, h);
@@ -349,8 +349,8 @@ const drawEntity = (
     case 'circle':
       ctx.beginPath();
       ctx.arc(e.center.x, e.center.y, e.radius, 0, Math.PI * 2);
-      if ((e as any).fill) {
-        ctx.fillStyle = (e as any).fill;
+      if (e.fill) {
+        ctx.fillStyle = e.fill;
         ctx.fill();
       }
       ctx.stroke();
@@ -396,6 +396,15 @@ const drawEntity = (
       ctx.textBaseline = 'middle';
       ctx.fillText(e.text, 0, 0);
       ctx.restore();
+      break;
+    case 'containment':
+      drawContainment(ctx, e, color, state);
+      break;
+    case 'wall':
+      drawWall(ctx, e, color, state);
+      break;
+    case 'room':
+      drawRoom(ctx, e, layer, color, state);
       break;
     case 'group':
       break;
@@ -682,6 +691,215 @@ const drawSelectionBox = (ctx: CanvasRenderingContext2D, e: Entity, opts: Render
   ctx.restore();
 };
 
+// Render a containment run (trunking / basket / tray / conduit) as a thick
+// band along its polyline. Different types layer on extra strokes to read
+// distinctly in plan view.
+const drawContainment = (
+  ctx: CanvasRenderingContext2D,
+  e: import('../types').ContainmentEntity,
+  color: string,
+  state: { isSelected: boolean; isHovered: boolean; zoom: number }
+) => {
+  if (e.points.length < 2) return;
+  const w = e.width ?? 50;
+  const stroke = state.isSelected
+    ? SELECTION_COLOR
+    : state.isHovered
+    ? HOVER_COLOR
+    : color;
+
+  ctx.save();
+  ctx.lineCap = e.containmentType === 'conduit' ? 'round' : 'butt';
+  ctx.lineJoin = 'round';
+  ctx.setLineDash([]);
+
+  // Build the polyline path.
+  const path = new Path2D();
+  path.moveTo(e.points[0].x, e.points[0].y);
+  for (let i = 1; i < e.points.length; i++) {
+    path.lineTo(e.points[i].x, e.points[i].y);
+  }
+
+  if (e.containmentType === 'conduit') {
+    // Round tube — single thick line, plus a thin centerline highlight.
+    ctx.strokeStyle = stroke;
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = w;
+    ctx.stroke(path);
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = Math.max(0.4, w * 0.06);
+    ctx.stroke(path);
+  } else {
+    // Filled band for the cross-section.
+    ctx.strokeStyle = stroke;
+    ctx.globalAlpha = e.containmentType === 'basket' ? 0.18 : 0.32;
+    ctx.lineWidth = w;
+    ctx.stroke(path);
+    ctx.globalAlpha = 1;
+
+    // Edge highlights — outline the band with thinner lines on either side
+    // of the centerline by re-stroking with reduced width using a lighter
+    // alpha, then a thin centerline.
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 0.5;
+    ctx.stroke(path);
+
+    // Type-specific overlay markings drawn as evenly-spaced ticks along the
+    // path so the type is recognizable at a glance.
+    drawContainmentTicks(ctx, e, w, stroke);
+  }
+
+  ctx.restore();
+};
+
+// Walk each segment of a containment run and draw short perpendicular
+// "ticks" (the rungs of a basket, the perforations of a tray) at fixed
+// world-space intervals.
+const drawContainmentTicks = (
+  ctx: CanvasRenderingContext2D,
+  e: import('../types').ContainmentEntity,
+  w: number,
+  color: string
+) => {
+  if (e.containmentType === 'trunking') return; // smooth band, no ticks
+
+  const spacing = e.containmentType === 'tray' ? Math.max(8, w * 0.4) : Math.max(6, w * 0.35);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = e.containmentType === 'tray' ? 0.4 : 0.5;
+  ctx.setLineDash([]);
+
+  for (let i = 0; i < e.points.length - 1; i++) {
+    const a = e.points[i];
+    const b = e.points[i + 1];
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-3) continue;
+    const ux = dx / len;
+    const uy = dy / len;
+    const px = -uy; // perpendicular
+    const py = ux;
+    const half = w / 2;
+
+    for (let s = spacing / 2; s < len; s += spacing) {
+      const cx = a.x + ux * s;
+      const cy = a.y + uy * s;
+      if (e.containmentType === 'basket') {
+        // X-shaped crossings at each rung
+        ctx.beginPath();
+        ctx.moveTo(cx + ux * (spacing * 0.3) - px * half, cy + uy * (spacing * 0.3) - py * half);
+        ctx.lineTo(cx - ux * (spacing * 0.3) + px * half, cy - uy * (spacing * 0.3) + py * half);
+        ctx.moveTo(cx - ux * (spacing * 0.3) - px * half, cy - uy * (spacing * 0.3) - py * half);
+        ctx.lineTo(cx + ux * (spacing * 0.3) + px * half, cy + uy * (spacing * 0.3) + py * half);
+        ctx.stroke();
+      } else if (e.containmentType === 'tray') {
+        // Single perpendicular line — perforated tray rung
+        ctx.beginPath();
+        ctx.moveTo(cx - px * half, cy - py * half);
+        ctx.lineTo(cx + px * half, cy + py * half);
+        ctx.stroke();
+      }
+    }
+  }
+};
+
+// Render a wall as the standard architectural double-line: a thick translucent
+// band at the wall's true thickness with a thin centerline outline so corners
+// read cleanly in plan view.
+const drawWall = (
+  ctx: CanvasRenderingContext2D,
+  e: import('../types').WallEntity,
+  color: string,
+  state: { isSelected: boolean; isHovered: boolean; zoom: number }
+) => {
+  if (e.points.length < 2) return;
+  const stroke = state.isSelected
+    ? SELECTION_COLOR
+    : state.isHovered
+    ? HOVER_COLOR
+    : color;
+  const t = e.thickness ?? 200;
+
+  ctx.save();
+  ctx.lineCap = 'butt';
+  ctx.lineJoin = 'miter';
+  ctx.setLineDash([]);
+
+  const path = new Path2D();
+  path.moveTo(e.points[0].x, e.points[0].y);
+  for (let i = 1; i < e.points.length; i++) {
+    path.lineTo(e.points[i].x, e.points[i].y);
+  }
+
+  // Thick translucent band at full wall thickness.
+  ctx.strokeStyle = stroke;
+  ctx.globalAlpha = 0.5;
+  ctx.lineWidth = t;
+  ctx.stroke(path);
+  ctx.globalAlpha = 1;
+
+  // Thin centerline outline so corners read cleanly.
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = Math.max(0.4, t * 0.04);
+  ctx.stroke(path);
+
+  ctx.restore();
+};
+
+// Render a room as a translucent rectangular floor patch with a dashed
+// boundary, plus an optional centered name label.
+const drawRoom = (
+  ctx: CanvasRenderingContext2D,
+  e: import('../types').RoomEntity,
+  layer: Layer,
+  color: string,
+  state: { isSelected: boolean; isHovered: boolean; zoom: number }
+) => {
+  const x = Math.min(e.a.x, e.b.x);
+  const y = Math.min(e.a.y, e.b.y);
+  const w = Math.abs(e.b.x - e.a.x);
+  const h = Math.abs(e.b.y - e.a.y);
+  if (w <= 0 || h <= 0) return;
+  const stroke = state.isSelected
+    ? SELECTION_COLOR
+    : state.isHovered
+    ? HOVER_COLOR
+    : color;
+
+  ctx.save();
+  // Translucent floor fill.
+  ctx.fillStyle = e.floorColor ?? layer.color;
+  ctx.globalAlpha = 0.12;
+  ctx.fillRect(x, y, w, h);
+  ctx.globalAlpha = 1;
+
+  // Dashed boundary in the layer color.
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 0.4;
+  ctx.setLineDash([2, 1.5]);
+  ctx.lineCap = 'butt';
+  ctx.lineJoin = 'miter';
+  ctx.strokeRect(x, y, w, h);
+  ctx.setLineDash([]);
+
+  // Centered room name label (unflipped — see text case for pattern).
+  if (e.name) {
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const size = Math.max(3, Math.min(10, Math.min(w, h) * 0.08));
+    ctx.save();
+    ctx.scale(1, -1);
+    ctx.fillStyle = state.isSelected ? SELECTION_COLOR : color;
+    ctx.font = `${size}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(e.name, cx, -cy);
+    ctx.restore();
+  }
+  ctx.restore();
+};
+
 const drawDrafting = (
   ctx: CanvasRenderingContext2D,
   editor: EditorState,
@@ -752,6 +970,79 @@ const drawDrafting = (
       for (let i = 1; i < d.points.length; i++) ctx.lineTo(d.points[i].x, d.points[i].y);
       ctx.lineTo(cur.x, cur.y);
       ctx.stroke();
+      break;
+    }
+    case 'trunking':
+    case 'basket':
+    case 'tray':
+    case 'conduit': {
+      // Preview the band at its real width with a translucent fill so the
+      // user can see the run's footprint while drafting.
+      const widths: Record<string, number> = {
+        trunking: 100,
+        basket: 100,
+        tray: 150,
+        conduit: 25,
+      };
+      const w = widths[d.tool] ?? 50;
+      ctx.save();
+      ctx.lineCap = d.tool === 'conduit' ? 'round' : 'butt';
+      ctx.lineJoin = 'round';
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.25;
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      ctx.moveTo(d.points[0].x, d.points[0].y);
+      for (let i = 1; i < d.points.length; i++) ctx.lineTo(d.points[i].x, d.points[i].y);
+      ctx.lineTo(cur.x, cur.y);
+      ctx.stroke();
+      // Centerline on top
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 0.5;
+      ctx.setLineDash([1, 1]);
+      ctx.beginPath();
+      ctx.moveTo(d.points[0].x, d.points[0].y);
+      for (let i = 1; i < d.points.length; i++) ctx.lineTo(d.points[i].x, d.points[i].y);
+      ctx.lineTo(cur.x, cur.y);
+      ctx.stroke();
+      ctx.restore();
+      break;
+    }
+    case 'wall': {
+      // Translucent band preview at the default wall thickness, plus a
+      // dashed centerline overlay for the in-progress polyline.
+      const t = 200;
+      ctx.save();
+      ctx.lineCap = 'butt';
+      ctx.lineJoin = 'miter';
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.25;
+      ctx.lineWidth = t;
+      ctx.beginPath();
+      ctx.moveTo(d.points[0].x, d.points[0].y);
+      for (let i = 1; i < d.points.length; i++) ctx.lineTo(d.points[i].x, d.points[i].y);
+      ctx.lineTo(cur.x, cur.y);
+      ctx.stroke();
+      // Centerline on top
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 0.5;
+      ctx.setLineDash([1, 1]);
+      ctx.beginPath();
+      ctx.moveTo(d.points[0].x, d.points[0].y);
+      for (let i = 1; i < d.points.length; i++) ctx.lineTo(d.points[i].x, d.points[i].y);
+      ctx.lineTo(cur.x, cur.y);
+      ctx.stroke();
+      ctx.restore();
+      break;
+    }
+    case 'room': {
+      const a = d.points[0];
+      ctx.strokeRect(
+        Math.min(a.x, cur.x),
+        Math.min(a.y, cur.y),
+        Math.abs(cur.x - a.x),
+        Math.abs(cur.y - a.y)
+      );
       break;
     }
     case 'dimension': {

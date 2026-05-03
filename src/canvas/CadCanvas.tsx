@@ -7,8 +7,7 @@ import { findEntityAt, findEntitiesInRect } from '../lib/hittest';
 import { onToolClick, onToolCommit } from './tools';
 import { getSymbol } from '../symbols';
 import { fitViewportToSheet } from '../lib/fit';
-import type { Vec2 } from '../types';
-import { sub, add } from '../lib/math';
+import type { Vec2, Entity, ToolId } from '../types';
 
 export function CadCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -20,9 +19,16 @@ export function CadCanvas() {
   const [marquee, setMarquee] = useState<{ a: Vec2; b: Vec2 } | null>(null);
   const [draggingSelection, setDraggingSelection] = useState<{
     start: Vec2;
-    initial: Map<string, any>;
+    initial: Map<string, Entity>;
   } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  // Inline text editor — replaces window.prompt for the text tool. Anchored
+  // in screen space so we keep visible while the user pans/zooms.
+  const [textInput, setTextInput] = useState<{
+    screen: Vec2;
+    world: Vec2;
+    layerId: string;
+  } | null>(null);
 
   const project = useStore((s) => s.project);
   const editor = useStore((s) => s.editor);
@@ -70,53 +76,61 @@ export function CadCanvas() {
     setViewport(fitViewportToSheet(sheet, size.w, size.h));
   }, [sheet, size.w, size.h, setViewport]);
 
-  // Render loop
+  // Render — schedule a single frame per state change (instead of a perpetual
+  // requestAnimationFrame loop). The previous implementation re-queued itself
+  // every frame and re-set canvas.width/height each tick, causing both wasted
+  // CPU and a recomposite on idle.
   useEffect(() => {
-    let raf = 0;
-    const draw = () => {
-      const canvas = canvasRef.current;
-      if (canvas) {
-        canvas.width = size.w * dpr;
-        canvas.height = size.h * dpr;
-        canvas.style.width = `${size.w}px`;
-        canvas.style.height = `${size.h}px`;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          render2d(ctx, project, editor, {
-            width: size.w,
-            height: size.h,
-            dpr,
-            symbolLookup: getSymbol,
-          });
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-          // marquee
-          if (marquee) {
-            const a = marquee.a;
-            const b = marquee.b;
-            ctx.save();
-            ctx.setTransform(1, 0, 0, 1, 0, 0);
-            ctx.scale(dpr, dpr);
-            const fullEnclosed = b.x > a.x; // dragging right = window, left = crossing
-            ctx.fillStyle = fullEnclosed
-              ? 'rgba(80, 160, 255, 0.12)'
-              : 'rgba(120, 220, 110, 0.12)';
-            ctx.strokeStyle = fullEnclosed ? '#5cdcff' : '#6dd17c';
-            ctx.lineWidth = 1;
-            ctx.setLineDash(fullEnclosed ? [] : [4, 3]);
-            const x = Math.min(a.x, b.x);
-            const y = Math.min(a.y, b.y);
-            const w = Math.abs(b.x - a.x);
-            const h = Math.abs(b.y - a.y);
-            ctx.fillRect(x, y, w, h);
-            ctx.strokeRect(x, y, w, h);
-            ctx.restore();
-          }
-        }
+    // Only resize the backing buffer when it actually changes — assigning to
+    // canvas.width clears the canvas, so we'd rather avoid it on every frame.
+    const targetW = size.w * dpr;
+    const targetH = size.h * dpr;
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW;
+      canvas.height = targetH;
+      canvas.style.width = `${size.w}px`;
+      canvas.style.height = `${size.h}px`;
+    }
+
+    let raf: number | null = requestAnimationFrame(() => {
+      raf = null;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      render2d(ctx, project, editor, {
+        width: size.w,
+        height: size.h,
+        dpr,
+        symbolLookup: getSymbol,
+      });
+
+      if (marquee) {
+        const a = marquee.a;
+        const b = marquee.b;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.scale(dpr, dpr);
+        const fullEnclosed = b.x > a.x;
+        ctx.fillStyle = fullEnclosed
+          ? 'rgba(80, 160, 255, 0.12)'
+          : 'rgba(120, 220, 110, 0.12)';
+        ctx.strokeStyle = fullEnclosed ? '#5cdcff' : '#6dd17c';
+        ctx.lineWidth = 1;
+        ctx.setLineDash(fullEnclosed ? [] : [4, 3]);
+        const x = Math.min(a.x, b.x);
+        const y = Math.min(a.y, b.y);
+        const w = Math.abs(b.x - a.x);
+        const h = Math.abs(b.y - a.y);
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeRect(x, y, w, h);
+        ctx.restore();
       }
-      raf = requestAnimationFrame(draw);
+    });
+    return () => {
+      if (raf !== null) cancelAnimationFrame(raf);
     };
-    raf = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(raf);
   }, [project, editor, size, dpr, marquee]);
 
   const eventToWorld = (e: { clientX: number; clientY: number }): Vec2 => {
@@ -145,8 +159,6 @@ export function CadCanvas() {
     setCursor(world, snap.kind === 'none' ? null : snap.point);
 
     if (panning) {
-      // We pan via the dragstart delta — handled in mousedown w/ a temp ref,
-      // but since we use simple state, recompute pan from movementX/Y here.
       const v = editor.viewport;
       setViewport({
         ...v,
@@ -166,7 +178,6 @@ export function CadCanvas() {
       const start = draggingSelection.start;
       const dx = (snap.kind === 'none' ? world.x : snap.point.x) - start.x;
       const dy = (snap.kind === 'none' ? world.y : snap.point.y) - start.y;
-      // move selected entities by delta from initial
       for (const id of editor.selection) {
         const init = draggingSelection.initial.get(id);
         if (!init) continue;
@@ -190,7 +201,7 @@ export function CadCanvas() {
 
   const moveEntity = (
     id: string,
-    initial: any,
+    initial: Entity,
     dx: number,
     dy: number
   ) => {
@@ -200,32 +211,27 @@ export function CadCanvas() {
     const offsetArr = (pts: Vec2[]) => pts.map(offset);
     switch (initial.kind) {
       case 'line':
-        updateEntity(id, { a: offset(initial.a), b: offset(initial.b) } as any);
-        break;
       case 'rectangle':
-        updateEntity(id, { a: offset(initial.a), b: offset(initial.b) } as any);
+      case 'dimension':
+      case 'room':
+        updateEntity(id, { a: offset(initial.a), b: offset(initial.b) } as Partial<Entity>);
         break;
       case 'circle':
       case 'arc':
       case 'ellipse':
-        updateEntity(id, { center: offset(initial.center) } as any);
+        updateEntity(id, { center: offset(initial.center) } as Partial<Entity>);
         break;
       case 'polyline':
       case 'wire':
       case 'bus':
-        updateEntity(id, { points: offsetArr(initial.points) } as any);
+      case 'containment':
+      case 'wall':
+        updateEntity(id, { points: offsetArr(initial.points) } as Partial<Entity>);
         break;
       case 'text':
-        updateEntity(id, { position: offset(initial.position) } as any);
-        break;
       case 'symbol':
-        updateEntity(id, { position: offset(initial.position) } as any);
-        break;
-      case 'dimension':
-        updateEntity(id, { a: offset(initial.a), b: offset(initial.b) } as any);
-        break;
       case 'wire-label':
-        updateEntity(id, { position: offset(initial.position) } as any);
+        updateEntity(id, { position: offset(initial.position) } as Partial<Entity>);
         break;
     }
   };
@@ -234,13 +240,14 @@ export function CadCanvas() {
     setContextMenu(null);
     canvasRef.current?.focus();
 
-    // Middle mouse, Pan tool, or Space-held + LMB = pan
     if (e.button === 1 || (e.button === 0 && (editor.tool === 'pan' || spaceHeld))) {
       setPanning(true);
+      // Snapshot the viewport at the start of the gesture so we record
+      // exactly one history entry per pan, not one per mouse-move event.
+      useStore.getState().recordView();
       return;
     }
 
-    // Right mouse = context menu (if select tool) or commit drafting
     if (e.button === 2) {
       if (editor.drafting && editor.drafting.points.length > 0) {
         const result = onToolCommit(editor.tool, {
@@ -270,7 +277,6 @@ export function CadCanvas() {
     }, (id) => project.layers[id]?.visible ?? true);
     const snapped = snap.kind === 'none' ? world : snap.point;
 
-    // Handle by tool
     if (editor.tool === 'select') {
       const hit = findEntityAt(sheet, world, {
         tolerance: 8,
@@ -285,18 +291,18 @@ export function CadCanvas() {
         } else {
           if (!editor.selection.has(hit)) setSelection([hit]);
         }
-        // start drag
-        const initial = new Map();
+        const initial = new Map<string, Entity>();
         const ids = editor.selection.has(hit) ? Array.from(editor.selection) : [hit];
         for (const id of ids) {
           const ent = sheet.entities[id];
-          if (ent) initial.set(id, JSON.parse(JSON.stringify(ent)));
+          if (ent) initial.set(id, structuredClone(ent));
         }
-        if (!editor.selection.has(hit)) initial.set(hit, JSON.parse(JSON.stringify(sheet.entities[hit])));
+        if (!editor.selection.has(hit)) {
+          initial.set(hit, structuredClone(sheet.entities[hit]));
+        }
         setDraggingSelection({ start: snapped, initial });
       } else {
         if (!e.shiftKey) clearSelection();
-        // begin marquee
         setMarquee({ a: eventToScreen(e), b: eventToScreen(e) });
       }
       return;
@@ -313,23 +319,14 @@ export function CadCanvas() {
     }
 
     if (editor.tool === 'text') {
-      const txt = window.prompt('Text:', '');
-      if (txt) {
-        addEntities([
-          {
-            id: crypto.randomUUID().slice(0, 10),
-            kind: 'text',
-            layerId: activeLayerId,
-            visible: true,
-            locked: false,
-            position: snapped,
-            text: txt,
-            fontSize: 4,
-            rotation: 0,
-            align: 'left',
-          },
-        ]);
-      }
+      // Open the inline editor at the click point and commit on Enter/blur.
+      // The previous implementation used window.prompt(), which felt out of
+      // place and blocked the canvas thread.
+      setTextInput({
+        screen: eventToScreen(e),
+        world: snapped,
+        layerId: activeLayerId,
+      });
       return;
     }
 
@@ -354,6 +351,8 @@ export function CadCanvas() {
   const handleMouseUp = (e: React.MouseEvent) => {
     if (panning) {
       setPanning(false);
+      // Record the post-gesture viewport so back/forward steps land here.
+      useStore.getState().recordView();
       return;
     }
     if (marquee) {
@@ -383,22 +382,17 @@ export function CadCanvas() {
   };
 
   const handleWheel = (e: React.WheelEvent) => {
-    // Heuristic: trackpads report pixel-level deltas (deltaMode=0) and
-    // ctrlKey is set on macOS pinch-to-zoom. Mouse wheels typically use
-    // deltaMode=1 (lines) with much larger magnitudes. We treat:
-    //   - ctrl/meta + wheel  = zoom (pinch on Mac, ctrl+wheel on PC)
-    //   - line/page mode     = zoom (mouse wheel)
-    //   - pixel mode         = pan  (trackpad two-finger scroll)
     const isPinch = e.ctrlKey || e.metaKey;
     const isMouseWheel = e.deltaMode === 1 || e.deltaMode === 2;
     if (isPinch || isMouseWheel) {
-      const dy = e.deltaY;
-      const factor = dy > 0 ? Math.pow(0.85, Math.min(3, Math.abs(dy) / 50 + 1))
-                            : Math.pow(1.15, Math.min(3, Math.abs(dy) / 50 + 1));
+      let delta = e.deltaY;
+      if (e.deltaMode === 1) delta *= 16;
+      else if (e.deltaMode === 2) delta *= 100;
+      delta = Math.max(-100, Math.min(100, delta));
+      const factor = Math.exp(-delta * 0.003);
       const sp = eventToScreen(e);
       setViewport(zoomAtPoint(editor.viewport, sp, size.w, size.h, factor));
     } else {
-      // pixel-mode trackpad scroll: pan
       const v = editor.viewport;
       setViewport({
         ...v,
@@ -478,7 +472,6 @@ export function CadCanvas() {
       const d = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
       const factor = d / Math.max(1, st.startPinchDist);
       const newZoom = Math.max(0.05, Math.min(200, st.startViewport.zoom * factor));
-      // Keep pinch start centroid stationary; also apply pan delta of centroid
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
       const sw = size.w;
@@ -503,7 +496,6 @@ export function CadCanvas() {
     const st = touchRef.current;
     if (!st) return;
     if (st.mode === 'tap' && !st.moved) {
-      // Treat as a click — synthesize a mousedown handler call
       const fakeEvent = {
         button: 0,
         clientX: st.startX,
@@ -513,8 +505,6 @@ export function CadCanvas() {
         preventDefault: () => {},
       } as unknown as React.MouseEvent;
       handleMouseDown(fakeEvent);
-      // For one-shot tools that don't need a drag, also fire mouseUp so
-      // marquee state etc. resets cleanly.
       handleMouseUp(fakeEvent);
     }
     if (e.touches.length === 0) {
@@ -522,80 +512,11 @@ export function CadCanvas() {
     }
   };
 
-  // Rotate selection or pending symbol on R
-  const handleKeyDown = (e: KeyboardEvent) => {
-    const target = e.target as HTMLElement;
-    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-
-    // Spacebar: hold to pan with LMB drag
-    if (e.code === 'Space') {
-      e.preventDefault();
-      setSpaceHeld(true);
-      return;
-    }
-
-    // Arrow keys pan the viewport (Shift = larger step)
-    if (e.key.startsWith('Arrow')) {
-      e.preventDefault();
-      const v = editor.viewport;
-      const step = (e.shiftKey ? 80 : 30) / v.zoom;
-      const next = { ...v };
-      if (e.key === 'ArrowLeft') next.x -= step;
-      if (e.key === 'ArrowRight') next.x += step;
-      if (e.key === 'ArrowUp') next.y += step;
-      if (e.key === 'ArrowDown') next.y -= step;
-      setViewport(next);
-      return;
-    }
-
-    if (e.key === 'Escape') {
-      setDrafting(null);
-      clearSelection();
-      setTool('select');
-      useStore.getState().setPendingSymbol(null);
-      setStatus('');
-      return;
-    }
-    if (e.key === 'Enter') {
-      if (editor.drafting && editor.drafting.points.length > 0) {
-        const result = onToolCommit(editor.tool, {
-          layerId: activeLayerId,
-          draft: editor.drafting.points,
-          cursor: editor.cursorSnap ?? editor.cursor,
-          ortho: editor.ortho,
-          pendingSymbol: editor.pendingSymbol,
-        });
-        if (result.committed.length) addEntities(result.committed);
-        setDrafting(null);
-      }
-      return;
-    }
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (editor.selection.size > 0) {
-        removeEntities(Array.from(editor.selection));
-      }
-      return;
-    }
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
-      e.preventDefault();
-      if (e.shiftKey) useStore.getState().redo();
-      else useStore.getState().undo();
-      return;
-    }
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
-      e.preventDefault();
-      setSelection(sheet.entityOrder);
-      return;
-    }
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
-      // duplicate
-      e.preventDefault();
-      duplicateSelection();
-      return;
-    }
-
-    // Tool shortcuts
-    const toolMap: Record<string, any> = {
+  // Keyboard shortcuts. We register once with a stable handler that reads
+  // the latest store state via useStore.getState() — the previous version
+  // captured stale closures and re-attached on every render.
+  useEffect(() => {
+    const TOOL_MAP: Record<string, ToolId> = {
       's': 'select',
       'l': 'line',
       'w': 'wire',
@@ -608,61 +529,163 @@ export function CadCanvas() {
       'm': 'measure',
       'd': 'dimension',
     };
-    if (!e.metaKey && !e.ctrlKey && !e.altKey && toolMap[e.key.toLowerCase()]) {
-      setTool(toolMap[e.key.toLowerCase()]);
-      return;
-    }
-    if (e.key === 'F8') {
-      e.preventDefault();
-      setOrtho(!editor.ortho);
-      return;
-    }
-    if (e.key === 'r' || e.key === 'R') {
-      // rotate selection 90 degrees
-      const ids = Array.from(editor.selection);
-      for (const id of ids) {
-        const ent = sheet.entities[id];
-        if (ent && ent.kind === 'symbol') {
-          updateEntity(id, { rotation: ent.rotation + Math.PI / 2 } as any);
-        }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+
+      const state = useStore.getState();
+      const ed = state.editor;
+      const proj = state.project;
+      const sh = proj.sheets[proj.activeSheetId];
+      if (!sh) return;
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        setSpaceHeld(true);
+        return;
       }
-    }
-  };
 
-  const duplicateSelection = () => {
-    const ids = Array.from(editor.selection);
-    if (ids.length === 0) return;
-    const offset = 10;
-    const newEntities = [];
-    const newIds: string[] = [];
-    for (const id of ids) {
-      const ent = sheet.entities[id];
-      if (!ent) continue;
-      const cp = JSON.parse(JSON.stringify(ent));
-      cp.id = crypto.randomUUID().slice(0, 10);
-      newIds.push(cp.id);
-      moveDeepEntity(cp, offset, offset);
-      newEntities.push(cp);
-    }
-    addEntities(newEntities);
-    setSelection(newIds);
-  };
+      // Alt + arrow = view-history navigation. Check before plain arrows.
+      if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        if (e.key === 'ArrowLeft') state.viewBack();
+        else state.viewForward();
+        return;
+      }
 
-  const handleKeyUp = (e: KeyboardEvent) => {
-    if (e.code === 'Space') {
-      setSpaceHeld(false);
-      setPanning(false);
-    }
-  };
+      if (e.key.startsWith('Arrow')) {
+        e.preventDefault();
+        const v = ed.viewport;
+        const step = (e.shiftKey ? 80 : 30) / v.zoom;
+        const next = { ...v };
+        if (e.key === 'ArrowLeft') next.x -= step;
+        if (e.key === 'ArrowRight') next.x += step;
+        if (e.key === 'ArrowUp') next.y += step;
+        if (e.key === 'ArrowDown') next.y -= step;
+        state.setViewport(next);
+        return;
+      }
 
-  useEffect(() => {
+      if (e.key === 'Escape') {
+        state.setDrafting(null);
+        state.clearSelection();
+        state.setTool('select');
+        state.setPendingSymbol(null);
+        state.setStatus('');
+        setTextInput(null);
+        return;
+      }
+
+      if (e.key === 'Enter') {
+        if (ed.drafting && ed.drafting.points.length > 0) {
+          const result = onToolCommit(ed.tool, {
+            layerId: proj.activeLayerId,
+            draft: ed.drafting.points,
+            cursor: ed.cursorSnap ?? ed.cursor,
+            ortho: ed.ortho,
+            pendingSymbol: ed.pendingSymbol,
+          });
+          if (result.committed.length) state.addEntities(result.committed);
+          state.setDrafting(null);
+        }
+        return;
+      }
+
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (ed.selection.size > 0) state.removeEntities(Array.from(ed.selection));
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) state.redo();
+        else state.undo();
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        state.setSelection(sh.entityOrder);
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        state.copySelection();
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        const cursor = ed.cursorSnap ?? ed.cursor;
+        state.pasteFromClipboard(cursor);
+        return;
+      }
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        state.duplicateSelection();
+        return;
+      }
+
+      if (e.key === 'F8') {
+        e.preventDefault();
+        state.setOrtho(!ed.ortho);
+        return;
+      }
+
+      // R: rotate selected symbols/text 90° if anything's selected; otherwise
+      // fall through and let the tool-shortcut path bind R to Rectangle.
+      if ((e.key === 'r' || e.key === 'R') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (ed.selection.size > 0) {
+          let rotated = false;
+          for (const id of ed.selection) {
+            const ent = sh.entities[id];
+            if (!ent) continue;
+            if (ent.kind === 'symbol' || ent.kind === 'text' || ent.kind === 'wire-label' || ent.kind === 'ellipse') {
+              state.updateEntity(id, { rotation: (ent as any).rotation + Math.PI / 2 } as any);
+              rotated = true;
+            }
+          }
+          if (rotated) return;
+        }
+        // No rotatable selection — let the tool-map below switch tools.
+      }
+
+      const lower = e.key.toLowerCase();
+      if (!e.metaKey && !e.ctrlKey && !e.altKey && TOOL_MAP[lower]) {
+        state.setTool(TOOL_MAP[lower]);
+        return;
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setSpaceHeld(false);
+        setPanning(false);
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => {
+      window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
-      return window.removeEventListener('keydown', handleKeyDown);
     };
-  });
+  }, []);
+
+  // React's synthetic onWheel is attached as a passive listener (React 17+),
+  // so preventDefault() inside the React handler can't stop the browser from
+  // also doing its native pinch-to-zoom. Attach a native non-passive listener
+  // whose only job is to call preventDefault.
+  useEffect(() => {
+    const c = canvasRef.current;
+    if (!c) return;
+    const stop = (e: WheelEvent) => { e.preventDefault(); };
+    c.addEventListener('wheel', stop, { passive: false });
+    return () => c.removeEventListener('wheel', stop);
+  }, []);
 
   return (
     <div ref={wrapperRef} className="canvas-container" style={{ flex: 1, position: 'relative' }}>
@@ -684,6 +707,31 @@ export function CadCanvas() {
       />
       <CoordReadout />
       <CommandHint />
+      {textInput && (
+        <TextInput
+          screen={textInput.screen}
+          onCancel={() => setTextInput(null)}
+          onCommit={(text) => {
+            if (text.trim()) {
+              addEntities([
+                {
+                  id: crypto.randomUUID().slice(0, 10),
+                  kind: 'text',
+                  layerId: textInput.layerId,
+                  visible: true,
+                  locked: false,
+                  position: textInput.world,
+                  text,
+                  fontSize: 4,
+                  rotation: 0,
+                  align: 'left',
+                },
+              ]);
+            }
+            setTextInput(null);
+          }}
+        />
+      )}
       {contextMenu && (
         <ContextMenu
           x={contextMenu.x}
@@ -695,13 +743,40 @@ export function CadCanvas() {
   );
 }
 
-const moveDeepEntity = (ent: any, dx: number, dy: number) => {
-  if (ent.a) ent.a = { x: ent.a.x + dx, y: ent.a.y + dy };
-  if (ent.b) ent.b = { x: ent.b.x + dx, y: ent.b.y + dy };
-  if (ent.center) ent.center = { x: ent.center.x + dx, y: ent.center.y + dy };
-  if (ent.position) ent.position = { x: ent.position.x + dx, y: ent.position.y + dy };
-  if (ent.points) ent.points = ent.points.map((p: Vec2) => ({ x: p.x + dx, y: p.y + dy }));
-};
+function TextInput({
+  screen,
+  onCommit,
+  onCancel,
+}: {
+  screen: Vec2;
+  onCommit: (text: string) => void;
+  onCancel: () => void;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+  return (
+    <input
+      ref={ref}
+      className="canvas-text-input"
+      style={{ left: screen.x, top: screen.y }}
+      placeholder="Text…"
+      onBlur={(e) => onCommit(e.currentTarget.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          onCommit(e.currentTarget.value);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          onCancel();
+        }
+        // Don't let the canvas keydown handler swallow these keys.
+        e.stopPropagation();
+      }}
+    />
+  );
+}
 
 function CoordReadout() {
   const cursor = useStore((s) => s.editor.cursor);
@@ -722,7 +797,7 @@ function CommandHint() {
   return (
     <div className="canvas-overlay">
       Tool: {tool.toUpperCase()} {drafting ? `(${drafting.points.length} pt)` : ''}
-      {status ? ` • ${status}` : ' • Hold Space + drag to pan, or use arrow keys'}
+      {status ? ` • ${status}` : ' • Hold Space + drag to pan, Alt+←/→ to step through views'}
     </div>
   );
 }
@@ -732,6 +807,9 @@ function ContextMenu({ x, y, onClose }: { x: number; y: number; onClose: () => v
   const removeEntities = useStore((s) => s.removeEntities);
   const setSelection = useStore((s) => s.setSelection);
   const updateEntity = useStore((s) => s.updateEntity);
+  const copySelection = useStore((s) => s.copySelection);
+  const pasteFromClipboard = useStore((s) => s.pasteFromClipboard);
+  const duplicateSelection = useStore((s) => s.duplicateSelection);
   const project = useStore((s) => s.project);
   const sheet = project.sheets[project.activeSheetId];
 
@@ -748,20 +826,30 @@ function ContextMenu({ x, y, onClose }: { x: number; y: number; onClose: () => v
 
   return (
     <div className="context-menu" style={{ left: x, top: y }}>
-      <div className="item" onClick={() => { has && removeEntities(sel); close(); }}>
+      <div className="item" onClick={() => { if (has) copySelection(); close(); }}>
+        Copy <span className="key">⌘C</span>
+      </div>
+      <div className="item" onClick={() => { pasteFromClipboard(editor.cursorSnap ?? editor.cursor); close(); }}>
+        Paste <span className="key">⌘V</span>
+      </div>
+      <div className="item" onClick={() => { if (has) duplicateSelection(); close(); }}>
+        Duplicate <span className="key">⌘D</span>
+      </div>
+      <div className="divider" />
+      <div className="item" onClick={() => { if (has) removeEntities(sel); close(); }}>
         Delete <span className="key">Del</span>
       </div>
       <div className="item" onClick={() => {
         for (const id of sel) {
           const e = sheet.entities[id];
-          if (e && e.kind === 'symbol') updateEntity(id, { rotation: e.rotation + Math.PI / 2 } as any);
+          if (e && e.kind === 'symbol') updateEntity(id, { rotation: e.rotation + Math.PI / 2 } as Partial<Entity>);
         }
         close();
       }}>Rotate 90° <span className="key">R</span></div>
       <div className="item" onClick={() => {
         for (const id of sel) {
           const e = sheet.entities[id];
-          if (e && e.kind === 'symbol') updateEntity(id, { mirror: !e.mirror } as any);
+          if (e && e.kind === 'symbol') updateEntity(id, { mirror: !e.mirror } as Partial<Entity>);
         }
         close();
       }}>Mirror <span className="key">M</span></div>

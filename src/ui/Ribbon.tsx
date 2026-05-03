@@ -17,6 +17,12 @@ const ICONS: Record<ToolId, JSX.Element> = {
   'symbol':    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2"><circle cx="12" cy="12" r="4"/><path d="M2 12h6M16 12h6M12 2v6M12 16v6"/></svg>,
   'erase':     <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><path d="M3 17l8-8 7 7-3 3H6zM12 4l4 4"/></svg>,
   'measure':   <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2"><path d="M3 17 17 3l4 4L7 21z"/><path d="M7 13l2 2M10 10l2 2M13 7l2 2"/></svg>,
+  'trunking':  <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="1.5"><rect x="3" y="9" width="18" height="6"/><line x1="3" y1="12" x2="21" y2="12" strokeDasharray="1 1"/></svg>,
+  'basket':    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="1.5"><rect x="3" y="9" width="18" height="6"/><line x1="6" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="6" y2="15"/><line x1="12" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="12" y2="15"/><line x1="18" y1="9" x2="21" y2="15"/></svg>,
+  'tray':      <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="1.5"><path d="M3 9 v6 M21 9 v6 M3 15 H21"/><line x1="7" y1="13" x2="7" y2="11"/><line x1="11" y1="13" x2="11" y2="11"/><line x1="15" y1="13" x2="15" y2="11"/><line x1="19" y1="13" x2="19" y2="11"/></svg>,
+  'conduit':   <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2.5" strokeLinecap="round"><line x1="3" y1="12" x2="21" y2="12"/></svg>,
+  'wall':      <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="1.5"><rect x="3" y="10" width="18" height="4" fill="currentColor" fillOpacity="0.3"/></svg>,
+  'room':      <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="1.5"><rect x="4" y="6" width="16" height="12"/><line x1="4" y1="12" x2="20" y2="12"/></svg>,
 };
 
 const TOOL_DEFS: { id: ToolId; label: string; group: string; key?: string }[] = [
@@ -30,12 +36,18 @@ const TOOL_DEFS: { id: ToolId; label: string; group: string; key?: string }[] = 
   { id: 'polyline', label: 'Polyline', group: 'Draw', key: 'P' },
   { id: 'wire', label: 'Wire', group: 'Wire', key: 'W' },
   { id: 'bus', label: 'Bus', group: 'Wire' },
+  { id: 'trunking', label: 'Trunk', group: 'Contain' },
+  { id: 'basket', label: 'Basket', group: 'Contain' },
+  { id: 'tray', label: 'Tray', group: 'Contain' },
+  { id: 'conduit', label: 'Conduit', group: 'Contain' },
+  { id: 'wall', label: 'Wall', group: 'Building' },
+  { id: 'room', label: 'Room', group: 'Building' },
   { id: 'text', label: 'Text', group: 'Annot', key: 'T' },
   { id: 'dimension', label: 'Dim', group: 'Annot', key: 'D' },
   { id: 'measure', label: 'Measure', group: 'Annot', key: 'M' },
 ];
 
-const GROUPS = ['Edit', 'Draw', 'Wire', 'Annot'];
+const GROUPS = ['Edit', 'Draw', 'Wire', 'Contain', 'Building', 'Annot'];
 
 export function Ribbon() {
   const tool = useStore((s) => s.editor.tool);
@@ -50,6 +62,12 @@ export function Ribbon() {
   const redo = useStore((s) => s.redo);
   const past = useStore((s) => s.past.length);
   const future = useStore((s) => s.future.length);
+  const viewBack = useStore((s) => s.viewBack);
+  const viewForward = useStore((s) => s.viewForward);
+  const viewIndex = useStore((s) => s.viewHistory.index);
+  const viewStackLen = useStore((s) => s.viewHistory.stack.length);
+  const canViewBack = viewIndex > 0;
+  const canViewForward = viewIndex < viewStackLen - 1;
 
   return (
     <div className="ribbon">
@@ -112,6 +130,34 @@ export function Ribbon() {
           </button>
         </div>
         <div className="ribbon-group-label">Snap</div>
+      </div>
+
+      <div className="ribbon-group">
+        <div className="ribbon-buttons">
+          <button
+            className="tool-btn"
+            onClick={viewBack}
+            disabled={!canViewBack}
+            title="Previous view (Alt+←)"
+          >
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/><circle cx="6" cy="12" r="1.5" fill="currentColor"/></svg>
+            </span>
+            <span className="label">Back</span>
+          </button>
+          <button
+            className="tool-btn"
+            onClick={viewForward}
+            disabled={!canViewForward}
+            title="Next view (Alt+→)"
+          >
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6"/><circle cx="18" cy="12" r="1.5" fill="currentColor"/></svg>
+            </span>
+            <span className="label">Fwd</span>
+          </button>
+        </div>
+        <div className="ribbon-group-label">Nav</div>
       </div>
 
       <div className="ribbon-group">
