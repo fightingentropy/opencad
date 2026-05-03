@@ -23,6 +23,9 @@ export type EntityKind =
   | 'symbol'
   | 'dimension'
   | 'wire-label'
+  | 'containment'
+  | 'wall'
+  | 'room'
   | 'group';
 
 export interface BaseEntity {
@@ -140,6 +143,42 @@ export interface GroupEntity extends BaseEntity {
   childIds: EntityId[];
 }
 
+export type ContainmentType = 'trunking' | 'basket' | 'tray' | 'conduit';
+
+export interface ContainmentEntity extends BaseEntity {
+  kind: 'containment';
+  containmentType: ContainmentType;
+  points: Vec2[];
+  // Cross-section dimensions (mm). For round conduit, `width` is the
+  // outside diameter and `height` is ignored.
+  width?: number;
+  height?: number;
+  label?: string;
+}
+
+// Architectural wall — a polyline with thickness. In 3D it's extruded
+// vertically from floor to wallHeight (default 3000 mm). Multiple wall
+// entities can share endpoints to form rooms; gaps in the polyline make
+// doorways without needing CSG holes.
+export interface WallEntity extends BaseEntity {
+  kind: 'wall';
+  points: Vec2[];
+  // Wall thickness (mm)
+  thickness: number;
+  // Wall height (mm). Defaults to 3000 if omitted.
+  height?: number;
+}
+
+// Labeled room footprint. In 2D it's a translucent floor patch with the
+// room name; in 3D it tints the floor under the room.
+export interface RoomEntity extends BaseEntity {
+  kind: 'room';
+  a: Vec2;
+  b: Vec2;
+  name?: string;
+  floorColor?: string;
+}
+
 export type Entity =
   | LineEntity
   | PolylineEntity
@@ -153,6 +192,9 @@ export type Entity =
   | SymbolEntity
   | DimensionEntity
   | WireLabelEntity
+  | ContainmentEntity
+  | WallEntity
+  | RoomEntity
   | GroupEntity;
 
 // ---------- Symbol library ----------
@@ -233,6 +275,10 @@ export interface Sheet {
   entities: Record<EntityId, Entity>;
   entityOrder: EntityId[];
   background?: string;
+  // 3D scene style. 'panel' (default) renders the panel enclosure with door,
+  // DIN rails and ducts. 'building' renders a clean floor with no enclosure
+  // — useful for showing containment runs in a corridor or open space.
+  sceneStyle?: 'panel' | 'building';
 }
 
 export interface Project {
@@ -270,7 +316,13 @@ export type ToolId =
   | 'dimension'
   | 'symbol'
   | 'erase'
-  | 'measure';
+  | 'measure'
+  | 'trunking'
+  | 'basket'
+  | 'tray'
+  | 'conduit'
+  | 'wall'
+  | 'room';
 
 export interface Viewport {
   x: number; // pan in world coords

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Panel3D } from './Panel3D';
+import { Panel3D, type DoorMode, type ViewPreset } from './Panel3D';
 import { useStore } from '../state/store';
 
 interface Props {
@@ -7,10 +7,24 @@ interface Props {
   fillParent?: boolean;
 }
 
+const PRESETS: { key: ViewPreset; label: string; title: string }[] = [
+  { key: 'iso', label: '3/4', title: '3/4 view (default)' },
+  { key: 'front', label: 'Front', title: 'Look straight at the panel face' },
+  { key: 'top', label: 'Top', title: 'Look down from above' },
+  { key: 'left', label: 'Left', title: 'Look from the left side' },
+];
+
+const DOOR_MODES: DoorMode[] = ['open', 'closed', 'hidden'];
+
 export function Panel3DContainer({ width = 320, fillParent = false }: Props) {
   const project = useStore((s) => s.project);
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: width, h: 600 });
+  const [doorMode, setDoorMode] = useState<DoorMode>('open');
+  const [view, setView] = useState<{ preset: ViewPreset; key: number }>({
+    preset: 'iso',
+    key: 0,
+  });
 
   useEffect(() => {
     if (!ref.current) return;
@@ -25,15 +39,61 @@ export function Panel3DContainer({ width = 320, fillParent = false }: Props) {
     return () => ro.disconnect();
   }, []);
 
-  const style: React.CSSProperties = fillParent
+  const containerStyle: React.CSSProperties = fillParent
     ? { flex: 1, minWidth: 0 }
     : { width, flexShrink: 0 };
 
+  const applyPreset = (preset: ViewPreset) => {
+    setView((v) => ({ preset, key: v.key + 1 }));
+  };
+  const cycleDoor = () => {
+    const i = DOOR_MODES.indexOf(doorMode);
+    setDoorMode(DOOR_MODES[(i + 1) % DOOR_MODES.length]);
+  };
+
   return (
-    <div ref={ref} className="canvas-3d" style={style}>
-      <Panel3D project={project} width={size.w} height={size.h} />
+    <div ref={ref} className="canvas-3d" style={containerStyle}>
+      <Panel3D
+        project={project}
+        width={size.w}
+        height={size.h}
+        doorMode={doorMode}
+        viewKey={view.key}
+        viewPreset={view.preset}
+      />
       <div className="canvas-3d-overlay">
         3D Panel View • drag to orbit • scroll to zoom
+      </div>
+      <div className="canvas-3d-controls">
+        <div className="group" role="group" aria-label="View presets">
+          {PRESETS.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              className={view.preset === p.key ? 'active' : ''}
+              onClick={() => applyPreset(p.key)}
+              title={p.title}
+            >
+              {p.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => applyPreset(view.preset)}
+            title="Reframe to current preset"
+          >
+            Fit
+          </button>
+        </div>
+        <div className="group" role="group" aria-label="Door">
+          <button
+            type="button"
+            onClick={cycleDoor}
+            title="Cycle door: open → closed → hidden"
+          >
+            Door: {doorMode}
+          </button>
+        </div>
       </div>
     </div>
   );

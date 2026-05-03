@@ -83,6 +83,16 @@ const entitySVG = (e: Entity, layer: Layer, project: Project): string => {
       return `<g transform="translate(${e.position.x} ${e.position.y}) scale(1 -1) rotate(${-e.rotation * 180 / Math.PI})"><text font-size="3" fill="#ffd84d" text-anchor="middle" font-family="monospace">${escapeXml(e.text)}</text></g>`;
     case 'dimension':
       return ''; // simplified
+    case 'containment': {
+      const w = e.width ?? 50;
+      const pts = e.points.map(p => `${p.x},${p.y}`).join(' ');
+      const cap = e.containmentType === 'conduit' ? 'round' : 'butt';
+      // Translucent band + thin centerline approximates the on-screen look.
+      return (
+        `<polyline points="${pts}" stroke="${stroke}" stroke-width="${w}" fill="none" stroke-opacity="0.3" stroke-linecap="${cap}" stroke-linejoin="round" />` +
+        `<polyline points="${pts}" stroke="${stroke}" stroke-width="${Math.max(0.4, w * 0.06)}" fill="none" stroke-linecap="${cap}" />`
+      );
+    }
     default:
       return '';
   }

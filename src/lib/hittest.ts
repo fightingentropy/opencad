@@ -43,6 +43,27 @@ export const hitTestEntity = (e: Entity, p: Vec2, opts: HitOptions): boolean => 
         return distToSegment(p, e.points[e.points.length - 1], e.points[0]) <= tol;
       }
       return false;
+    case 'containment': {
+      // Hit anywhere within the containment band's half-width, not just the centerline.
+      const half = Math.max(2, (e.width ?? 50) / 2);
+      const bandTol = tol + half;
+      for (let i = 0; i < e.points.length - 1; i++) {
+        if (distToSegment(p, e.points[i], e.points[i + 1]) <= bandTol) return true;
+      }
+      return false;
+    }
+    case 'wall': {
+      // Walls have thickness — accept hits within thickness/2 + tol of any segment.
+      const bandTol = tol + Math.max(2, (e.thickness ?? 100) / 2);
+      for (let i = 0; i < e.points.length - 1; i++) {
+        if (distToSegment(p, e.points[i], e.points[i + 1]) <= bandTol) return true;
+      }
+      return false;
+    }
+    case 'room': {
+      // Rooms hit-test like a filled rectangle so users can grab them anywhere.
+      return pointInRect(p, e.a, e.b);
+    }
     case 'rectangle': {
       // hit on the rectangle outline
       const a = e.a;
