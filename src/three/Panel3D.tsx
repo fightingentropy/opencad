@@ -11,6 +11,10 @@ import type {
   WireEntity,
   Entity,
   SymbolCategory,
+  ContainmentEntity,
+  WallEntity,
+  RoomEntity,
+  Vec2,
 } from '../types';
 
 // We want to look up the symbol category by id. The library file may not
@@ -1096,7 +1100,8 @@ function buildEnclosure(
   gnd.receiveShadow = true;
   root.add(gnd);
 
-  // Door (open at an angle) — barely visible behind, just for context
+  // Door — hinged on the right side. Mode (open/closed/hidden) is applied
+  // imperatively after build via root.getObjectByName('door').
   const door = new THREE.Mesh(
     new THREE.BoxGeometry(H * 0.95, H + frameThick * 1.6, 4),
     new THREE.MeshStandardMaterial({
@@ -1106,6 +1111,7 @@ function buildEnclosure(
       side: THREE.DoubleSide,
     })
   );
+  door.name = 'door';
   door.geometry.translate(H * 0.475, 0, 0);
   door.position.set(W + frameThick, H / 2, frameDepth - backThick - 4);
   door.rotation.y = -Math.PI * 0.55;
@@ -1118,64 +1124,498 @@ function buildEnclosure(
 }
 
 // ---------- Wire builder -----------------------------------------------------
-function buildWires(
-  scene: THREE.Object3D,
-  wires: WireEntity[],
-  H: number
-): THREE.Group {
-  const root = new THREE.Group();
+function wireColor(t?: string): number {
+  const k = (t || '').toUpperCase();
+  if (k.includes('PE') || k.includes('GND')) return 0x2c8a3a; // green
+  if (k.includes('N')) return 0x1f6fb4; // blue
+  if (k.includes('L1') || k === 'L1') return 0x2a2a2a; // black
+  if (k.includes('L2')) return 0xb22a2a; // red
+  if (k.includes('L3')) return 0x2a2ab2; // blue-ish
+  if (k.includes('24V') || k.includes('+24')) return 0xc41a1a; // red
+  if (k.includes('0V') || k.includes('COM')) return 0x141414;
+  if (k.includes('120')) return 0xc41a1a;
+  return 0xc41a1a;
+}
 
-  // Wire color by type
-  const colorOf = (t?: string): number => {
-    const k = (t || '').toUpperCase();
-    if (k.includes('PE') || k.includes('GND')) return 0x2c8a3a; // green
-    if (k.includes('N')) return 0x1f6fb4; // blue
-    if (k.includes('L1') || k === 'L1') return 0x2a2a2a; // black
-    if (k.includes('L2')) return 0xb22a2a; // red
-    if (k.includes('L3')) return 0x2a2ab2; // blue-ish
-    if (k.includes('24V') || k.includes('+24')) return 0xc41a1a; // red
-    if (k.includes('0V') || k.includes('COM')) return 0x141414;
-    if (k.includes('120')) return 0xc41a1a;
-    return 0xc41a1a;
+// ---------- Building-mode scenery -------------------------------------------
+// Default elevation (mm) for each containment type in building mode.
+// Tuned to a real 3 m wall height — runs hang just below the ceiling like
+// a real ceiling-mount BIM model.
+const BUILDING_ELEVATION: Record<string, number> = {
+  trunking: 2700,
+  basket: 2400,
+  tray: 2100,
+  conduit: 1800,
+};
+
+// ---------- Containment builder ---------------------------------------------
+// Build a Group representing one containment run by walking each polyline
+// segment and emitting the appropriate per-segment geometry. Corners may
+// show a small gap at sharp bends — acceptable for a panel-layout overview.
+function buildContainmentGroup(
+  c: ContainmentEntity,
+  H: number,
+  mats: MaterialBag,
+  // Bottom-of-section elevation in panel-Z. In panel mode this stays small
+  // so runs sit on the back panel; in building mode the caller passes a
+  // ceiling-height value so runs hang above the floor like real BIM models.
+  baseZ = 30
+): THREE.Group | null {
+  if (!c.points || c.points.length < 2) return null;
+  const grp = new THREE.Group();
+  const w = c.width ?? 50;
+  const h = c.height ?? 50;
+
+  // Per-entity color override. When the sample (or user) sets a colour on
+  // the containment, fresh materials replace the cached defaults so the
+  // run reads with that hue in 3D.
+  const overrideHex = c.color ? new THREE.Color(c.color).getHex() : null;
+  const matFor = (
+    fallback: THREE.Material,
+    metalness = 0.05,
+    roughness = 0.55,
+  ): THREE.Material => {
+    if (overrideHex == null) return fallback;
+    return new THREE.MeshStandardMaterial({
+      color: overrideHex,
+      metalness,
+      roughness,
+    });
   };
 
-  for (const w of wires) {
-    if (!w.points || w.points.length < 2) continue;
-    const color = w.color
-      ? new THREE.Color(w.color).getHex()
-      : colorOf(w.wireType);
-    const mat = new THREE.MeshStandardMaterial({
-      color,
-      metalness: 0.05,
-      roughness: 0.5,
-    });
-    // Build a path with a bit of z-variation so wires sit in ducts
-    const pts: THREE.Vector3[] = w.points.map(
-      (p, i) =>
-        new THREE.Vector3(
-          p.x,
-          // y in CAD is screen-down typically; flip so panel y matches three.js up
-          H - p.y,
-          // raise wires off panel surface so they sit "in" the ducts at ~25mm
-          25 + (i % 2) * 1.5
-        )
-    );
-    const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.2);
-    const tube = new THREE.TubeGeometry(
-      curve,
-      Math.max(8, pts.length * 6),
-      1.2,
-      8,
-      false
-    );
-    const mesh = new THREE.Mesh(tube, mat);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    root.add(mesh);
+  for (let i = 0; i < c.points.length - 1; i++) {
+    const a = c.points[i];
+    const b = c.points[i + 1];
+    // Flip y to match panel convention (CAD y is screen-down).
+    const ax = a.x;
+    const ay = H - a.y;
+    const bx = b.x;
+    const by = H - b.y;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-3) continue;
+
+    const cx = (ax + bx) / 2;
+    const cy = (ay + by) / 2;
+    // Segment is built along its local +x axis (length), then rotated to
+    // match its heading in the XY plane.
+    const heading = Math.atan2(dy, dx);
+
+    if (c.containmentType === 'conduit') {
+      const radius = w / 2;
+      const tube = new THREE.Mesh(
+        new THREE.CylinderGeometry(radius, radius, len, 16, 1, false),
+        matFor(mats.chrome, 0.85, 0.25)
+      );
+      // CylinderGeometry's axis is +Y; rotate so it lies along +X, then
+      // rotate again into the segment's heading.
+      tube.rotation.z = Math.PI / 2;
+      const wrap = new THREE.Group();
+      wrap.add(tube);
+      wrap.position.set(cx, cy, baseZ + radius);
+      wrap.rotation.z = heading;
+      tube.castShadow = true;
+      tube.receiveShadow = true;
+      grp.add(wrap);
+      continue;
+    }
+
+    if (c.containmentType === 'trunking') {
+      // Solid rectangular tube + a darker lid on top.
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(len, w, h),
+        matFor(mats.grayPlastic, 0.1, 0.55)
+      );
+      // The lid keeps a distinct darker accent even when an override hue
+      // is supplied — modulate the override to make it slightly darker.
+      let lidMat: THREE.Material = mats.blackPlastic;
+      if (overrideHex != null) {
+        const c2 = new THREE.Color(overrideHex).multiplyScalar(0.55);
+        lidMat = new THREE.MeshStandardMaterial({
+          color: c2,
+          metalness: 0.05,
+          roughness: 0.6,
+        });
+      }
+      const lid = new THREE.Mesh(
+        new THREE.BoxGeometry(len, w * 0.92, h * 0.12),
+        lidMat
+      );
+      lid.position.z = h / 2 + (h * 0.12) / 2 - 0.5;
+      const wrap = new THREE.Group();
+      wrap.add(body);
+      wrap.add(lid);
+      wrap.position.set(cx, cy, baseZ + h / 2);
+      wrap.rotation.z = heading;
+      body.castShadow = true;
+      body.receiveShadow = true;
+      lid.castShadow = true;
+      grp.add(wrap);
+      continue;
+    }
+
+    if (c.containmentType === 'tray') {
+      // U-channel — bottom plate + two side rails, top open.
+      const tk = 2; // wall thickness
+      const wrap = new THREE.Group();
+      const trayMat = matFor(mats.steel, 0.4, 0.45);
+      const bottom = new THREE.Mesh(
+        new THREE.BoxGeometry(len, w, tk),
+        trayMat
+      );
+      bottom.position.z = -h / 2 + tk / 2;
+      bottom.castShadow = true;
+      bottom.receiveShadow = true;
+      wrap.add(bottom);
+      for (const sy of [-1, 1]) {
+        const side = new THREE.Mesh(
+          new THREE.BoxGeometry(len, tk, h),
+          trayMat
+        );
+        side.position.set(0, sy * (w / 2 - tk / 2), 0);
+        side.castShadow = true;
+        side.receiveShadow = true;
+        wrap.add(side);
+      }
+      // Perforation indication: a few thin slots along the bottom
+      const slotCount = Math.max(2, Math.floor(len / 30));
+      for (let k = 0; k < slotCount; k++) {
+        const slot = new THREE.Mesh(
+          new THREE.BoxGeometry(8, w * 0.5, 0.4),
+          mats.ductSlot
+        );
+        slot.position.set(
+          -len / 2 + (k + 0.5) * (len / slotCount),
+          0,
+          -h / 2 + tk + 0.2
+        );
+        wrap.add(slot);
+      }
+      wrap.position.set(cx, cy, baseZ + h / 2);
+      wrap.rotation.z = heading;
+      grp.add(wrap);
+      continue;
+    }
+
+    if (c.containmentType === 'basket') {
+      // Cable basket — thin solid bottom + low side flanges. Looks like a
+      // real basket from a distance and avoids the "ladder rungs" look that
+      // a hollow cage would create when viewed from below.
+      const wrap = new THREE.Group();
+      const basketMat = matFor(mats.steel, 0.4, 0.45);
+      const tk = 1.5;
+      const flangeH = Math.min(h, 12); // short side flanges, not full height
+      const bottom = new THREE.Mesh(
+        new THREE.BoxGeometry(len, w, tk),
+        basketMat
+      );
+      bottom.position.z = -h / 2 + tk / 2;
+      bottom.castShadow = true;
+      bottom.receiveShadow = true;
+      wrap.add(bottom);
+      for (const sy of [-1, 1]) {
+        const side = new THREE.Mesh(
+          new THREE.BoxGeometry(len, tk, flangeH),
+          basketMat
+        );
+        side.position.set(0, sy * (w / 2 - tk / 2), -h / 2 + flangeH / 2);
+        side.castShadow = true;
+        side.receiveShadow = true;
+        wrap.add(side);
+      }
+      // Mesh hint: a few longitudinal cylinders running along the bottom
+      // imply the wire-mesh weave without sticking up like ladder rungs.
+      const meshCount = 4;
+      for (let r = 0; r < meshCount; r++) {
+        const t = (r + 0.5) / meshCount;
+        const y = -w / 2 + t * w;
+        const rail = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.7, 0.7, len, 6),
+          basketMat
+        );
+        rail.rotation.z = Math.PI / 2;
+        rail.position.set(0, y, -h / 2 + tk + 0.7);
+        wrap.add(rail);
+      }
+      wrap.position.set(cx, cy, baseZ + h / 2);
+      wrap.rotation.z = heading;
+      grp.add(wrap);
+      continue;
+    }
   }
 
-  scene.add(root);
-  return root;
+  return grp;
+}
+
+// ---------- Wall builder ----------------------------------------------------
+// Walls are extruded segments along a polyline. Built in panel coords; the
+// contentRoot's -90deg X rotation flips +Z (height) onto world +Y so each
+// segment stands vertical on the floor.
+
+interface ContainmentRunInfo {
+  points: Vec2[];
+  containmentType: string;
+  width: number;
+  height: number;
+  baseZ: number;
+}
+
+interface HoleDef {
+  tPos: number;
+  holeW: number;
+  zBottom: number;
+  zTop: number;
+}
+
+function segmentIntersect2D(
+  ax: number, ay: number, bx: number, by: number,
+  cx: number, cy: number, dx: number, dy: number,
+): { t: number; s: number } | null {
+  const ux = bx - ax, uy = by - ay;
+  const vx = dx - cx, vy = dy - cy;
+  const cross = ux * vy - uy * vx;
+  if (Math.abs(cross) < 1e-6) return null;
+  const wx = ax - cx, wy = ay - cy;
+  const t = (vx * wy - vy * wx) / cross;
+  const s = (ux * wy - uy * wx) / cross;
+  if (t < -0.001 || t > 1.001 || s < -0.001 || s > 1.001) return null;
+  return {
+    t: Math.max(0, Math.min(1, t)),
+    s: Math.max(0, Math.min(1, s)),
+  };
+}
+
+function computeHolesForSegment(
+  wallAx: number, wallAy: number,
+  wallBx: number, wallBy: number,
+  runs: ContainmentRunInfo[],
+  H: number,
+  wallHeight: number,
+): HoleDef[] {
+  const holes: HoleDef[] = [];
+  const wallLen = Math.hypot(wallBx - wallAx, wallBy - wallAy);
+  if (wallLen < 1) return holes;
+  const wdx = (wallBx - wallAx) / wallLen;
+  const wdy = (wallBy - wallAy) / wallLen;
+
+  const CLEARANCE = 40;
+
+  for (const run of runs) {
+    for (let j = 0; j < run.points.length - 1; j++) {
+      const ca = run.points[j];
+      const cb = run.points[j + 1];
+      const cax = ca.x, cay = H - ca.y;
+      const cbx = cb.x, cby = H - cb.y;
+
+      const hit = segmentIntersect2D(
+        wallAx, wallAy, wallBx, wallBy,
+        cax, cay, cbx, cby,
+      );
+      if (!hit) continue;
+
+      const contDx = cbx - cax, contDy = cby - cay;
+      const contLen = Math.hypot(contDx, contDy);
+      if (contLen < 1) continue;
+
+      const sinAngle = Math.abs((contDx * wdy - contDy * wdx) / contLen);
+      if (sinAngle < 0.05) continue;
+
+      const crossWidth = run.width;
+      const crossHeight = run.containmentType === 'conduit'
+        ? run.width : run.height;
+      const holeW = crossWidth / sinAngle + CLEARANCE * 2;
+      const zBottom = Math.max(0, run.baseZ - CLEARANCE);
+      const zTop = Math.min(wallHeight, run.baseZ + crossHeight + CLEARANCE);
+
+      holes.push({
+        tPos: hit.t,
+        holeW: Math.min(holeW, wallLen * 0.9),
+        zBottom,
+        zTop,
+      });
+    }
+  }
+
+  holes.sort((a, b) => a.tPos - b.tPos);
+  return holes;
+}
+
+function buildWallGroup(
+  w: WallEntity,
+  H: number,
+  _mats: MaterialBag,
+  containmentRuns: ContainmentRunInfo[] = [],
+): THREE.Group | null {
+  if (!w.points || w.points.length < 2) return null;
+  const grp = new THREE.Group();
+  const thickness = w.thickness ?? 200;
+  const wallHeight = w.height ?? 3000;
+
+  const wallMat = new THREE.MeshStandardMaterial({
+    color: 0xeceeef,
+    metalness: 0.0,
+    roughness: 0.92,
+    side: THREE.DoubleSide,
+  });
+
+  for (let i = 0; i < w.points.length - 1; i++) {
+    const a = w.points[i];
+    const b = w.points[i + 1];
+    const ax = a.x;
+    const ay = H - a.y;
+    const bx = b.x;
+    const by = H - b.y;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-3) continue;
+
+    const cx = (ax + bx) / 2;
+    const cy = (ay + by) / 2;
+    const heading = Math.atan2(dy, dx);
+
+    const holes = computeHolesForSegment(
+      ax, ay, bx, by, containmentRuns, H, wallHeight,
+    );
+
+    if (holes.length === 0) {
+      const seg = new THREE.Mesh(
+        new THREE.BoxGeometry(len, thickness, wallHeight),
+        wallMat,
+      );
+      seg.position.set(cx, cy, wallHeight / 2);
+      seg.rotation.z = heading;
+      seg.castShadow = true;
+      seg.receiveShadow = true;
+      grp.add(seg);
+    } else {
+      const segGroup = new THREE.Group();
+      segGroup.position.set(cx, cy, 0);
+      segGroup.rotation.z = heading;
+
+      const addBox = (bx: number, bz: number, bw: number, bh: number) => {
+        if (bw < 1 || bh < 1) return;
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(bw, thickness, bh),
+          wallMat,
+        );
+        mesh.position.set(bx, 0, bz);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        segGroup.add(mesh);
+      };
+
+      let cursor = -len / 2;
+      for (const hole of holes) {
+        const hCenter = hole.tPos * len - len / 2;
+        const hLeft = hCenter - hole.holeW / 2;
+        const hRight = hCenter + hole.holeW / 2;
+
+        const beforeW = hLeft - cursor;
+        if (beforeW > 1) {
+          addBox((cursor + hLeft) / 2, wallHeight / 2, beforeW, wallHeight);
+        }
+
+        if (hole.zBottom > 1) {
+          addBox(hCenter, hole.zBottom / 2, hole.holeW, hole.zBottom);
+        }
+        const aboveH = wallHeight - hole.zTop;
+        if (aboveH > 1) {
+          addBox(hCenter, hole.zTop + aboveH / 2, hole.holeW, aboveH);
+        }
+
+        cursor = hRight;
+      }
+
+      const afterW = len / 2 - cursor;
+      if (afterW > 1) {
+        addBox((cursor + len / 2) / 2, wallHeight / 2, afterW, wallHeight);
+      }
+
+      grp.add(segGroup);
+    }
+  }
+
+  return grp;
+}
+
+// ---------- Room builder ----------------------------------------------------
+// A thin floor slab covering the rectangle from r.a to r.b. Panel-Y must be
+// flipped to match panel convention (CAD y is screen-down).
+function buildRoomGroup(
+  r: RoomEntity,
+  H: number,
+  // mats unused for now — kept for signature parity with other builders.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  mats: MaterialBag
+): THREE.Group | null {
+  const xMin = Math.min(r.a.x, r.b.x);
+  const xMax = Math.max(r.a.x, r.b.x);
+  const yMin = Math.min(r.a.y, r.b.y);
+  const yMax = Math.max(r.a.y, r.b.y);
+  const width = xMax - xMin;
+  const depth = yMax - yMin;
+  if (width < 1e-3 || depth < 1e-3) return null;
+
+  const grp = new THREE.Group();
+  const slabThick = 6; // mm — sits just above the building floor (y = -10)
+
+  // Panel-coord centre. Panel-Y flip: yMin..yMax in sheet coords becomes
+  // (H - yMin)..(H - yMax) in panel-Y; the centre is symmetric.
+  const cx = (xMin + xMax) / 2;
+  const cy = H - (yMin + yMax) / 2;
+
+  const colorHex = r.floorColor
+    ? new THREE.Color(r.floorColor).getHex()
+    : 0xb6c1cc;
+  const slabMat = new THREE.MeshStandardMaterial({
+    color: colorHex,
+    metalness: 0.0,
+    roughness: 0.85,
+  });
+  const slab = new THREE.Mesh(
+    new THREE.BoxGeometry(width, depth, slabThick),
+    slabMat
+  );
+  slab.position.set(cx, cy, slabThick / 2);
+  slab.receiveShadow = true;
+  // No castShadow — the slab is flat against the floor.
+  grp.add(slab);
+
+  return grp;
+}
+
+function buildWireMesh(w: WireEntity, H: number): THREE.Mesh | null {
+  if (!w.points || w.points.length < 2) return null;
+  const color = w.color
+    ? new THREE.Color(w.color).getHex()
+    : wireColor(w.wireType);
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    metalness: 0.05,
+    roughness: 0.5,
+  });
+  const pts: THREE.Vector3[] = w.points.map(
+    (p, i) =>
+      new THREE.Vector3(
+        p.x,
+        H - p.y,
+        25 + (i % 2) * 1.5
+      )
+  );
+  const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.2);
+  const tube = new THREE.TubeGeometry(
+    curve,
+    Math.max(8, pts.length * 6),
+    1.2,
+    8,
+    false
+  );
+  const mesh = new THREE.Mesh(tube, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return mesh;
 }
 
 // ---------- Custom orbit controls -------------------------------------------
@@ -1200,8 +1640,8 @@ function makeOrbitControls(
     azimuth: 0.5,
     polar: 1.05,
     distance: camera.position.distanceTo(initialTarget),
-    minDistance: 100,
-    maxDistance: 5000,
+    minDistance: 50,
+    maxDistance: 30000,
     apply(cam) {
       const sinP = Math.sin(this.polar);
       const cosP = Math.cos(this.polar);
@@ -1272,7 +1712,14 @@ function makeOrbitControls(
   };
   const onWheel = (e: WheelEvent) => {
     e.preventDefault();
-    const factor = Math.exp(e.deltaY * 0.001);
+    // Normalize delta across input devices: trackpads send many small
+    // pixel-mode events, mice send a few large line-mode ticks.
+    let delta = e.deltaY;
+    if (e.deltaMode === 1) delta *= 16;
+    else if (e.deltaMode === 2) delta *= 100;
+    // Clamp per-event so one big mouse tick doesn't overshoot wildly
+    delta = Math.max(-80, Math.min(80, delta));
+    const factor = Math.exp(delta * 0.005);
     state.distance = Math.max(
       state.minDistance,
       Math.min(state.maxDistance, state.distance * factor)
@@ -1332,17 +1779,121 @@ function pickSheetForViewer(project: Project): { sheet: Sheet; isPanel: boolean 
   return { sheet: active, isPanel: false };
 }
 
+// ---------- View presets -----------------------------------------------------
+export type ViewPreset = 'iso' | 'front' | 'top' | 'left';
+export type DoorMode = 'open' | 'closed' | 'hidden';
+
+// Apply a named camera framing for a panel of size W x H.
+// sceneStyle controls whether the camera frames a vertical panel ('panel')
+// or a horizontal floor ('building'); the latter accounts for the -90° X
+// rotation that contentRoot receives in building mode.
+function applyViewPreset(
+  preset: ViewPreset,
+  W: number,
+  H: number,
+  camera: THREE.PerspectiveCamera,
+  orbit: OrbitState,
+  sceneStyle: 'panel' | 'building' = 'panel'
+): void {
+  const fovRad = (camera.fov * Math.PI) / 180;
+
+  let dir: THREE.Vector3;
+  let fitDist: number;
+  if (sceneStyle === 'building') {
+    // Building-mode: rotated content lays on the floor (X ∈ [0, W],
+    // Z ∈ [-H, 0]). Fit the floor diagonal plus generous margin so the
+    // whole building, including 3m walls, is in frame.
+    const diag = Math.hypot(W, H);
+    fitDist = diag / (2 * Math.tan(fovRad / 2)) * 0.9;
+    // Aim mid-room height so the camera sees walls + ceiling ducts.
+    orbit.target.set(W / 2, 1500, -H / 2);
+    switch (preset) {
+      case 'front':
+        dir = new THREE.Vector3(0, 0.15, 1).normalize();
+        break;
+      case 'top':
+        dir = new THREE.Vector3(0.001, 1, 0.001).normalize();
+        break;
+      case 'left':
+        dir = new THREE.Vector3(-1, 0.15, 0.1).normalize();
+        break;
+      case 'iso':
+      default:
+        // Higher angle so the camera clears the 3 m walls and sees the
+        // rooftop / interior layout.
+        dir = new THREE.Vector3(-0.4, 0.7, 0.55).normalize();
+        break;
+    }
+  } else {
+    fitDist = Math.max(W, H) / (2 * Math.tan(fovRad / 2)) * 1.4 + 200;
+    orbit.target.set(W / 2, H / 2, 100);
+    switch (preset) {
+      case 'front':
+        dir = new THREE.Vector3(0, 0.05, 1).normalize();
+        break;
+      case 'top':
+        dir = new THREE.Vector3(0, 1, 0.001).normalize();
+        break;
+      case 'left':
+        dir = new THREE.Vector3(-1, 0.1, 0.1).normalize();
+        break;
+      case 'iso':
+      default:
+        dir = new THREE.Vector3(-0.4, 0.5, 1).normalize();
+        break;
+    }
+  }
+
+  camera.position.copy(orbit.target).addScaledVector(dir, fitDist);
+  const offset = new THREE.Vector3().subVectors(camera.position, orbit.target);
+  orbit.distance = offset.length();
+  orbit.polar = Math.acos(
+    Math.max(-1, Math.min(1, offset.y / orbit.distance))
+  );
+  orbit.azimuth = Math.atan2(offset.x, offset.z);
+  orbit.apply(camera);
+}
+
+// Apply door visibility/rotation for a given mode.
+function applyDoorMode(root: THREE.Object3D | null, mode: DoorMode): void {
+  if (!root) return;
+  const door = root.getObjectByName('door');
+  if (!door) return;
+  switch (mode) {
+    case 'open':
+      door.visible = true;
+      door.rotation.y = -Math.PI * 0.55;
+      break;
+    case 'closed':
+      door.visible = true;
+      door.rotation.y = 0;
+      break;
+    case 'hidden':
+      door.visible = false;
+      break;
+  }
+}
+
 // ---------- Main component ---------------------------------------------------
 export interface Panel3DProps {
   project: Project;
   width?: number;
   height?: number;
+  doorMode?: DoorMode;
+  // Increment `viewKey` to (re-)apply `viewPreset`. Without this nonce the
+  // effect couldn't tell a fresh user-click from the prop merely staying
+  // the same after the user has orbited.
+  viewKey?: number;
+  viewPreset?: ViewPreset;
 }
 
 export function Panel3D({
   project,
   width,
   height,
+  doorMode = 'open',
+  viewKey = 0,
+  viewPreset = 'iso',
 }: Panel3DProps): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
 
@@ -1356,7 +1907,44 @@ export function Panel3D({
   const animationRef = useRef<number | null>(null);
   const contentRootRef = useRef<THREE.Group | null>(null);
   const materialsRef = useRef<MaterialBag | null>(null);
+  // Last-built panel dimensions, so view-preset effect can reframe correctly.
+  const sizeRef = useRef<{ w: number; h: number }>({ w: 600, h: 400 });
+  // Diffing state for incremental scene updates
+  const enclosureRef = useRef<THREE.Group | null>(null);
+  const symbolsGroupRef = useRef<THREE.Group | null>(null);
+  const wiresGroupRef = useRef<THREE.Group | null>(null);
+  const containmentGroupRef = useRef<THREE.Group | null>(null);
+  const symbolMapRef = useRef<Map<string, { group: THREE.Group; sig: string }>>(
+    new Map()
+  );
+  const wireMapRef = useRef<Map<string, { mesh: THREE.Mesh; sig: string }>>(
+    new Map()
+  );
+  const containmentMapRef = useRef<
+    Map<string, { group: THREE.Group; sig: string }>
+  >(new Map());
+  // Walls + rooms: only populated in building mode, but we keep refs at the
+  // top level so cleanup mirrors the other diff maps.
+  const wallsGroupRef = useRef<THREE.Group | null>(null);
+  const roomsGroupRef = useRef<THREE.Group | null>(null);
+  const wallMapRef = useRef<
+    Map<string, { group: THREE.Group; sig: string }>
+  >(new Map());
+  const roomMapRef = useRef<
+    Map<string, { group: THREE.Group; sig: string }>
+  >(new Map());
+  // (sheetId, w, h) signature so we know when to reframe and rebuild enclosure
+  const lastFrameSigRef = useRef<string>('');
+  const lastEnclosureSigRef = useRef<string>('');
   const resizeObsRef = useRef<ResizeObserver | null>(null);
+  // Scene-style elements: panel mode and building mode each get their own
+  // floor + ambient setup. Toggled via .visible based on the active sheet.
+  const panelFloorRef = useRef<THREE.Mesh | null>(null);
+  const panelAccentRef = useRef<THREE.Mesh | null>(null);
+  const buildingFloorRef = useRef<THREE.Mesh | null>(null);
+  const buildingAmbientRef = useRef<THREE.Light | null>(null);
+  const skyMatRef = useRef<THREE.ShaderMaterial | null>(null);
+  const lastSceneStyleRef = useRef<'panel' | 'building'>('panel');
 
   // ---- One-time scene initialization -----------------------------------
   useEffect(() => {
@@ -1407,13 +1995,15 @@ export function Panel3D({
     });
     const sky = new THREE.Mesh(skyGeo, skyMat);
     scene.add(sky);
+    skyMatRef.current = skyMat;
 
-    // Camera — positioned later when project is known
+    // Camera — positioned later when project is known. Far plane sized to
+    // comfortably contain a building-scale scene (tens of metres).
     const camera = new THREE.PerspectiveCamera(
       45,
       initialW / initialH,
       1,
-      10000
+      200000
     );
     camera.position.set(800, 800, 1200);
     camera.lookAt(400, 200, 0);
@@ -1471,7 +2061,7 @@ export function Panel3D({
     rim.position.set(0, 400, -1500);
     scene.add(rim);
 
-    // Floor (large dark plane for context)
+    // Floors — one for each scene style. Visibility toggled per sheet.
     const floorGeo = new THREE.PlaneGeometry(8000, 8000, 1, 1);
     const floorMat = new THREE.MeshStandardMaterial({
       color: 0x171a1f,
@@ -1483,6 +2073,7 @@ export function Panel3D({
     floor.position.y = -50;
     floor.receiveShadow = true;
     scene.add(floor);
+    panelFloorRef.current = floor;
 
     // Subtle radial accent on floor under panel (fake AO)
     const accent = new THREE.Mesh(
@@ -1496,6 +2087,29 @@ export function Panel3D({
     accent.rotation.x = -Math.PI / 2;
     accent.position.y = -49.5;
     scene.add(accent);
+    panelAccentRef.current = accent;
+
+    // Building-style floor: a bright concrete-look slab. Hidden until a
+    // sheet with sceneStyle='building' becomes active.
+    const buildingFloorGeo = new THREE.PlaneGeometry(8000, 8000, 1, 1);
+    const buildingFloorMat = new THREE.MeshStandardMaterial({
+      color: 0xc9cdd2,
+      metalness: 0.0,
+      roughness: 0.85,
+    });
+    const buildingFloor = new THREE.Mesh(buildingFloorGeo, buildingFloorMat);
+    buildingFloor.rotation.x = -Math.PI / 2;
+    buildingFloor.position.y = -10;
+    buildingFloor.receiveShadow = true;
+    buildingFloor.visible = false;
+    scene.add(buildingFloor);
+    buildingFloorRef.current = buildingFloor;
+
+    // Extra ambient light used only in building mode for the brighter,
+    // daylight-interior feel seen in BIM viewers.
+    const buildingAmbient = new THREE.AmbientLight(0xffffff, 0.0);
+    scene.add(buildingAmbient);
+    buildingAmbientRef.current = buildingAmbient;
 
     // Materials cache
     materialsRef.current = buildMaterials();
@@ -1540,6 +2154,19 @@ export function Panel3D({
         disposeObject(contentRootRef.current);
         contentRootRef.current = null;
       }
+      enclosureRef.current = null;
+      symbolsGroupRef.current = null;
+      wiresGroupRef.current = null;
+      containmentGroupRef.current = null;
+      wallsGroupRef.current = null;
+      roomsGroupRef.current = null;
+      symbolMapRef.current.clear();
+      wireMapRef.current.clear();
+      containmentMapRef.current.clear();
+      wallMapRef.current.clear();
+      roomMapRef.current.clear();
+      lastFrameSigRef.current = '';
+      lastEnclosureSigRef.current = '';
 
       // Dispose scene-attached singletons
       scene.traverse((obj: THREE.Object3D) => disposeObject(obj));
@@ -1557,7 +2184,7 @@ export function Panel3D({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---- Rebuild content when project changes ----------------------------
+  // ---- Reconcile content when project changes (incremental) ------------
   useEffect(() => {
     const scene = sceneRef.current;
     const camera = cameraRef.current;
@@ -1565,80 +2192,363 @@ export function Panel3D({
     const mats = materialsRef.current;
     if (!scene || !camera || !orbit || !mats) return;
 
-    // Remove old content
-    if (contentRootRef.current) {
-      scene.remove(contentRootRef.current);
-      disposeObject(contentRootRef.current);
-      contentRootRef.current = null;
+    // Lazily create the persistent root + sub-groups on first run.
+    let root = contentRootRef.current;
+    if (!root) {
+      root = new THREE.Group();
+      contentRootRef.current = root;
+      scene.add(root);
+      const symG = new THREE.Group();
+      const wireG = new THREE.Group();
+      const contG = new THREE.Group();
+      const wallG = new THREE.Group();
+      const roomG = new THREE.Group();
+      symbolsGroupRef.current = symG;
+      wiresGroupRef.current = wireG;
+      containmentGroupRef.current = contG;
+      wallsGroupRef.current = wallG;
+      roomsGroupRef.current = roomG;
+      root.add(symG);
+      root.add(wireG);
+      root.add(contG);
+      root.add(wallG);
+      root.add(roomG);
     }
-
-    const root = new THREE.Group();
-    contentRootRef.current = root;
-    scene.add(root);
+    const symbolsGroup = symbolsGroupRef.current!;
+    const wiresGroup = wiresGroupRef.current!;
+    const containmentGroup = containmentGroupRef.current!;
+    const wallsGroup = wallsGroupRef.current!;
+    const roomsGroup = roomsGroupRef.current!;
+    const symbolMap = symbolMapRef.current;
+    const wireMap = wireMapRef.current;
+    const containmentMap = containmentMapRef.current;
+    const wallMap = wallMapRef.current;
+    const roomMap = roomMapRef.current;
 
     const { sheet, isPanel } = pickSheetForViewer(project);
     const W = sheet?.width || 600;
     const H = sheet?.height || 400;
+    const sceneStyle: 'panel' | 'building' = sheet?.sceneStyle ?? 'panel';
+    const isBuilding = sceneStyle === 'building';
+    const enclSig = `${W}x${H}|${sceneStyle}`;
 
-    // Build enclosure (always)
-    buildEnclosure(root, mats, W, H);
+    // Apply scene-style toggles: panel uses dark floor + enclosure, building
+    // uses a bright concrete floor with no panel hardware.
+    if (panelFloorRef.current) panelFloorRef.current.visible = !isBuilding;
+    if (panelAccentRef.current) panelAccentRef.current.visible = !isBuilding;
+    if (buildingFloorRef.current) buildingFloorRef.current.visible = isBuilding;
+    if (buildingAmbientRef.current) buildingAmbientRef.current.intensity = isBuilding ? 0.55 : 0.0;
+    if (skyMatRef.current) {
+      const u = skyMatRef.current.uniforms;
+      if (isBuilding) {
+        u.topColor.value.setHex(0xd9e2eb);
+        u.bottomColor.value.setHex(0x9aa1a8);
+      } else {
+        u.topColor.value.setHex(0x2a313a);
+        u.bottomColor.value.setHex(0x0d1015);
+      }
+    }
+    // Push fog way back in building mode (camera distances run 5–15 m) and
+    // tint it daylight-gray so it doesn't kill colours at range.
+    if (scene.fog && scene.fog instanceof THREE.Fog) {
+      if (isBuilding) {
+        scene.fog.color.setHex(0xc4cdd4);
+        scene.fog.near = 30000;
+        scene.fog.far = 200000;
+        scene.background = new THREE.Color(0xc4cdd4);
+      } else {
+        scene.fog.color.setHex(0x1a1d22);
+        scene.fog.near = 1500;
+        scene.fog.far = 5000;
+        scene.background = new THREE.Color(0x1a1d22);
+      }
+    }
+    // In building mode, rotate the contentRoot so the panel's X-Y plane
+    // becomes the world's X-(-Z) floor plane. Containment runs that
+    // previously stuck out toward the camera now extrude upward.
+    root.rotation.x = isBuilding ? -Math.PI / 2 : 0;
+    lastSceneStyleRef.current = sceneStyle;
 
-    // Iterate symbol entities and place 3D components
+    // (Re)build the enclosure when size or scene style changes. In building
+    // mode the enclosure is omitted entirely.
+    if (enclSig !== lastEnclosureSigRef.current) {
+      if (enclosureRef.current) {
+        root.remove(enclosureRef.current);
+        disposeObject(enclosureRef.current);
+        enclosureRef.current = null;
+      }
+      if (!isBuilding) {
+        const enc = new THREE.Group();
+        buildEnclosure(enc, mats, W, H);
+        root.add(enc);
+        enclosureRef.current = enc;
+      }
+      lastEnclosureSigRef.current = enclSig;
+    }
+
+    // Symbols: walk current entities, build/update/remove.
+    const seenSymbols = new Set<string>();
     if (sheet) {
       for (const id of sheet.entityOrder) {
         const e: Entity | undefined = sheet.entities[id];
-        if (!e) continue;
-        if (e.visible === false) continue;
-        if (e.kind !== 'symbol') continue;
+        if (!e || e.visible === false || e.kind !== 'symbol') continue;
         const sym = e as SymbolEntity;
         const cat = categoryFor(sym);
+        // Signature controls when the underlying geometry must be rebuilt.
+        // Position/rotation/scale don't change geometry — applied directly.
+        const sig = [
+          isPanel ? cat : 'wf',
+          sym.symbolId,
+          sym.tag ?? '',
+          sym.attributes?.color ?? '',
+          sym.mirror ? '1' : '0',
+        ].join('|');
 
-        let g: THREE.Group;
-        if (!isPanel) {
-          g = buildWireframePlaceholder(mats);
-        } else {
-          g = buildComponentForCategory(cat, mats, sym);
-        }
-        // Position: CAD y is screen-down; we flip to make y go up.
-        g.position.set(sym.position.x, H - sym.position.y, 0);
-        if (sym.rotation) g.rotation.z = sym.rotation;
-        if (sym.scale && sym.scale !== 1) g.scale.setScalar(sym.scale);
-        if (sym.mirror) g.scale.x *= -1;
-        root.add(g);
-      }
-
-      // Build wires (only meaningful in panel mode)
-      if (isPanel) {
-        const wires: WireEntity[] = [];
-        for (const id of sheet.entityOrder) {
-          const e = sheet.entities[id];
-          if (e && e.kind === 'wire' && e.visible !== false) {
-            wires.push(e as WireEntity);
+        let entry = symbolMap.get(id);
+        if (!entry || entry.sig !== sig) {
+          if (entry) {
+            symbolsGroup.remove(entry.group);
+            disposeObject(entry.group);
           }
+          const g = isPanel
+            ? buildComponentForCategory(cat, mats, sym)
+            : buildWireframePlaceholder(mats);
+          symbolsGroup.add(g);
+          entry = { group: g, sig };
+          symbolMap.set(id, entry);
         }
-        if (wires.length > 0) buildWires(root, wires, H);
+
+        const g = entry.group;
+        g.position.set(sym.position.x, H - sym.position.y, 0);
+        g.rotation.z = sym.rotation || 0;
+        const s = sym.scale && sym.scale !== 1 ? sym.scale : 1;
+        g.scale.setScalar(s);
+        if (sym.mirror) g.scale.x *= -1;
+        seenSymbols.add(id);
       }
     }
+    for (const [id, entry] of symbolMap) {
+      if (seenSymbols.has(id)) continue;
+      symbolsGroup.remove(entry.group);
+      disposeObject(entry.group);
+      symbolMap.delete(id);
+    }
 
-    // Reposition camera for a 3/4 view on the panel
-    const targetX = W / 2;
-    const targetY = H / 2;
-    const targetZ = 50;
-    orbit.state.target.set(targetX, targetY, targetZ);
-    // Compute a 3/4 view roughly at (W*0.7, H*0.7, 600) relative to back panel
-    const camPos = new THREE.Vector3(W * 1.0, H * 1.1, Math.max(W, H) * 1.2);
-    camera.position.copy(camPos);
-    const offset = new THREE.Vector3().subVectors(
-      camera.position,
-      orbit.state.target
-    );
-    orbit.state.distance = offset.length();
-    orbit.state.polar = Math.acos(
-      Math.max(-1, Math.min(1, offset.y / orbit.state.distance))
-    );
-    orbit.state.azimuth = Math.atan2(offset.x, offset.z);
-    orbit.state.apply(camera);
+    // Wires: same diff pattern. Geometry depends on point list, so the
+    // signature includes the JSON of points + style.
+    const seenWires = new Set<string>();
+    if (sheet && isPanel) {
+      for (const id of sheet.entityOrder) {
+        const e = sheet.entities[id];
+        if (!e || e.visible === false || e.kind !== 'wire') continue;
+        const w = e as WireEntity;
+        const sig = [
+          JSON.stringify(w.points),
+          w.wireType ?? '',
+          w.color ?? '',
+          String(H),
+        ].join('|');
+        let entry = wireMap.get(id);
+        if (!entry || entry.sig !== sig) {
+          if (entry) {
+            wiresGroup.remove(entry.mesh);
+            disposeObject(entry.mesh);
+          }
+          const mesh = buildWireMesh(w, H);
+          if (!mesh) continue;
+          wiresGroup.add(mesh);
+          entry = { mesh, sig };
+          wireMap.set(id, entry);
+        }
+        seenWires.add(id);
+      }
+    }
+    for (const [id, entry] of wireMap) {
+      if (seenWires.has(id)) continue;
+      wiresGroup.remove(entry.mesh);
+      disposeObject(entry.mesh);
+      wireMap.delete(id);
+    }
+
+    // Containment runs (trunking / basket / tray / conduit). Geometry is
+    // built per-segment, so any change to points/dims/type forces rebuild.
+    const seenContainment = new Set<string>();
+    if (sheet) {
+      for (const id of sheet.entityOrder) {
+        const e = sheet.entities[id];
+        if (!e || e.visible === false || e.kind !== 'containment') continue;
+        const c = e as ContainmentEntity;
+        const baseZ = isBuilding
+          ? BUILDING_ELEVATION[c.containmentType] ?? 2200
+          : 30;
+        const sig = [
+          c.containmentType,
+          JSON.stringify(c.points),
+          String(c.width ?? ''),
+          String(c.height ?? ''),
+          String(c.color ?? ''),
+          String(H),
+          String(baseZ),
+        ].join('|');
+        let entry = containmentMap.get(id);
+        if (!entry || entry.sig !== sig) {
+          if (entry) {
+            containmentGroup.remove(entry.group);
+            disposeObject(entry.group);
+          }
+          const grp = buildContainmentGroup(c, H, mats, baseZ);
+          if (!grp) continue;
+          containmentGroup.add(grp);
+          entry = { group: grp, sig };
+          containmentMap.set(id, entry);
+        }
+        seenContainment.add(id);
+      }
+    }
+    for (const [id, entry] of containmentMap) {
+      if (seenContainment.has(id)) continue;
+      containmentGroup.remove(entry.group);
+      disposeObject(entry.group);
+      containmentMap.delete(id);
+    }
+
+    // Walls and rooms — only meaningful for floor-plan (building) sheets.
+    // In panel mode we still want any previously-built meshes torn down so
+    // toggling sceneStyle doesn't leave them orbiting the panel.
+    if (isBuilding) {
+      // Collect containment run info for wall cutout detection.
+      const containmentRuns: ContainmentRunInfo[] = [];
+      if (sheet) {
+        for (const id of sheet.entityOrder) {
+          const e = sheet.entities[id];
+          if (!e || e.visible === false || e.kind !== 'containment') continue;
+          const c = e as ContainmentEntity;
+          const cBaseZ = BUILDING_ELEVATION[c.containmentType] ?? 2200;
+          containmentRuns.push({
+            points: c.points,
+            containmentType: c.containmentType,
+            width: c.width ?? 50,
+            height: c.containmentType === 'conduit'
+              ? (c.width ?? 50) : (c.height ?? 50),
+            baseZ: cBaseZ,
+          });
+        }
+      }
+      const contRunSig = containmentRuns.map(r =>
+        `${r.containmentType}:${JSON.stringify(r.points)}:${r.width}:${r.height}:${r.baseZ}`
+      ).join(';;');
+
+      const seenWalls = new Set<string>();
+      if (sheet) {
+        for (const id of sheet.entityOrder) {
+          const e = sheet.entities[id];
+          if (!e || e.visible === false || e.kind !== 'wall') continue;
+          const wEnt = e as WallEntity;
+          const sig = [
+            JSON.stringify(wEnt.points),
+            String(wEnt.thickness ?? ''),
+            String(wEnt.height ?? ''),
+            String(H),
+            contRunSig,
+          ].join('|');
+          let entry = wallMap.get(id);
+          if (!entry || entry.sig !== sig) {
+            if (entry) {
+              wallsGroup.remove(entry.group);
+              disposeObject(entry.group);
+            }
+            const grp = buildWallGroup(wEnt, H, mats, containmentRuns);
+            if (!grp) continue;
+            wallsGroup.add(grp);
+            entry = { group: grp, sig };
+            wallMap.set(id, entry);
+          }
+          seenWalls.add(id);
+        }
+      }
+      for (const [id, entry] of wallMap) {
+        if (seenWalls.has(id)) continue;
+        wallsGroup.remove(entry.group);
+        disposeObject(entry.group);
+        wallMap.delete(id);
+      }
+
+      const seenRooms = new Set<string>();
+      if (sheet) {
+        for (const id of sheet.entityOrder) {
+          const e = sheet.entities[id];
+          if (!e || e.visible === false || e.kind !== 'room') continue;
+          const rEnt = e as RoomEntity;
+          const sig = [
+            JSON.stringify(rEnt.a),
+            JSON.stringify(rEnt.b),
+            String(rEnt.floorColor ?? ''),
+            String(H),
+          ].join('|');
+          let entry = roomMap.get(id);
+          if (!entry || entry.sig !== sig) {
+            if (entry) {
+              roomsGroup.remove(entry.group);
+              disposeObject(entry.group);
+            }
+            const grp = buildRoomGroup(rEnt, H, mats);
+            if (!grp) continue;
+            roomsGroup.add(grp);
+            entry = { group: grp, sig };
+            roomMap.set(id, entry);
+          }
+          seenRooms.add(id);
+        }
+      }
+      for (const [id, entry] of roomMap) {
+        if (seenRooms.has(id)) continue;
+        roomsGroup.remove(entry.group);
+        disposeObject(entry.group);
+        roomMap.delete(id);
+      }
+    } else {
+      // Panel mode: tear down any leftover wall/room meshes so a sheet
+      // switch doesn't leave architectural geometry next to the enclosure.
+      for (const [, entry] of wallMap) {
+        wallsGroup.remove(entry.group);
+        disposeObject(entry.group);
+      }
+      wallMap.clear();
+      for (const [, entry] of roomMap) {
+        roomsGroup.remove(entry.group);
+        disposeObject(entry.group);
+      }
+      roomMap.clear();
+    }
+
+    sizeRef.current = { w: W, h: H };
+    applyDoorMode(enclosureRef.current, doorMode);
+
+    // Only reframe the camera when the panel sheet itself changes (or its
+    // size or scene style changes). Don't snap the camera back on every
+    // entity edit.
+    const frameSig = `${sheet?.id ?? ''}|${enclSig}`;
+    if (frameSig !== lastFrameSigRef.current) {
+      applyViewPreset(viewPreset, W, H, camera, orbit.state, sceneStyle);
+      lastFrameSigRef.current = frameSig;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project]);
+
+  // ---- React to door-mode prop without rebuilding the scene ------------
+  useEffect(() => {
+    applyDoorMode(contentRootRef.current, doorMode);
+  }, [doorMode]);
+
+  // ---- React to view-preset requests (bumped via viewKey) --------------
+  useEffect(() => {
+    const camera = cameraRef.current;
+    const orbit = orbitRef.current;
+    if (!camera || !orbit) return;
+    const { w, h } = sizeRef.current;
+    applyViewPreset(viewPreset, w, h, camera, orbit.state, lastSceneStyleRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewKey]);
 
   const style: React.CSSProperties = {
     width: width ? `${width}px` : '100%',

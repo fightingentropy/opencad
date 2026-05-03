@@ -129,8 +129,11 @@ export const entityBounds = (e: Entity): Bounds => {
     case 'polyline':
     case 'wire':
     case 'bus':
+    case 'containment':
+    case 'wall':
       return boundsOf(e.points);
     case 'rectangle':
+    case 'room':
       return boundsOf([e.a, e.b]);
     case 'circle':
       return {

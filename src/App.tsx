@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useStore } from './state/store';
 import { CadCanvas } from './canvas/CadCanvas';
 import { MenuBar } from './ui/MenuBar';
@@ -11,6 +11,7 @@ import { BomModal } from './ui/BomModal';
 import { AboutModal } from './ui/AboutModal';
 import { Panel3DContainer } from './three/Panel3DContainer';
 import { createSampleProject } from './sample';
+import { loadStoredProject, saveStoredProject } from './io/persist';
 
 const STORED_3D_WIDTH_KEY = 'opencad.panel3dWidth';
 const MOBILE_BREAKPOINT = 900;
@@ -32,6 +33,7 @@ export function App() {
   );
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
+  const saveTimerRef = useRef<number | undefined>(undefined);
 
   // Track viewport size for mobile breakpoint
   useEffect(() => {
@@ -57,13 +59,56 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile]);
 
-  // Load sample project on first mount so the app demos immediately
+  // Bootstrap: prefer the autosaved project from localStorage; fall back to
+  // the demo sample so a first-time visitor still sees something.
   useEffect(() => {
     if (!bootstrapped) {
-      setProject(createSampleProject());
+      const stored = loadStoredProject();
+      setProject(stored ?? createSampleProject());
       setBootstrapped(true);
     }
   }, [bootstrapped, setProject]);
+
+  // Autosave: persist the project to localStorage with a short debounce so
+  // every keystroke doesn't hit storage. Skip the very first render before
+  // the bootstrap project is installed. If the browser refuses (quota), we
+  // surface a status message so the user knows autosave is paused.
+  useEffect(() => {
+    if (!bootstrapped) return;
+    const unsub = useStore.subscribe((s, prev) => {
+      if (s.project === prev.project) return;
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = window.setTimeout(() => {
+        const result = saveStoredProject(useStore.getState().project);
+        if (!result.ok && result.reason === 'quota') {
+          useStore.getState().setStatus('Autosave paused: browser storage full. Use File → Save to download a copy.');
+        }
+      }, 400);
+    });
+    return () => {
+      unsub();
+      window.clearTimeout(saveTimerRef.current);
+    };
+  }, [bootstrapped]);
+
+  // View-history recording: any settled viewport change (i.e. one that
+  // hasn't been followed by another change in 350ms) gets pushed onto the
+  // viewport history stack. Navigation via viewBack/viewForward sets the
+  // viewport to a value already on the stack, so recordView no-ops in that
+  // case (it deduplicates against the current stack entry).
+  useEffect(() => {
+    if (!bootstrapped) return;
+    let timer: number | undefined;
+    const unsub = useStore.subscribe((s, prev) => {
+      if (s.editor.viewport === prev.editor.viewport) return;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => useStore.getState().recordView(), 350);
+    });
+    return () => {
+      unsub();
+      window.clearTimeout(timer);
+    };
+  }, [bootstrapped]);
 
   // Global F-key shortcuts that don't fit in the canvas
   useEffect(() => {

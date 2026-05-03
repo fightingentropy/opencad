@@ -1,6 +1,22 @@
-import type { Vec2, Entity, ToolId, EntityId } from '../types';
+import type { Vec2, Entity, ToolId, EntityId, ContainmentType } from '../types';
 import { newEntityId } from '../state/store';
 import { orthoConstrain } from '../lib/math';
+
+// Default cross-section dimensions per containment type (mm).
+// width × height for rectangular sections; conduit uses width as diameter.
+export const CONTAINMENT_DEFAULTS: Record<
+  ContainmentType,
+  { width: number; height: number }
+> = {
+  trunking: { width: 100, height: 75 },
+  basket: { width: 100, height: 50 },
+  tray: { width: 150, height: 50 },
+  conduit: { width: 25, height: 25 },
+};
+
+const CONTAINMENT_TOOLS: ToolId[] = ['trunking', 'basket', 'tray', 'conduit'];
+const isContainmentTool = (t: ToolId): t is ContainmentType =>
+  (CONTAINMENT_TOOLS as string[]).includes(t);
 
 export type DraftPoints = Vec2[];
 
@@ -133,6 +149,44 @@ export const onToolClick = (tool: ToolId, ctx: ToolContext): ToolResult => {
     case 'measure':
       if (ctx.draft.length === 0) return { committed: [], newDraft: [cursor], status: 'Measure: pick second point' };
       return { committed: [], newDraft: null };
+    case 'trunking':
+    case 'basket':
+    case 'tray':
+    case 'conduit': {
+      const label = tool[0].toUpperCase() + tool.slice(1);
+      if (ctx.draft.length === 0)
+        return { committed: [], newDraft: [cursor], status: `${label}: pick next vertex` };
+      return {
+        committed: [],
+        newDraft: [...ctx.draft, cursor],
+        status: `${label}: pick next vertex (Enter/right-click to finish)`,
+      };
+    }
+    case 'wall':
+      if (ctx.draft.length === 0)
+        return { committed: [], newDraft: [cursor], status: 'Wall: pick next vertex' };
+      return {
+        committed: [],
+        newDraft: [...ctx.draft, cursor],
+        status: 'Wall: pick next vertex (Enter/right-click to finish)',
+      };
+    case 'room':
+      if (ctx.draft.length === 0)
+        return { committed: [], newDraft: [cursor], status: 'Room: pick second corner' };
+      return {
+        committed: [
+          {
+            id: newEntityId(),
+            kind: 'room',
+            layerId: ctx.layerId,
+            visible: true,
+            locked: false,
+            a: ctx.draft[0],
+            b: cursor,
+          },
+        ],
+        newDraft: null,
+      };
     case 'symbol':
       if (!ctx.pendingSymbol) return { committed: [], newDraft: null };
       return {
@@ -210,7 +264,44 @@ export const onToolCommit = (tool: ToolId, ctx: ToolContext): ToolResult => {
         ],
         newDraft: null,
       };
+    case 'wall':
+      if (ctx.draft.length < 2) return { committed: [], newDraft: null };
+      return {
+        committed: [
+          {
+            id: newEntityId(),
+            kind: 'wall',
+            layerId: ctx.layerId,
+            visible: true,
+            locked: false,
+            points: ctx.draft.slice(),
+            thickness: 200,
+            height: 3000,
+          },
+        ],
+        newDraft: null,
+      };
     default:
+      if (isContainmentTool(tool)) {
+        if (ctx.draft.length < 2) return { committed: [], newDraft: null };
+        const defaults = CONTAINMENT_DEFAULTS[tool];
+        return {
+          committed: [
+            {
+              id: newEntityId(),
+              kind: 'containment',
+              containmentType: tool,
+              layerId: ctx.layerId,
+              visible: true,
+              locked: false,
+              points: ctx.draft.slice(),
+              width: defaults.width,
+              height: defaults.height,
+            },
+          ],
+          newDraft: null,
+        };
+      }
       return { committed: [], newDraft: null };
   }
 };
