@@ -9,8 +9,43 @@ import { getSymbol } from '../symbols';
 import { fitViewportToSheet } from '../lib/fit';
 import { computeOrthogonalRoute } from '../lib/autoroute';
 import { newEntityId } from '../state/store';
-import type { Vec2, Entity, ToolId } from '../types';
+import type { Vec2, Entity, ToolId, PenetrationSeal } from '../types';
 import { exportSheetPDF } from '../io/pdf';
+import {
+  autoPlaceFittingsForContainment,
+  autoPlaceSupportsForContainment,
+  autoDetectPenetrationsForContainment,
+} from '../lib/auto-features';
+
+// After committing one or more containments, derive their fittings,
+// supports, and fire-stop penetrations and dispatch them as a single
+// store transaction. Anything else (lines, walls, etc.) is ignored.
+const applyAutoFeaturesForCommitted = (committed: Entity[]): void => {
+  const containments = committed.filter((e) => e.kind === 'containment');
+  if (containments.length === 0) return;
+  const state = useStore.getState();
+  const proj = state.project;
+  const sheetId = proj.activeSheetId;
+  const newEntities: Entity[] = [];
+  let newSeals: Record<string, PenetrationSeal> = {};
+  for (const c of containments) {
+    newEntities.push(...autoPlaceFittingsForContainment(proj, sheetId, c.id));
+    newEntities.push(...autoPlaceSupportsForContainment(proj, sheetId, c.id));
+    const result = autoDetectPenetrationsForContainment(proj, sheetId, c.id);
+    newEntities.push(...result.penetrations);
+    newSeals = { ...newSeals, ...result.seals };
+  }
+  if (newEntities.length > 0) state.addEntities(newEntities);
+  if (Object.keys(newSeals).length > 0) {
+    useStore.setState((s) => ({
+      project: {
+        ...s.project,
+        penetrationSeals: { ...(s.project.penetrationSeals ?? {}), ...newSeals },
+        modified: Date.now(),
+      },
+    }));
+  }
+};
 
 export function CadCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -275,7 +310,10 @@ export function CadCanvas() {
           ortho: editor.ortho,
           pendingSymbol: editor.pendingSymbol,
         });
-        if (result.committed.length) addEntities(result.committed);
+        if (result.committed.length) {
+          addEntities(result.committed);
+          applyAutoFeaturesForCommitted(result.committed);
+        }
         setDrafting(null);
         autoRouteFlipRef.current = false;
         return;
@@ -400,7 +438,10 @@ export function CadCanvas() {
       ortho: editor.ortho,
       pendingSymbol: editor.pendingSymbol,
     });
-    if (result.committed.length) addEntities(result.committed);
+    if (result.committed.length) {
+      addEntities(result.committed);
+      applyAutoFeaturesForCommitted(result.committed);
+    }
     if (result.newDraft) {
       setDrafting({ tool: editor.tool, points: result.newDraft });
     } else {
@@ -658,7 +699,10 @@ export function CadCanvas() {
             ortho: ed.ortho,
             pendingSymbol: ed.pendingSymbol,
           });
-          if (result.committed.length) state.addEntities(result.committed);
+          if (result.committed.length) {
+            state.addEntities(result.committed);
+            applyAutoFeaturesForCommitted(result.committed);
+          }
           state.setDrafting(null);
         }
         return;
