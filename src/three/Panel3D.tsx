@@ -2228,7 +2228,9 @@ export function Panel3D({
     const { sheet, isPanel } = pickSheetForViewer(project);
     const W = sheet?.width || 600;
     const H = sheet?.height || 400;
-    const sceneStyle: 'panel' | 'building' = sheet?.sceneStyle ?? 'panel';
+    // 'site' (multi-building) is rendered the same way as 'building' for now
+    const rawStyle = sheet?.sceneStyle ?? 'panel';
+    const sceneStyle: 'panel' | 'building' = rawStyle === 'panel' ? 'panel' : 'building';
     const isBuilding = sceneStyle === 'building';
     const enclSig = `${W}x${H}|${sceneStyle}`;
 
