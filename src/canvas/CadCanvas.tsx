@@ -8,6 +8,7 @@ import { onToolClick, onToolCommit } from './tools';
 import { getSymbol } from '../symbols';
 import { fitViewportToSheet } from '../lib/fit';
 import type { Vec2, Entity, ToolId } from '../types';
+import { exportSheetPDF } from '../io/pdf';
 
 export function CadCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -626,6 +627,13 @@ export function CadCanvas() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
         e.preventDefault();
         state.duplicateSelection();
+        return;
+      }
+
+      // Ctrl/Cmd + Shift + P  →  Export PDF
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        exportSheetPDF(proj);
         return;
       }
 
