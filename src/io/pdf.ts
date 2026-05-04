@@ -2,44 +2,72 @@ import type { Project } from '../types';
 import jsPDF from 'jspdf';
 import { exportSheetSVG } from './svg';
 
-export const exportSheetPDF = async (project: Project) => {
+/**
+ * Render an SVG string onto an offscreen canvas and return the PNG data URL.
+ * Uses a data-URI approach (more reliable across browsers than Blob URLs for
+ * SVG content) and renders at 300 DPI equivalent resolution.
+ */
+const svgToDataURL = (
+  svg: string,
+  widthMM: number,
+  heightMM: number,
+): Promise<string> => {
+  const DPI = 300;
+  const pxW = Math.round((widthMM / 25.4) * DPI);
+  const pxH = Math.round((heightMM / 25.4) * DPI);
+
+  // Encode SVG as a data URI — encodeURIComponent handles all special chars
+  const encoded = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+
+  return new Promise<string>((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = pxW;
+      canvas.height = pxH;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Could not get canvas 2D context'));
+        return;
+      }
+      // White background so the dark-themed SVG sits on a printable page
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, pxW, pxH);
+      ctx.drawImage(img, 0, 0, pxW, pxH);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => reject(new Error('Failed to load SVG into Image element'));
+    img.src = encoded;
+  });
+};
+
+/**
+ * Export the active sheet as a single-page PDF and trigger a browser download.
+ *
+ * The page size matches the sheet dimensions (mm) with the correct orientation.
+ * The drawing is rasterised at 300 DPI so it looks crisp when printed.
+ */
+export const exportSheetPDF = async (project: Project): Promise<void> => {
   const sheet = project.sheets[project.activeSheetId];
   const orientation = sheet.width > sheet.height ? 'landscape' : 'portrait';
+
   const doc = new jsPDF({
     orientation,
     unit: 'mm',
     format: [sheet.width, sheet.height],
   });
 
-  // Render the SVG to canvas, then place as image into the PDF
-  const svg = exportSheetSVG(project);
-  const blob = new Blob([svg], { type: 'image/svg+xml' });
-  const url = URL.createObjectURL(blob);
-  const img = new Image();
-  await new Promise<void>((resolve, reject) => {
-    img.onload = () => resolve();
-    img.onerror = () => reject(new Error('Failed loading SVG'));
-    img.src = url;
+  // Metadata
+  doc.setProperties({
+    title: `${project.name} — ${sheet.name}`,
+    subject: `Sheet ${sheet.number}`,
+    creator: 'OpenCAD Electrical',
   });
 
-  const dpi = 300;
-  const w = (sheet.width / 25.4) * dpi;
-  const h = (sheet.height / 25.4) * dpi;
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, w, h);
-  ctx.drawImage(img, 0, 0, w, h);
-  URL.revokeObjectURL(url);
-  const data = canvas.toDataURL('image/png');
-  doc.addImage(data, 'PNG', 0, 0, sheet.width, sheet.height);
-
-  // Add additional sheets
-  for (let i = 0; i < project.sheetOrder.length; i++) {
-    if (project.sheetOrder[i] === project.activeSheetId) continue;
-  }
+  // Render SVG → high-res PNG → embed in PDF page
+  const svg = exportSheetSVG(project);
+  const dataURL = await svgToDataURL(svg, sheet.width, sheet.height);
+  doc.addImage(dataURL, 'PNG', 0, 0, sheet.width, sheet.height);
 
   doc.save(`${project.name.replace(/\s+/g, '_')}.pdf`);
 };
