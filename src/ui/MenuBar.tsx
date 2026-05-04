@@ -104,7 +104,7 @@ export function MenuBar({ onShowBom, onShowAbout }: { onShowBom: () => void; onS
         <Divider />
         <MenuOpt label="Export SVG…" onClick={action(onExportSVG)} hint="" />
         <MenuOpt label="Export PNG…" onClick={action(onExportPNG)} hint="" />
-        <MenuOpt label="Export PDF…" onClick={action(onExportPDF)} hint="" />
+        <MenuOpt label="Export PDF…" onClick={action(onExportPDF)} hint="⌘⇧P" />
       </MenuButton>
       <MenuButton label="Edit" open={openMenu === 'edit'} onClick={click('edit')}>
         <MenuOpt label="Undo" onClick={action(undo)} hint="⌘Z" />
