@@ -15,6 +15,8 @@ import type {
   Vec2,
   Viewport,
 } from '../types';
+import type { Cable, CableId } from '../models/cable';
+import { emptyCableSchedule } from '../models/cable';
 
 const newId = () => nanoid(10);
 
@@ -354,6 +356,15 @@ interface Store {
   // Project actions
   setProject: (p: Project) => void;
   resetProject: () => void;
+  // Apply a partial patch to the current project, recording undo. Used by
+  // companion action modules (cable-actions, site-actions, ...) so they can
+  // produce a new immutable project and ship it back to the store in one go.
+  setProjectPatch: (patch: Partial<Project>) => void;
+
+  // Cable schedule
+  addCable: (cable: Cable) => void;
+  updateCable: (id: CableId, patch: Partial<Cable>) => void;
+  removeCable: (id: CableId) => void;
 
   // Sheet
   setActiveSheet: (id: SheetId) => void;
@@ -459,6 +470,73 @@ export const useStore = create<Store>((set, get) => ({
         viewHistory: initialViewHistory(ed.viewport),
       };
     }),
+
+  setProjectPatch: (patch) => {
+    const { project, past } = get();
+    set({
+      past: pushPast(past, project),
+      future: [],
+      project: { ...project, ...patch, modified: Date.now() },
+    });
+  },
+
+  addCable: (cable) => {
+    const { project, past } = get();
+    const schedule = project.cableSchedule ?? emptyCableSchedule();
+    if (schedule.cables[cable.id]) return;
+    set({
+      past: pushPast(past, project),
+      future: [],
+      project: {
+        ...project,
+        cableSchedule: {
+          cables: { ...schedule.cables, [cable.id]: cable },
+          cableOrder: [...schedule.cableOrder, cable.id],
+        },
+        modified: Date.now(),
+      },
+    });
+  },
+
+  updateCable: (id, patch) => {
+    const { project, past } = get();
+    const schedule = project.cableSchedule;
+    if (!schedule) return;
+    const existing = schedule.cables[id];
+    if (!existing) return;
+    set({
+      past: pushPast(past, project),
+      future: [],
+      project: {
+        ...project,
+        cableSchedule: {
+          ...schedule,
+          cables: { ...schedule.cables, [id]: { ...existing, ...patch } },
+        },
+        modified: Date.now(),
+      },
+    });
+  },
+
+  removeCable: (id) => {
+    const { project, past } = get();
+    const schedule = project.cableSchedule;
+    if (!schedule || !schedule.cables[id]) return;
+    const cables = { ...schedule.cables };
+    delete cables[id];
+    set({
+      past: pushPast(past, project),
+      future: [],
+      project: {
+        ...project,
+        cableSchedule: {
+          cables,
+          cableOrder: schedule.cableOrder.filter((cid) => cid !== id),
+        },
+        modified: Date.now(),
+      },
+    });
+  },
 
   setActiveSheet: (id) =>
     set((s) => ({ project: { ...s.project, activeSheetId: id, modified: Date.now() } })),
