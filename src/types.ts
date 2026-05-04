@@ -302,6 +302,16 @@ export interface Project {
 
 // ---------- Tools / Editor State ----------
 
+export type SnapKind =
+  | 'grid'
+  | 'endpoint'
+  | 'midpoint'
+  | 'intersection'
+  | 'pin'
+  | 'center'
+  | 'perpendicular'
+  | 'none';
+
 export type ToolId =
   | 'select'
   | 'pan'
@@ -333,6 +343,7 @@ export interface Viewport {
 export interface SnapSettings {
   enabled: boolean;
   grid: boolean;
+  osnap: boolean; // master toggle for all object-snap types (F3)
   endpoint: boolean;
   midpoint: boolean;
   intersection: boolean;
@@ -354,6 +365,7 @@ export interface EditorState {
   // pointer position in world coords (for ghost rendering)
   cursor: Vec2;
   cursorSnap: Vec2 | null;
+  cursorSnapKind: SnapKind;
   // ortho mode constrains drawing to 0/90
   ortho: boolean;
   // show 3D panel preview side-by-side
