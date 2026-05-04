@@ -115,7 +115,66 @@ const entityBounds = (e: Entity): Bounds | null => {
       return { minX: e.position.x, minY: e.position.y, maxX: e.position.x, maxY: e.position.y };
     case 'group':
       return null;
+    case 'fitting':
+    case 'support':
+    case 'penetration':
+    case 'level-marker':
+    case 'north-arrow':
+    case 'scale-bar':
+    case 'riser':
+      return {
+        minX: (e as any).position.x,
+        minY: (e as any).position.y,
+        maxX: (e as any).position.x,
+        maxY: (e as any).position.y,
+      };
+    case 'fire-barrier':
+    case 'leader':
+    case 'revision-cloud':
+    case 'cloud': {
+      const pts = (e as any).points as Vec2[];
+      if (!pts || pts.length === 0) return null;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const p of pts) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+      }
+      return { minX, minY, maxX, maxY };
+    }
+    case 'equipment':
+      return {
+        minX: Math.min((e as any).a.x, (e as any).b.x),
+        minY: Math.min((e as any).a.y, (e as any).b.y),
+        maxX: Math.max((e as any).a.x, (e as any).b.x),
+        maxY: Math.max((e as any).a.y, (e as any).b.y),
+      };
+    case 'section-marker':
+      return {
+        minX: Math.min((e as any).a.x, (e as any).b.x),
+        minY: Math.min((e as any).a.y, (e as any).b.y),
+        maxX: Math.max((e as any).a.x, (e as any).b.x),
+        maxY: Math.max((e as any).a.y, (e as any).b.y),
+      };
+    case 'grid-line': {
+      const ge = e as any;
+      if (ge.orientation === 'horizontal') {
+        return { minX: ge.start, minY: ge.offset, maxX: ge.end, maxY: ge.offset };
+      }
+      return { minX: ge.offset, minY: ge.start, maxX: ge.offset, maxY: ge.end };
+    }
+    case 'underlay': {
+      const u = e as any;
+      return {
+        minX: u.origin.x,
+        minY: u.origin.y,
+        maxX: u.origin.x + u.width,
+        maxY: u.origin.y + u.height,
+      };
+    }
   }
+  return null;
 };
 
 const reflectEntity = (e: Entity, axis: 'horizontal' | 'vertical', center: number): Entity => {

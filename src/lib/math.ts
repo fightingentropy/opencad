@@ -184,7 +184,59 @@ export const entityBounds = (e: Entity): Bounds => {
       };
     case 'group':
       return emptyBounds();
+    // New entity kinds — most have a `position` or `points` field
+    case 'fitting':
+    case 'support':
+    case 'level-marker':
+    case 'north-arrow':
+    case 'scale-bar':
+      return {
+        minX: (e as any).position.x - 20,
+        minY: (e as any).position.y - 20,
+        maxX: (e as any).position.x + 20,
+        maxY: (e as any).position.y + 20,
+      };
+    case 'fire-barrier':
+    case 'leader':
+    case 'revision-cloud':
+    case 'cloud':
+      return boundsOf((e as any).points);
+    case 'penetration':
+      return {
+        minX: (e as any).position.x - 30,
+        minY: (e as any).position.y - 30,
+        maxX: (e as any).position.x + 30,
+        maxY: (e as any).position.y + 30,
+      };
+    case 'equipment':
+      return boundsOf([(e as any).a, (e as any).b]);
+    case 'riser':
+      return {
+        minX: (e as any).position.x - (e as any).width / 2,
+        minY: (e as any).position.y - (e as any).height / 2,
+        maxX: (e as any).position.x + (e as any).width / 2,
+        maxY: (e as any).position.y + (e as any).height / 2,
+      };
+    case 'section-marker':
+      return boundsOf([(e as any).a, (e as any).b]);
+    case 'grid-line': {
+      const ge = e as any;
+      if (ge.orientation === 'horizontal') {
+        return { minX: ge.start, minY: ge.offset, maxX: ge.end, maxY: ge.offset };
+      }
+      return { minX: ge.offset, minY: ge.start, maxX: ge.offset, maxY: ge.end };
+    }
+    case 'underlay': {
+      const u = e as any;
+      return {
+        minX: u.origin.x,
+        minY: u.origin.y,
+        maxX: u.origin.x + u.width,
+        maxY: u.origin.y + u.height,
+      };
+    }
   }
+  return emptyBounds();
 };
 
 export const clamp = (v: number, lo: number, hi: number): number =>
