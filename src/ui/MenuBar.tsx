@@ -5,8 +5,25 @@ import { exportSheetSVG } from '../io/svg';
 import { exportSheetPNG } from '../io/png';
 import { exportSheetPDF } from '../io/pdf';
 import { autoNumberWires } from '../io/wire-numbering';
+import { StandardsProfilePicker } from './StandardsProfilePicker';
 
-export function MenuBar({ onShowBom, onShowAbout }: { onShowBom: () => void; onShowAbout: () => void }) {
+export function MenuBar({
+  onShowBom,
+  onShowAbout,
+  onShowCableSchedule,
+  onShowCompliance,
+  onShowCatalogue,
+  onShowCost,
+  onShowCrossSection,
+}: {
+  onShowBom: () => void;
+  onShowAbout: () => void;
+  onShowCableSchedule?: () => void;
+  onShowCompliance?: () => void;
+  onShowCatalogue?: () => void;
+  onShowCost?: () => void;
+  onShowCrossSection?: () => void;
+}) {
   const project = useStore((s) => s.project);
   const setProject = useStore((s) => s.setProject);
   const resetProject = useStore((s) => s.resetProject);
@@ -127,6 +144,18 @@ export function MenuBar({ onShowBom, onShowAbout }: { onShowBom: () => void; onS
       <MenuButton label="Tools" open={openMenu === 'tools'} onClick={click('tools')}>
         <MenuOpt label="Auto-Number Wires" onClick={action(onAutoNumber)} hint="" />
         <MenuOpt label="Bill of Materials…" onClick={action(onShowBom)} hint="" />
+        <Divider />
+        {onShowCableSchedule && <MenuOpt label="Cable Schedule…" onClick={action(onShowCableSchedule)} hint="" />}
+        {onShowCompliance && <MenuOpt label="Compliance Dashboard…" onClick={action(onShowCompliance)} hint="" />}
+        {onShowCatalogue && <MenuOpt label="Catalogue Browser…" onClick={action(onShowCatalogue)} hint="" />}
+        {onShowCrossSection && <MenuOpt label="Edit Cross Section…" onClick={action(onShowCrossSection)} hint="" />}
+        <Divider />
+        {onShowCost && <MenuOpt label="Cost Estimate…" onClick={action(onShowCost)} hint="" />}
+      </MenuButton>
+      <MenuButton label="Settings" open={openMenu === 'settings'} onClick={click('settings')}>
+        <div className="settings-pane" onClick={(e) => e.stopPropagation()}>
+          <StandardsProfilePicker />
+        </div>
       </MenuButton>
       <MenuButton label="Help" open={openMenu === 'help'} onClick={click('help')}>
         <MenuOpt label="About OpenCAD Electrical" onClick={action(onShowAbout)} hint="" />

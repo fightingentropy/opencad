@@ -328,6 +328,9 @@ const initialEditor = (): EditorState => ({
   viewMode: '2d',
   commandHistory: [],
   statusMessage: 'Welcome to OpenCAD Electrical',
+  phaseFilter: 'all',
+  systemFilter: 'all',
+  complianceOverlay: 'off',
 });
 
 const initialViewHistory = (v: Viewport): { stack: Viewport[]; index: number } => ({

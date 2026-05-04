@@ -84,10 +84,19 @@ export function defaultElevation(
     const ceilingPlane = ceilingVoid > 0 ? slabUnderside - ceilingVoid : slabUnderside;
 
     // High-level routing — pin to just under the structure.
-    const highLevel = type === 'ladder' || type === 'trunking' || type === 'basket'
-      || type === 'busbar' || (type === 'conduit' && CEILING_CONDUIT_SUBTYPES.has(containment.subType ?? ''));
-    if (highLevel) {
-      const offsetBelowSlab = type === 'tray' ? 600 : type === 'basket' ? 400 : 200;
+    const isHighLevelType =
+      type === 'ladder' ||
+      type === 'trunking' ||
+      type === 'basket' ||
+      type === 'tray' ||
+      type === 'busbar';
+    const isCeilingConduit =
+      type === 'conduit' &&
+      CEILING_CONDUIT_SUBTYPES.has(containment.subType ?? '');
+    if (isHighLevelType || isCeilingConduit) {
+      // Treat 'tray' separately so TS narrowing keeps it in the union.
+      const t: string = type;
+      const offsetBelowSlab = t === 'tray' ? 600 : t === 'basket' ? 400 : 200;
       const candidate = slabUnderside - offsetBelowSlab;
       // Don't go higher than the ceiling plane if there's a finished ceiling.
       z = ceilingVoid > 0 ? Math.min(candidate, ceilingPlane - 50) : candidate;

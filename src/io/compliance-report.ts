@@ -284,7 +284,7 @@ const evaluateFireStops = (
 
   for (const c of containments) {
     for (const w of walls) {
-      if (!w.fireRating || w.fireRating === 0) continue;
+      if (!w.fireRating) continue;
       const cross = containmentCrossesWall(c, w);
       if (!cross) continue;
       const seal = seals.find((s: PenetrationSeal) => {
