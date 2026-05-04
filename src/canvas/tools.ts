@@ -12,10 +12,15 @@ export const CONTAINMENT_DEFAULTS: Record<
   basket: { width: 100, height: 50 },
   tray: { width: 150, height: 50 },
   conduit: { width: 25, height: 25 },
+  ladder: { width: 300, height: 100 },
+  duct: { width: 110, height: 110 },
+  busbar: { width: 100, height: 50 },
 };
 
-const CONTAINMENT_TOOLS: ToolId[] = ['trunking', 'basket', 'tray', 'conduit'];
-const isContainmentTool = (t: ToolId): t is ContainmentType =>
+// ToolIds that map directly onto a containment placement tool. Subset of
+// ContainmentType — busbar/duct don't get a draw tool yet (placed via dialog).
+const CONTAINMENT_TOOLS: ContainmentType[] = ['trunking', 'basket', 'tray', 'conduit', 'ladder'];
+const isContainmentTool = (t: ToolId): t is Extract<ContainmentType, ToolId> =>
   (CONTAINMENT_TOOLS as string[]).includes(t);
 
 export type DraftPoints = Vec2[];

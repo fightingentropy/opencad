@@ -139,6 +139,31 @@ export const hitTestEntity = (e: Entity, p: Vec2, opts: HitOptions): boolean => 
     }
     case 'group':
       return false;
+    // New entity kinds — bounds-based hit test as a sane default.
+    case 'fitting':
+    case 'support':
+    case 'penetration':
+    case 'level-marker':
+    case 'north-arrow':
+    case 'scale-bar':
+    case 'section-marker':
+    case 'equipment':
+    case 'riser':
+    case 'grid-line':
+    case 'underlay': {
+      const b = entityBounds(e);
+      return pointInRect(p, { x: b.minX, y: b.minY }, { x: b.maxX, y: b.maxY });
+    }
+    case 'fire-barrier':
+    case 'leader':
+    case 'revision-cloud':
+    case 'cloud': {
+      const pts = (e as any).points as Vec2[];
+      for (let i = 0; i < pts.length - 1; i++) {
+        if (distToSegment(p, pts[i], pts[i + 1]) <= tol) return true;
+      }
+      return false;
+    }
   }
 };
 

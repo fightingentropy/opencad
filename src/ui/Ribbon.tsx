@@ -2,7 +2,9 @@ import React from 'react';
 import { useStore } from '../state/store';
 import type { ToolId } from '../types';
 
-const ICONS: Record<ToolId, JSX.Element> = {
+// Partial because new whole-site tools (equipment, support, ...) don't all
+// have icons yet — those tools are surfaced from menus rather than the ribbon.
+const ICONS: Partial<Record<ToolId, JSX.Element>> = {
   'select': <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3l7 17 2-7 7-2z"/></svg>,
   'pan':    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2"><path d="M5 11V6a2 2 0 0 1 4 0v3M9 9V4a2 2 0 0 1 4 0v6m0-3a2 2 0 0 1 4 0v5m0-2a2 2 0 0 1 4 0v6a8 8 0 0 1-16 0v-3l3 3"/></svg>,
   'line':   <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><line x1="4" y1="20" x2="20" y2="4"/><circle cx="4" cy="20" r="1.5" fill="currentColor"/><circle cx="20" cy="4" r="1.5" fill="currentColor"/></svg>,
