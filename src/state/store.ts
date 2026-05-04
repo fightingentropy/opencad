@@ -17,6 +17,8 @@ import type {
 } from '../types';
 import type { Cable, CableId } from '../models/cable';
 import { emptyCableSchedule } from '../models/cable';
+import type { SheetMeta } from '../models/revision';
+import { assembleDrawingNumber, nextSequenceNumber } from '../drawing/numbering';
 
 const newId = () => nanoid(10);
 
@@ -37,6 +39,83 @@ const pushPast = (past: Project[], project: Project): Project[] => {
   const next = past.length >= MAX_HISTORY ? past.slice(past.length - MAX_HISTORY + 1) : past.slice();
   next.push(cloneProject(project));
   return next;
+};
+
+// Pick the BS EN ISO 7200 paper-size letter that comfortably fits a sheet
+// of the given mm dimensions. Matches the spec's portrait/landscape sizes
+// loosely — uses the long edge (max of width / height) as the discriminator.
+const paperSizeForSheet = (
+  width: number,
+  height: number,
+): SheetMeta['paperSize'] => {
+  const long = Math.max(width, height);
+  if (long >= 800) return 'A1';
+  if (long >= 500) return 'A2';
+  return 'A3';
+};
+
+// "ZZ" is the universal volume / level placeholder per BS EN ISO 19650.
+// Floor sheets get the project floor's level number (zero-padded), other
+// sheets fall back to the placeholder so the assembled number stays valid.
+const levelCodeForSheet = (project: Project, sheet: Sheet): string => {
+  if (sheet.floorId) {
+    const floor = project.floors?.[sheet.floorId];
+    if (floor && Number.isFinite(floor.level)) {
+      const lvl = floor.level;
+      if (lvl < 0) return `B${String(Math.abs(lvl)).padStart(2, '0')}`;
+      return String(lvl).padStart(2, '0');
+    }
+  }
+  return 'ZZ';
+};
+
+// Assemble the default SheetMeta for a freshly-created sheet. The drawing
+// number is built from the project's project / originator codes plus the
+// next free sequence number for this (level, type, discipline) tuple, so
+// numbering stays unique across the project.
+const buildSheetMetaDefaults = (
+  project: Project,
+  sheet: Sheet,
+): SheetMeta => {
+  const projectCode = project.projectNumber || 'PRJ';
+  const originator = project.originatorCode || 'OPC';
+  const volume = 'ZZ';
+  const level = levelCodeForSheet(project, sheet);
+  const type = 'DR';
+  const discipline = 'E';
+  const sequenceNumber = nextSequenceNumber(
+    project,
+    discipline,
+    type,
+    volume,
+    level,
+  );
+  const paperSize = paperSizeForSheet(sheet.width, sheet.height);
+  // Floor plans default to 1:50 — small detail sheets pick a tighter scale.
+  const scale = sheet.kind === 'detail' ? '1:20' : '1:50';
+  return {
+    drawingNumber: assembleDrawingNumber({
+      projectCode,
+      originator,
+      volume,
+      level,
+      type,
+      discipline,
+      sequenceNumber,
+    }),
+    projectCode,
+    originator,
+    volume,
+    level,
+    type,
+    discipline,
+    sequenceNumber,
+    title: sheet.name,
+    scale,
+    paperSize,
+    status: 'S0',
+    revisions: [],
+  };
 };
 
 const moveEntityDeep = (e: Entity, dx: number, dy: number): Entity => {
@@ -557,7 +636,15 @@ export const useStore = create<Store>((set, get) => ({
       entities: {},
       entityOrder: [],
       background: sheet.background ?? '#0a0e14',
+      sceneStyle: sheet.sceneStyle,
+      floorId: sheet.floorId,
+      buildingId: sheet.buildingId,
+      zoneId: sheet.zoneId,
     };
+    // Populate sheet meta defaults so the title block renders out of the
+    // box. Caller-provided meta (if any) takes precedence over the auto-
+    // generated values.
+    s.meta = { ...buildSheetMetaDefaults(project, s), ...(sheet.meta ?? {}) };
     set({
       past: pushPast(past, project),
       future: [],

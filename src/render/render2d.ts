@@ -14,6 +14,7 @@ import type { SymbolDef } from '../types';
 import { transformSymbolPoint } from '../lib/hittest';
 import { entityBounds } from '../lib/math';
 import { computeOrthogonalRoute } from '../lib/autoroute';
+import { renderTitleBlock } from './title-block-render';
 
 export interface RenderOptions {
   width: number;
@@ -110,6 +111,13 @@ export const render2d = (
 
   // Pin highlights at cursor
   drawPinHighlights(ctx, sheet, editor, opts, layerVisible);
+
+  // Title block — rendered last in world coords so it sits above all
+  // entities. Skipped when the sheet has no `meta` so legacy projects
+  // don't get a half-empty box overlaid on the placeholder block.
+  if (sheet.meta) {
+    renderTitleBlock(ctx, sheet, project, v);
+  }
 
   ctx.restore();
 

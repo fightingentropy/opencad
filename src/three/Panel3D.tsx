@@ -1944,6 +1944,7 @@ export function Panel3D({
   const buildingFloorRef = useRef<THREE.Mesh | null>(null);
   const buildingAmbientRef = useRef<THREE.Light | null>(null);
   const skyMatRef = useRef<THREE.ShaderMaterial | null>(null);
+  const skyMeshRef = useRef<THREE.Mesh | null>(null);
   const lastSceneStyleRef = useRef<'panel' | 'building'>('panel');
 
   // ---- One-time scene initialization -----------------------------------
@@ -1995,6 +1996,7 @@ export function Panel3D({
     });
     const sky = new THREE.Mesh(skyGeo, skyMat);
     scene.add(sky);
+    skyMeshRef.current = sky;
     skyMatRef.current = skyMat;
 
     // Camera — positioned later when project is known. Far plane sized to
@@ -2240,15 +2242,11 @@ export function Panel3D({
     if (panelAccentRef.current) panelAccentRef.current.visible = !isBuilding;
     if (buildingFloorRef.current) buildingFloorRef.current.visible = isBuilding;
     if (buildingAmbientRef.current) buildingAmbientRef.current.intensity = isBuilding ? 0.55 : 0.0;
-    if (skyMatRef.current) {
+    if (skyMeshRef.current) skyMeshRef.current.visible = !isBuilding;
+    if (skyMatRef.current && !isBuilding) {
       const u = skyMatRef.current.uniforms;
-      if (isBuilding) {
-        u.topColor.value.setHex(0xd9e2eb);
-        u.bottomColor.value.setHex(0x9aa1a8);
-      } else {
-        u.topColor.value.setHex(0x2a313a);
-        u.bottomColor.value.setHex(0x0d1015);
-      }
+      u.topColor.value.setHex(0x2a313a);
+      u.bottomColor.value.setHex(0x0d1015);
     }
     // Push fog way back in building mode (camera distances run 5–15 m) and
     // tint it daylight-gray so it doesn't kill colours at range.

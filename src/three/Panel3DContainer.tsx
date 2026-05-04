@@ -1,6 +1,19 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, {
+  Suspense,
+  lazy,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Panel3D, type DoorMode, type ViewPreset } from './Panel3D';
 import { useStore } from '../state/store';
+
+// Lazy-import the whole-site viewer so projects that only use the panel
+// viewer don't pay the BuildingScene bundle cost up-front.
+const SiteSceneViewer = lazy(() =>
+  import('./SiteSceneViewer').then((m) => ({ default: m.SiteSceneViewer })),
+);
 
 interface Props {
   width?: number;
@@ -16,6 +29,21 @@ const PRESETS: { key: ViewPreset; label: string; title: string }[] = [
 
 const DOOR_MODES: DoorMode[] = ['open', 'closed', 'hidden'];
 
+// Decide which 3D viewer to mount. The site viewer takes over when:
+//   - the active sheet is explicitly tagged sceneStyle = 'site', OR
+//   - the project has a populated site/building/floor hierarchy and the
+//     active sheet is a floor-plan style sheet (has floorId).
+const shouldUseSiteViewer = (
+  project: ReturnType<typeof useStore.getState>['project'],
+): boolean => {
+  const active = project.sheets[project.activeSheetId];
+  if (active?.sceneStyle === 'site') return true;
+  const hasSiteHierarchy =
+    !!project.sites && Object.keys(project.sites).length > 0;
+  if (hasSiteHierarchy && active?.floorId) return true;
+  return false;
+};
+
 export function Panel3DContainer({ width = 320, fillParent = false }: Props) {
   const project = useStore((s) => s.project);
   const ref = useRef<HTMLDivElement>(null);
@@ -25,6 +53,8 @@ export function Panel3DContainer({ width = 320, fillParent = false }: Props) {
     preset: 'iso',
     key: 0,
   });
+
+  const useSite = useMemo(() => shouldUseSiteViewer(project), [project]);
 
   useEffect(() => {
     if (!ref.current) return;
@@ -53,48 +83,66 @@ export function Panel3DContainer({ width = 320, fillParent = false }: Props) {
 
   return (
     <div ref={ref} className="canvas-3d" style={containerStyle}>
-      <Panel3D
-        project={project}
-        width={size.w}
-        height={size.h}
-        doorMode={doorMode}
-        viewKey={view.key}
-        viewPreset={view.preset}
-      />
-      <div className="canvas-3d-overlay">
-        3D Panel View • drag to orbit • scroll to zoom
-      </div>
-      <div className="canvas-3d-controls">
-        <div className="group" role="group" aria-label="View presets">
-          {PRESETS.map((p) => (
-            <button
-              key={p.key}
-              type="button"
-              className={view.preset === p.key ? 'active' : ''}
-              onClick={() => applyPreset(p.key)}
-              title={p.title}
-            >
-              {p.label}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={() => applyPreset(view.preset)}
-            title="Reframe to current preset"
-          >
-            Fit
-          </button>
-        </div>
-        <div className="group" role="group" aria-label="Door">
-          <button
-            type="button"
-            onClick={cycleDoor}
-            title="Cycle door: open → closed → hidden"
-          >
-            Door: {doorMode}
-          </button>
-        </div>
-      </div>
+      {useSite ? (
+        <Suspense
+          fallback={
+            <div className="canvas-3d-overlay" style={{ padding: 12 }}>
+              Loading whole-site viewer…
+            </div>
+          }
+        >
+          <SiteSceneViewer
+            project={project}
+            width={size.w}
+            height={size.h}
+          />
+        </Suspense>
+      ) : (
+        <>
+          <Panel3D
+            project={project}
+            width={size.w}
+            height={size.h}
+            doorMode={doorMode}
+            viewKey={view.key}
+            viewPreset={view.preset}
+          />
+          <div className="canvas-3d-overlay">
+            3D Panel View • drag to orbit • scroll to zoom
+          </div>
+          <div className="canvas-3d-controls">
+            <div className="group" role="group" aria-label="View presets">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  className={view.preset === p.key ? 'active' : ''}
+                  onClick={() => applyPreset(p.key)}
+                  title={p.title}
+                >
+                  {p.label}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => applyPreset(view.preset)}
+                title="Reframe to current preset"
+              >
+                Fit
+              </button>
+            </div>
+            <div className="group" role="group" aria-label="Door">
+              <button
+                type="button"
+                onClick={cycleDoor}
+                title="Cycle door: open → closed → hidden"
+              >
+                Door: {doorMode}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
