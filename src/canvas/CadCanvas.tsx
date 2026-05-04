@@ -7,6 +7,8 @@ import { findEntityAt, findEntitiesInRect } from '../lib/hittest';
 import { onToolClick, onToolCommit } from './tools';
 import { getSymbol } from '../symbols';
 import { fitViewportToSheet } from '../lib/fit';
+import { computeOrthogonalRoute } from '../lib/autoroute';
+import { newEntityId } from '../state/store';
 import type { Vec2, Entity, ToolId } from '../types';
 
 export function CadCanvas() {
@@ -46,6 +48,11 @@ export function CadCanvas() {
   const setStatus = useStore((s) => s.setStatus);
   const setTool = useStore((s) => s.setTool);
   const setOrtho = useStore((s) => s.setOrtho);
+  const autoRoute = useStore((s) => s.autoRoute);
+
+  // Transient ref: when true, the auto-route L-shape direction is flipped
+  // (toggled by Tab while drawing a wire). Reset when the wire finishes.
+  const autoRouteFlipRef = useRef(false);
 
   const sheet = project.sheets[project.activeSheetId];
   const activeLayerId = project.activeLayerId;
@@ -104,6 +111,8 @@ export function CadCanvas() {
         height: size.h,
         dpr,
         symbolLookup: getSymbol,
+        autoRoute,
+        autoRouteFlip: autoRouteFlipRef.current,
       });
 
       if (marquee) {
@@ -131,7 +140,7 @@ export function CadCanvas() {
     return () => {
       if (raf !== null) cancelAnimationFrame(raf);
     };
-  }, [project, editor, size, dpr, marquee]);
+  }, [project, editor, size, dpr, marquee, autoRoute]);
 
   const eventToWorld = (e: { clientX: number; clientY: number }): Vec2 => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -250,6 +259,14 @@ export function CadCanvas() {
 
     if (e.button === 2) {
       if (editor.drafting && editor.drafting.points.length > 0) {
+        // For auto-route wires, right-click just cancels the draft (single
+        // start point doesn't produce a valid wire). Reset the flip ref.
+        if (editor.tool === 'wire' && autoRoute && editor.drafting.points.length === 1) {
+          setDrafting(null);
+          autoRouteFlipRef.current = false;
+          setStatus('');
+          return;
+        }
         const result = onToolCommit(editor.tool, {
           layerId: activeLayerId,
           draft: editor.drafting.points,
@@ -259,6 +276,7 @@ export function CadCanvas() {
         });
         if (result.committed.length) addEntities(result.committed);
         setDrafting(null);
+        autoRouteFlipRef.current = false;
         return;
       }
       if (editor.tool === 'select') {
@@ -327,6 +345,48 @@ export function CadCanvas() {
         world: snapped,
         layerId: activeLayerId,
       });
+      return;
+    }
+
+    // Auto-route wire mode: first click sets start, second click finalizes
+    // with the computed orthogonal route.
+    if (editor.tool === 'wire' && autoRoute) {
+      const draft = editor.drafting?.points ?? [];
+      if (draft.length === 0) {
+        // First click: set the start point
+        setDrafting({ tool: 'wire', points: [snapped] });
+        setStatus('Wire (auto): pick endpoint (Tab to flip direction)');
+        return;
+      }
+      // Second click: compute route and commit the wire
+      const start = draft[0];
+      const dx = Math.abs(snapped.x - start.x);
+      const dy = Math.abs(snapped.y - start.y);
+      const defaultHFirst = dx >= dy;
+      const horizontalFirst = autoRouteFlipRef.current ? !defaultHFirst : defaultHFirst;
+      const routePoints = computeOrthogonalRoute({
+        startX: start.x,
+        startY: start.y,
+        endX: snapped.x,
+        endY: snapped.y,
+        preferHorizontalFirst: horizontalFirst,
+      });
+      if (routePoints.length >= 2) {
+        addEntities([
+          {
+            id: newEntityId(),
+            kind: 'wire',
+            layerId: activeLayerId,
+            visible: true,
+            locked: false,
+            points: routePoints,
+          },
+        ]);
+      }
+      // Reset flip state and start a new wire from the endpoint
+      autoRouteFlipRef.current = false;
+      setDrafting({ tool: 'wire', points: [snapped] });
+      setStatus('Wire (auto): pick endpoint (Tab to flip direction)');
       return;
     }
 
@@ -567,12 +627,23 @@ export function CadCanvas() {
         return;
       }
 
+      // Tab: flip auto-route direction while drawing a wire
+      if (e.key === 'Tab' && ed.tool === 'wire' && state.autoRoute && ed.drafting && ed.drafting.points.length > 0) {
+        e.preventDefault();
+        autoRouteFlipRef.current = !autoRouteFlipRef.current;
+        state.setStatus(
+          `Wire (auto): direction flipped — ${autoRouteFlipRef.current ? 'alt' : 'default'} L-shape`
+        );
+        return;
+      }
+
       if (e.key === 'Escape') {
         state.setDrafting(null);
         state.clearSelection();
         state.setTool('select');
         state.setPendingSymbol(null);
         state.setStatus('');
+        autoRouteFlipRef.current = false;
         setTextInput(null);
         return;
       }

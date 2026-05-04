@@ -202,6 +202,8 @@ interface Store {
   clipboard: Entity[];
   // Viewport navigation history (Alt+←/Alt+→)
   viewHistory: { stack: Viewport[]; index: number };
+  // Wire auto-routing toggle
+  autoRoute: boolean;
 
   // Project actions
   setProject: (p: Project) => void;
@@ -258,6 +260,9 @@ interface Store {
   recordView: () => void;
   viewBack: () => void;
   viewForward: () => void;
+
+  // Wire auto-route
+  setAutoRoute: (on: boolean) => void;
 }
 
 const cloneProject = (p: Project): Project => {
@@ -287,6 +292,7 @@ export const useStore = create<Store>((set, get) => ({
   future: [],
   clipboard: [],
   viewHistory: initialViewHistory({ x: 216, y: 140, zoom: 2 }),
+  autoRoute: true,
 
   setProject: (p) =>
     set((s) => ({
@@ -719,6 +725,8 @@ export const useStore = create<Store>((set, get) => ({
       },
     });
   },
+
+  setAutoRoute: (on) => set({ autoRoute: on }),
 }));
 
 export const newEntityId = newId;
