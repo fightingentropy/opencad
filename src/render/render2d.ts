@@ -13,12 +13,17 @@ import { worldToScreen } from '../lib/viewport';
 import type { SymbolDef } from '../types';
 import { transformSymbolPoint } from '../lib/hittest';
 import { entityBounds } from '../lib/math';
+import { computeOrthogonalRoute } from '../lib/autoroute';
 
 export interface RenderOptions {
   width: number;
   height: number;
   dpr: number;
   symbolLookup: (id: string) => SymbolDef | undefined;
+  /** When true and the wire tool is drafting, show an auto-routed preview. */
+  autoRoute?: boolean;
+  /** When true, flip the default L-shape direction for the auto-route preview. */
+  autoRouteFlip?: boolean;
 }
 
 const SELECTION_COLOR = '#ffd84d';
@@ -965,6 +970,31 @@ const drawDrafting = (
     case 'bus': {
       if (d.tool === 'bus') ctx.lineWidth = 1.2;
       if (d.tool === 'wire') ctx.strokeStyle = '#ff7a7a';
+
+      // Auto-route wire preview: show the L-shaped orthogonal path instead
+      // of a straight line from the last draft point to the cursor.
+      if (d.tool === 'wire' && _opts.autoRoute && d.points.length === 1) {
+        const start = d.points[0];
+        const dx = Math.abs(cur.x - start.x);
+        const dy = Math.abs(cur.y - start.y);
+        const defaultHFirst = dx >= dy;
+        const horizontalFirst = _opts.autoRouteFlip ? !defaultHFirst : defaultHFirst;
+        const route = computeOrthogonalRoute({
+          startX: start.x,
+          startY: start.y,
+          endX: cur.x,
+          endY: cur.y,
+          preferHorizontalFirst: horizontalFirst,
+        });
+        ctx.setLineDash([1.5, 1]);
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(route[0].x, route[0].y);
+        for (let i = 1; i < route.length; i++) ctx.lineTo(route[i].x, route[i].y);
+        ctx.stroke();
+        break;
+      }
+
       ctx.beginPath();
       ctx.moveTo(d.points[0].x, d.points[0].y);
       for (let i = 1; i < d.points.length; i++) ctx.lineTo(d.points[i].x, d.points[i].y);
