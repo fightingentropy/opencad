@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { nanoid } from 'nanoid';
 import type {
+  Bounds,
   Project,
   EditorState,
   Entity,
@@ -56,6 +57,84 @@ const entityCentroid = (e: Entity): Vec2 | null => {
     return { x: sx / anyE.points.length, y: sy / anyE.points.length };
   }
   return null;
+};
+
+const entityBounds = (e: Entity): Bounds | null => {
+  switch (e.kind) {
+    case 'line':
+    case 'rectangle':
+    case 'dimension':
+    case 'room':
+      return {
+        minX: Math.min(e.a.x, e.b.x),
+        minY: Math.min(e.a.y, e.b.y),
+        maxX: Math.max(e.a.x, e.b.x),
+        maxY: Math.max(e.a.y, e.b.y),
+      };
+    case 'circle':
+      return {
+        minX: e.center.x - e.radius,
+        minY: e.center.y - e.radius,
+        maxX: e.center.x + e.radius,
+        maxY: e.center.y + e.radius,
+      };
+    case 'arc':
+      return {
+        minX: e.center.x - e.radius,
+        minY: e.center.y - e.radius,
+        maxX: e.center.x + e.radius,
+        maxY: e.center.y + e.radius,
+      };
+    case 'ellipse':
+      return {
+        minX: e.center.x - e.rx,
+        minY: e.center.y - e.ry,
+        maxX: e.center.x + e.rx,
+        maxY: e.center.y + e.ry,
+      };
+    case 'polyline':
+    case 'wire':
+    case 'bus':
+    case 'containment':
+    case 'wall': {
+      if (e.points.length === 0) return null;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const p of e.points) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+      }
+      return { minX, minY, maxX, maxY };
+    }
+    case 'text':
+    case 'wire-label':
+      return { minX: e.position.x, minY: e.position.y, maxX: e.position.x, maxY: e.position.y };
+    case 'symbol':
+      return { minX: e.position.x, minY: e.position.y, maxX: e.position.x, maxY: e.position.y };
+    case 'group':
+      return null;
+  }
+};
+
+const reflectEntity = (e: Entity, axis: 'horizontal' | 'vertical', center: number): Entity => {
+  const cp: any = structuredClone(e);
+  if (axis === 'horizontal') {
+    const rx = (v: number) => 2 * center - v;
+    if (cp.a) cp.a = { ...cp.a, x: rx(cp.a.x) };
+    if (cp.b) cp.b = { ...cp.b, x: rx(cp.b.x) };
+    if (cp.center) cp.center = { ...cp.center, x: rx(cp.center.x) };
+    if (cp.position) cp.position = { ...cp.position, x: rx(cp.position.x) };
+    if (cp.points) cp.points = cp.points.map((p: Vec2) => ({ ...p, x: rx(p.x) }));
+  } else {
+    const ry = (v: number) => 2 * center - v;
+    if (cp.a) cp.a = { ...cp.a, y: ry(cp.a.y) };
+    if (cp.b) cp.b = { ...cp.b, y: ry(cp.b.y) };
+    if (cp.center) cp.center = { ...cp.center, y: ry(cp.center.y) };
+    if (cp.position) cp.position = { ...cp.position, y: ry(cp.position.y) };
+    if (cp.points) cp.points = cp.points.map((p: Vec2) => ({ ...p, y: ry(p.y) }));
+  }
+  return cp;
 };
 
 const defaultLayers = (): { layers: Record<LayerId, Layer>; layerOrder: LayerId[]; defaultId: LayerId } => {
@@ -202,6 +281,11 @@ interface Store {
   clipboard: Entity[];
   // Viewport navigation history (Alt+←/Alt+→)
   viewHistory: { stack: Viewport[]; index: number };
+
+  // Arrange actions
+  alignEntities: (axis: 'left' | 'center-h' | 'right' | 'top' | 'center-v' | 'bottom') => void;
+  distributeEntities: (axis: 'horizontal' | 'vertical') => void;
+  flipEntities: (axis: 'horizontal' | 'vertical') => void;
 
   // Project actions
   setProject: (p: Project) => void;
@@ -716,6 +800,177 @@ export const useStore = create<Store>((set, get) => ({
         ...editor,
         viewport: { ...viewHistory.stack[nextIndex] },
         statusMessage: `View ${nextIndex + 1} / ${viewHistory.stack.length}`,
+      },
+    });
+  },
+
+  alignEntities: (axis) => {
+    const { project, past, editor } = get();
+    const sheet = project.sheets[project.activeSheetId];
+    if (!sheet) return;
+    const ids = Array.from(editor.selection);
+    if (ids.length < 2) return;
+
+    // Collect bounds for each selected entity
+    const items: { id: string; bounds: Bounds }[] = [];
+    for (const id of ids) {
+      const e = sheet.entities[id];
+      if (!e) continue;
+      const b = entityBounds(e);
+      if (b) items.push({ id, bounds: b });
+    }
+    if (items.length < 2) return;
+
+    // Compute target value
+    let target: number;
+    switch (axis) {
+      case 'left':
+        target = Math.min(...items.map((i) => i.bounds.minX));
+        break;
+      case 'right':
+        target = Math.max(...items.map((i) => i.bounds.maxX));
+        break;
+      case 'center-h':
+        target = items.reduce((s, i) => s + (i.bounds.minX + i.bounds.maxX) / 2, 0) / items.length;
+        break;
+      case 'top':
+        target = Math.max(...items.map((i) => i.bounds.maxY));
+        break;
+      case 'bottom':
+        target = Math.min(...items.map((i) => i.bounds.minY));
+        break;
+      case 'center-v':
+        target = items.reduce((s, i) => s + (i.bounds.minY + i.bounds.maxY) / 2, 0) / items.length;
+        break;
+    }
+
+    const entities = { ...sheet.entities };
+    for (const item of items) {
+      let dx = 0, dy = 0;
+      switch (axis) {
+        case 'left':
+          dx = target - item.bounds.minX;
+          break;
+        case 'right':
+          dx = target - item.bounds.maxX;
+          break;
+        case 'center-h':
+          dx = target - (item.bounds.minX + item.bounds.maxX) / 2;
+          break;
+        case 'top':
+          dy = target - item.bounds.maxY;
+          break;
+        case 'bottom':
+          dy = target - item.bounds.minY;
+          break;
+        case 'center-v':
+          dy = target - (item.bounds.minY + item.bounds.maxY) / 2;
+          break;
+      }
+      if (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001) {
+        entities[item.id] = moveEntityDeep(entities[item.id], dx, dy);
+      }
+    }
+
+    set({
+      past: pushPast(past, project),
+      future: [],
+      project: {
+        ...project,
+        sheets: { ...project.sheets, [sheet.id]: { ...sheet, entities } },
+        modified: Date.now(),
+      },
+    });
+  },
+
+  distributeEntities: (axis) => {
+    const { project, past, editor } = get();
+    const sheet = project.sheets[project.activeSheetId];
+    if (!sheet) return;
+    const ids = Array.from(editor.selection);
+    if (ids.length < 3) return;
+
+    const items: { id: string; bounds: Bounds; center: number }[] = [];
+    for (const id of ids) {
+      const e = sheet.entities[id];
+      if (!e) continue;
+      const b = entityBounds(e);
+      if (!b) continue;
+      const center = axis === 'horizontal'
+        ? (b.minX + b.maxX) / 2
+        : (b.minY + b.maxY) / 2;
+      items.push({ id, bounds: b, center });
+    }
+    if (items.length < 3) return;
+
+    // Sort by center position
+    items.sort((a, b) => a.center - b.center);
+
+    const first = items[0].center;
+    const last = items[items.length - 1].center;
+    const step = (last - first) / (items.length - 1);
+
+    const entities = { ...sheet.entities };
+    for (let i = 1; i < items.length - 1; i++) {
+      const desired = first + step * i;
+      const delta = desired - items[i].center;
+      if (Math.abs(delta) > 0.001) {
+        const dx = axis === 'horizontal' ? delta : 0;
+        const dy = axis === 'vertical' ? delta : 0;
+        entities[items[i].id] = moveEntityDeep(entities[items[i].id], dx, dy);
+      }
+    }
+
+    set({
+      past: pushPast(past, project),
+      future: [],
+      project: {
+        ...project,
+        sheets: { ...project.sheets, [sheet.id]: { ...sheet, entities } },
+        modified: Date.now(),
+      },
+    });
+  },
+
+  flipEntities: (axis) => {
+    const { project, past, editor } = get();
+    const sheet = project.sheets[project.activeSheetId];
+    if (!sheet) return;
+    const ids = Array.from(editor.selection);
+    if (ids.length < 1) return;
+
+    // Compute collective bounding box
+    let gMinX = Infinity, gMinY = Infinity, gMaxX = -Infinity, gMaxY = -Infinity;
+    const validIds: string[] = [];
+    for (const id of ids) {
+      const e = sheet.entities[id];
+      if (!e) continue;
+      const b = entityBounds(e);
+      if (!b) continue;
+      validIds.push(id);
+      if (b.minX < gMinX) gMinX = b.minX;
+      if (b.minY < gMinY) gMinY = b.minY;
+      if (b.maxX > gMaxX) gMaxX = b.maxX;
+      if (b.maxY > gMaxY) gMaxY = b.maxY;
+    }
+    if (validIds.length === 0) return;
+
+    const centerX = (gMinX + gMaxX) / 2;
+    const centerY = (gMinY + gMaxY) / 2;
+    const center = axis === 'horizontal' ? centerX : centerY;
+
+    const entities = { ...sheet.entities };
+    for (const id of validIds) {
+      entities[id] = reflectEntity(entities[id], axis, center);
+    }
+
+    set({
+      past: pushPast(past, project),
+      future: [],
+      project: {
+        ...project,
+        sheets: { ...project.sheets, [sheet.id]: { ...sheet, entities } },
+        modified: Date.now(),
       },
     });
   },
