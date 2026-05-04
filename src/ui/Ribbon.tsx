@@ -66,6 +66,8 @@ export function Ribbon() {
   const alignEntities = useStore((s) => s.alignEntities);
   const distributeEntities = useStore((s) => s.distributeEntities);
   const flipEntities = useStore((s) => s.flipEntities);
+  const autoRoute = useStore((s) => s.autoRoute);
+  const setAutoRoute = useStore((s) => s.setAutoRoute);
   const viewBack = useStore((s) => s.viewBack);
   const viewForward = useStore((s) => s.viewForward);
   const viewIndex = useStore((s) => s.viewHistory.index);
@@ -89,6 +91,20 @@ export function Ribbon() {
                 <span className="label">{t.label}</span>
               </button>
             ))}
+            {g === 'Wire' && (
+              <button
+                className={`tool-btn${autoRoute ? ' active' : ''}`}
+                onClick={() => setAutoRoute(!autoRoute)}
+                title="Auto-route wires (right-angle paths)"
+              >
+                <span className="icon">
+                  <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="4,18 4,6 20,6" />
+                  </svg>
+                </span>
+                <span className="label">Auto</span>
+              </button>
+            )}
           </div>
           <div className="ribbon-group-label">{g}</div>
         </div>
