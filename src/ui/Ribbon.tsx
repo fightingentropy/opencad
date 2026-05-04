@@ -128,6 +128,12 @@ export function Ribbon() {
             </span>
             <span className="label">Grid</span>
           </button>
+          <button className={`tool-btn${snap.osnap ? ' active' : ''}`} onClick={() => setSnap({ osnap: !snap.osnap })} title="Object Snap (F3)">
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><path d="M6.34 6.34l2.83 2.83M14.83 14.83l2.83 2.83M6.34 17.66l2.83-2.83M14.83 9.17l2.83-2.83"/><circle cx="12" cy="12" r="3"/></svg>
+            </span>
+            <span className="label">OSnap</span>
+          </button>
         </div>
         <div className="ribbon-group-label">Snap</div>
       </div>

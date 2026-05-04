@@ -9,6 +9,7 @@ import type {
   LayerId,
   Sheet,
   SheetId,
+  SnapKind,
   ToolId,
   Vec2,
   Viewport,
@@ -170,6 +171,7 @@ const initialEditor = (): EditorState => ({
   snap: {
     enabled: true,
     grid: true,
+    osnap: true,
     endpoint: true,
     midpoint: true,
     intersection: true,
@@ -181,6 +183,7 @@ const initialEditor = (): EditorState => ({
   pendingSymbol: null,
   cursor: { x: 0, y: 0 },
   cursorSnap: null,
+  cursorSnapKind: 'none' as const,
   ortho: false,
   viewMode: '2d',
   commandHistory: [],
@@ -231,7 +234,7 @@ interface Store {
   // Editor
   setTool: (t: ToolId) => void;
   setViewport: (v: Viewport) => void;
-  setCursor: (c: Vec2, snap: Vec2 | null) => void;
+  setCursor: (c: Vec2, snap: Vec2 | null, snapKind?: SnapKind) => void;
   setSelection: (ids: EntityId[]) => void;
   addToSelection: (ids: EntityId[]) => void;
   toggleInSelection: (id: EntityId) => void;
@@ -546,7 +549,7 @@ export const useStore = create<Store>((set, get) => ({
       },
     })),
   setViewport: (v) => set((s) => ({ editor: { ...s.editor, viewport: v } })),
-  setCursor: (c, snap) => set((s) => ({ editor: { ...s.editor, cursor: c, cursorSnap: snap } })),
+  setCursor: (c, snap, snapKind) => set((s) => ({ editor: { ...s.editor, cursor: c, cursorSnap: snap, cursorSnapKind: snapKind ?? 'none' } })),
   setSelection: (ids) => set((s) => ({ editor: { ...s.editor, selection: new Set(ids) } })),
   addToSelection: (ids) =>
     set((s) => {
