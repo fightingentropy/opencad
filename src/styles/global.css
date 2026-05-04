@@ -118,7 +118,7 @@ input[type=color] {
 /* App layout */
 .app {
   display: grid;
-  grid-template-rows: 32px 88px 1fr 24px;
+  grid-template-rows: 32px 40px 1fr 24px;
   grid-template-columns: 220px 1fr 280px;
   grid-template-areas:
     "menu menu menu"
@@ -188,21 +188,20 @@ input[type=color] {
 .ribbon {
   grid-area: ribbon;
   display: flex;
+  align-items: center;
   background: var(--bg-1);
   border-bottom: 1px solid var(--border);
-  padding: 6px 10px;
-  gap: 6px;
+  padding: 0 10px;
+  gap: 2px;
   overflow-x: auto;
 }
 
 .ribbon-group {
   display: flex;
-  flex-direction: column;
   align-items: center;
   border-right: 1px solid var(--border);
-  padding: 0 10px;
-  gap: 4px;
-  min-width: 80px;
+  padding: 0 6px;
+  gap: 0;
 }
 
 .ribbon-group:last-child {
@@ -210,30 +209,23 @@ input[type=color] {
 }
 
 .ribbon-group-label {
-  font-size: 10px;
-  color: var(--text-mute);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-top: auto;
+  display: none;
 }
 
 .ribbon-buttons {
   display: flex;
-  gap: 2px;
-  flex-wrap: wrap;
+  gap: 1px;
 }
 
 .tool-btn {
   display: inline-flex;
-  flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 6px 8px;
+  justify-content: center;
+  padding: 6px;
   border-radius: 4px;
   cursor: pointer;
   background: transparent;
   border: 1px solid transparent;
-  min-width: 48px;
   color: var(--text-dim);
   transition: all 0.12s;
 }
@@ -256,7 +248,7 @@ input[type=color] {
 }
 
 .tool-btn .label {
-  font-size: 10px;
+  display: none;
 }
 
 .tool-btn-small {
@@ -942,7 +934,7 @@ input[type=color] {
    ============================================================ */
 @media (max-width: 900px) {
   .app {
-    grid-template-rows: 36px 60px 1fr 22px;
+    grid-template-rows: 36px 40px 1fr 22px;
     grid-template-columns: 1fr;
     grid-template-areas:
       "menu"
@@ -970,11 +962,10 @@ input[type=color] {
   }
   .ribbon-group-label { display: none; }
   .tool-btn {
-    padding: 4px 6px;
-    min-width: 38px;
+    padding: 4px;
   }
   .tool-btn .label {
-    font-size: 9px;
+    display: none;
   }
   .tool-btn .icon svg {
     width: 18px;
@@ -985,7 +976,7 @@ input[type=color] {
   .left-panel,
   .right-panel {
     position: fixed;
-    top: 96px; /* menu + ribbon */
+    top: 76px; /* menu + ribbon */
     bottom: 22px; /* status */
     width: min(86vw, 320px);
     z-index: 40;
@@ -1008,7 +999,7 @@ input[type=color] {
   /* Backdrop when drawer open */
   .drawer-backdrop {
     position: fixed;
-    inset: 96px 0 22px 0;
+    inset: 76px 0 22px 0;
     background: rgba(0, 0, 0, 0.4);
     z-index: 35;
     backdrop-filter: blur(2px);

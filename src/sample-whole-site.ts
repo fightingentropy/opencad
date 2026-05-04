@@ -36,6 +36,8 @@ import type {
   ZoneClassification,
 } from './models/site';
 import type { PenetrationSeal, ITPItem } from './models/fire';
+import type { SheetMeta } from './models/revision';
+import { assembleDrawingNumber } from './drawing/numbering';
 
 const newId = (): string => nanoid(10);
 
@@ -862,6 +864,67 @@ export const createWholeSiteSampleProject = (): Project => {
   for (const r of [officeG, officeL1, plantG, plantD]) {
     project.sheets[r.sheet.id] = r.sheet;
     project.sheetOrder.push(r.sheet.id);
+  }
+
+  // Populate per-sheet title block metadata so the title block renders out
+  // of the box. Each floor plan gets a unique sequence number under the
+  // project / originator code, scoped by level so future drawings on the
+  // same floor pick up sequential numbers.
+  const today = Date.now();
+  type FloorMetaPlan = {
+    floorId: string;
+    levelCode: string;
+    seq: number;
+    titleSuffix: string;
+  };
+  const metaPlan: Record<string, FloorMetaPlan> = {
+    [officeG.sheet.id]: { floorId: officeGroundId, levelCode: '00', seq: 1, titleSuffix: 'Ground Floor Plan' },
+    [officeL1.sheet.id]: { floorId: officeLevel1Id, levelCode: '01', seq: 2, titleSuffix: 'Level 1 Floor Plan' },
+    [plantG.sheet.id]: { floorId: plantGroundId, levelCode: '00', seq: 3, titleSuffix: 'Plant Ground Plan' },
+    [plantD.sheet.id]: { floorId: plantDeckId, levelCode: '01', seq: 4, titleSuffix: 'Plant Deck Plan' },
+  };
+  for (const sid of Object.keys(metaPlan)) {
+    const sheet = project.sheets[sid];
+    if (!sheet) continue;
+    const plan = metaPlan[sid];
+    const meta: SheetMeta = {
+      projectCode: project.projectNumber,
+      originator: project.originatorCode,
+      volume: 'ZZ',
+      level: plan.levelCode,
+      type: 'DR',
+      discipline: 'E',
+      sequenceNumber: String(plan.seq).padStart(4, '0'),
+      title: sheet.name,
+      subtitle: plan.titleSuffix,
+      scale: '1:50',
+      paperSize: 'A1',
+      status: 'S0',
+      currentRevision: 'P01',
+      revisions: [
+        {
+          id: `rev-${sid}-1`,
+          code: 'P01',
+          status: 'S0',
+          date: today,
+          description: 'Initial issue',
+          author: project.engineer ?? 'OpenCAD Demo',
+        },
+      ],
+      drawnBy: project.engineer ?? 'OpenCAD Demo',
+      drawnDate: today,
+      designer: project.engineer ?? 'OpenCAD Demo',
+    };
+    meta.drawingNumber = assembleDrawingNumber({
+      projectCode: meta.projectCode,
+      originator: meta.originator,
+      volume: meta.volume,
+      level: meta.level,
+      type: meta.type,
+      discipline: meta.discipline,
+      sequenceNumber: meta.sequenceNumber,
+    });
+    sheet.meta = meta;
   }
 
   // ---------- Risers spanning floors ----------

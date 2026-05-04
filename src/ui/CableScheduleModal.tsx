@@ -2,8 +2,11 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../state/store';
 import { nanoid } from 'nanoid';
 import type { Cable, CableCircuitType, CableSchedule } from '../models/cable';
+import type { ContainmentEntity, EquipmentEntity, Vec2 } from '../types';
 import { CableEditDialog } from './CableEditDialog';
 import { estimateAmpacity, estimateCableLength, estimateVdrop, fmtNum } from './whole-site-helpers';
+import { buildContainmentGraph } from '../lib/containment-graph';
+import { routeCableThroughGraph } from '../lib/cable-router';
 
 type SortKey = 'reference' | 'from' | 'to' | 'systemId' | 'circuitType' | 'csa' | 'voltage';
 
@@ -135,7 +138,73 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
 
   const onAutoRoute = () => {
     if (selected.size === 0) return alert('Select cables to auto-route first');
-    alert(`Auto-route requested for ${selected.size} cable(s) — calc engine will handle this.`);
+    // Collect every containment in the project plus a tag→position map for
+    // equipment so the router can resolve `from`/`to` references.
+    const containments: ContainmentEntity[] = [];
+    const equipmentByTag = new Map<string, Vec2>();
+    const equipmentById = new Map<string, Vec2>();
+    for (const sid of project.sheetOrder) {
+      const sheet = project.sheets[sid];
+      if (!sheet) continue;
+      for (const eid of sheet.entityOrder) {
+        const e = sheet.entities[eid];
+        if (!e) continue;
+        if (e.kind === 'containment') containments.push(e as ContainmentEntity);
+        else if (e.kind === 'equipment') {
+          const eq = e as EquipmentEntity;
+          const center: Vec2 = { x: (eq.a.x + eq.b.x) / 2, y: (eq.a.y + eq.b.y) / 2 };
+          equipmentByTag.set(eq.tag, center);
+          equipmentById.set(eq.id, center);
+        }
+      }
+    }
+    if (containments.length === 0) {
+      return alert('No containment entities found — draw containment routes first.');
+    }
+    const graph = buildContainmentGraph(containments);
+    const routed: { ref: string; ok: boolean; reason?: string }[] = [];
+    const updatedCables = { ...schedule.cables };
+
+    for (const cid of selected) {
+      const cable = schedule.cables[cid];
+      if (!cable) continue;
+      const fromPos = (cable.fromEntityId && equipmentById.get(cable.fromEntityId))
+        ?? equipmentByTag.get(cable.from);
+      const toPos = (cable.toEntityId && equipmentById.get(cable.toEntityId))
+        ?? equipmentByTag.get(cable.to);
+      if (!fromPos || !toPos) {
+        routed.push({ ref: cable.reference, ok: false, reason: `Missing equipment position for ${!fromPos ? cable.from : cable.to}` });
+        continue;
+      }
+      // Generous snap tolerance — equipment is usually placed adjacent to but
+      // not exactly on a containment endpoint (e.g. a DB on the wall vs the
+      // tray running 1m below the slab). 2m covers typical drops.
+      const result = routeCableThroughGraph(graph, fromPos, toPos, cable, containments, {
+        snapTolerance: 5000,
+      });
+      if (!result.found) {
+        routed.push({ ref: cable.reference, ok: false, reason: result.warnings.join('; ') || 'No path found' });
+        continue;
+      }
+      updatedCables[cid] = {
+        ...cable,
+        route: result.path.map((c) => c.id),
+        estimatedLength: Math.round(result.length / 100) / 10, // m, 1dp
+      };
+      routed.push({ ref: cable.reference, ok: true });
+    }
+
+    updateSchedule({ cables: updatedCables, cableOrder: schedule.cableOrder });
+    const okCount = routed.filter((r) => r.ok).length;
+    const failed = routed.filter((r) => !r.ok);
+    const summary = [
+      `Auto-routed ${okCount} of ${routed.length} cables.`,
+      ...(failed.length > 0
+        ? ['', 'Failed:', ...failed.slice(0, 5).map((r) => `  ${r.ref}: ${r.reason}`)]
+        : []),
+      ...(failed.length > 5 ? [`  …and ${failed.length - 5} more`] : []),
+    ].join('\n');
+    alert(summary);
   };
 
   const toggleAll = () => {
