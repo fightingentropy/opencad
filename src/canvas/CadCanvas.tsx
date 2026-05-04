@@ -156,7 +156,7 @@ export function CadCanvas() {
       toleranceScreenPx: 12,
       symbolLookup: getSymbol,
     }, (id) => project.layers[id]?.visible ?? true);
-    setCursor(world, snap.kind === 'none' ? null : snap.point);
+    setCursor(world, snap.kind === 'none' ? null : snap.point, snap.kind);
 
     if (panning) {
       const v = editor.viewport;
@@ -626,6 +626,12 @@ export function CadCanvas() {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
         e.preventDefault();
         state.duplicateSelection();
+        return;
+      }
+
+      if (e.key === 'F3') {
+        e.preventDefault();
+        state.setSnap({ osnap: !ed.snap.osnap });
         return;
       }
 

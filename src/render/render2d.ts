@@ -24,7 +24,8 @@ export interface RenderOptions {
 const SELECTION_COLOR = '#ffd84d';
 const HOVER_COLOR = '#5cdcff';
 const PIN_COLOR = '#3ba3ff';
-const SNAP_COLOR = '#ffd84d';
+const SNAP_COLOR = '#00ff00';
+const SNAP_GRID_COLOR = '#ffd84d';
 
 export const render2d = (
   ctx: CanvasRenderingContext2D,
@@ -1110,21 +1111,106 @@ const drawSnapIndicator = (
   const w = opts.width;
   const h = opts.height;
   const sp = worldToScreen(editor.cursorSnap!, v, w, h);
+  const kind = editor.cursorSnapKind;
+
   ctx.save();
-  ctx.strokeStyle = SNAP_COLOR;
-  ctx.fillStyle = SNAP_COLOR;
-  ctx.lineWidth = 1.2;
-  // marker varies with snap kind — for now draw a square + label
-  ctx.beginPath();
-  ctx.rect(sp.x - 5, sp.y - 5, 10, 10);
-  ctx.stroke();
-  // small inner cross
-  ctx.beginPath();
-  ctx.moveTo(sp.x - 2, sp.y);
-  ctx.lineTo(sp.x + 2, sp.y);
-  ctx.moveTo(sp.x, sp.y - 2);
-  ctx.lineTo(sp.x, sp.y + 2);
-  ctx.stroke();
+  ctx.lineWidth = 1.5;
+
+  // Grid snap uses the original amber color; object snaps use green
+  const isOSnap = kind !== 'grid' && kind !== 'none';
+  const color = isOSnap ? SNAP_COLOR : SNAP_GRID_COLOR;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+
+  const sz = 5; // half-size of markers in screen pixels
+
+  switch (kind) {
+    case 'endpoint':
+      // Small square, unfilled
+      ctx.strokeRect(sp.x - sz, sp.y - sz, sz * 2, sz * 2);
+      break;
+    case 'midpoint':
+      // Small triangle pointing up
+      ctx.beginPath();
+      ctx.moveTo(sp.x, sp.y - sz);
+      ctx.lineTo(sp.x - sz, sp.y + sz);
+      ctx.lineTo(sp.x + sz, sp.y + sz);
+      ctx.closePath();
+      ctx.stroke();
+      break;
+    case 'center':
+      // Circle with crosshair
+      ctx.beginPath();
+      ctx.arc(sp.x, sp.y, sz, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(sp.x - sz * 0.6, sp.y);
+      ctx.lineTo(sp.x + sz * 0.6, sp.y);
+      ctx.moveTo(sp.x, sp.y - sz * 0.6);
+      ctx.lineTo(sp.x, sp.y + sz * 0.6);
+      ctx.stroke();
+      break;
+    case 'intersection':
+      // X mark
+      ctx.beginPath();
+      ctx.moveTo(sp.x - sz, sp.y - sz);
+      ctx.lineTo(sp.x + sz, sp.y + sz);
+      ctx.moveTo(sp.x + sz, sp.y - sz);
+      ctx.lineTo(sp.x - sz, sp.y + sz);
+      ctx.stroke();
+      break;
+    case 'pin':
+      // Diamond shape
+      ctx.beginPath();
+      ctx.moveTo(sp.x, sp.y - sz);
+      ctx.lineTo(sp.x + sz, sp.y);
+      ctx.lineTo(sp.x, sp.y + sz);
+      ctx.lineTo(sp.x - sz, sp.y);
+      ctx.closePath();
+      ctx.stroke();
+      break;
+    case 'perpendicular':
+      // Perpendicular symbol: L-shape rotated
+      ctx.beginPath();
+      ctx.moveTo(sp.x - sz, sp.y + sz);
+      ctx.lineTo(sp.x - sz, sp.y - sz);
+      ctx.lineTo(sp.x + sz, sp.y - sz);
+      ctx.stroke();
+      // Small square at the corner
+      ctx.strokeRect(sp.x - sz, sp.y - sz, sz * 0.6, sz * 0.6);
+      break;
+    case 'grid':
+    default:
+      // Small square with inner cross (original style)
+      ctx.strokeRect(sp.x - sz, sp.y - sz, sz * 2, sz * 2);
+      ctx.beginPath();
+      ctx.moveTo(sp.x - 2, sp.y);
+      ctx.lineTo(sp.x + 2, sp.y);
+      ctx.moveTo(sp.x, sp.y - 2);
+      ctx.lineTo(sp.x, sp.y + 2);
+      ctx.stroke();
+      break;
+  }
+
+  // Label the snap type for non-grid snaps
+  if (isOSnap) {
+    const labels: Record<string, string> = {
+      endpoint: 'END',
+      midpoint: 'MID',
+      center: 'CEN',
+      intersection: 'INT',
+      pin: 'PIN',
+      perpendicular: 'PER',
+    };
+    const label = labels[kind] ?? '';
+    if (label) {
+      ctx.font = '9px ui-monospace, monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(label, sp.x + sz + 3, sp.y - sz);
+    }
+  }
+
   ctx.restore();
 };
 
