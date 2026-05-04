@@ -78,15 +78,7 @@ export const generateTrapezeDetail = (
   out.push(...rod(rodLeftX, oy, channelY0));
   out.push(...rod(rodRightX, oy, channelY0));
 
-  // Ceiling fix line at top of rods.
-  out.push(
-    line(
-      { x: ox - 20, y: channelY0 + rodLength * 0 + (oy - oy) /* unused */ },
-      { x: ox - 20, y: channelY0 },
-    ),
-  );
-  // Solid ceiling line spanning the rod top.
-  const ceilY = oy + rodLength + (CHANNEL_DEPTH - CHANNEL_DEPTH); // clarity
+  // Solid ceiling line spanning the rod tops.
   out.push(
     line(
       { x: rodLeftX - 20, y: oy + rodLength },
@@ -211,9 +203,6 @@ export const generateTrapezeDetail = (
     ),
   );
 
-  // Suppress unused-var lint hint without affecting output.
-  void ceilY;
-
   return out;
 };
 
@@ -248,11 +237,8 @@ const line = (
 });
 
 // Threaded rod = two parallel vertical lines at the rod diameter.
-const rod = (cx: number, y0: number, y1: number): LineEntity => {
-  // Caller adds two — return one half so it composes; emit a single line
-  // and adjacent line via separate calls for clarity.
-  // For simplicity here we emit one line; the second is implicit.
-  return {
+const rod = (cx: number, y0: number, y1: number): LineEntity[] => [
+  {
     id: newId(),
     kind: 'line',
     layerId: LAYER_ANN,
@@ -260,8 +246,17 @@ const rod = (cx: number, y0: number, y1: number): LineEntity => {
     locked: false,
     a: { x: cx - ROD_DIAMETER / 2, y: y0 },
     b: { x: cx - ROD_DIAMETER / 2, y: y1 },
-  };
-};
+  },
+  {
+    id: newId(),
+    kind: 'line',
+    layerId: LAYER_ANN,
+    visible: true,
+    locked: false,
+    a: { x: cx + ROD_DIAMETER / 2, y: y0 },
+    b: { x: cx + ROD_DIAMETER / 2, y: y1 },
+  },
+];
 
 const label = (
   text: string,
