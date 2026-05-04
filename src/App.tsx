@@ -6,11 +6,17 @@ import { Ribbon } from './ui/Ribbon';
 import { LeftPanel } from './ui/LeftPanel';
 import { RightPanel } from './ui/RightPanel';
 import { StatusBar } from './ui/StatusBar';
-import { SheetTabs } from './ui/SheetTabs';
+import { SiteNavigator } from './ui/SiteNavigator';
 import { BomModal } from './ui/BomModal';
 import { AboutModal } from './ui/AboutModal';
+import { CableScheduleModal } from './ui/CableScheduleModal';
+import { ComplianceDashboard } from './ui/ComplianceDashboard';
+import { CatalogueBrowser } from './ui/CatalogueBrowser';
+import { CostEstimationModal } from './ui/CostEstimationModal';
+import { CrossSectionEditor } from './ui/CrossSectionEditor';
 import { Panel3DContainer } from './three/Panel3DContainer';
 import { createSampleProject } from './sample';
+import { createWholeSiteSampleProject } from './sample-whole-site';
 import { loadStoredProject, saveStoredProject } from './io/persist';
 
 const STORED_3D_WIDTH_KEY = 'opencad.panel3dWidth';
@@ -22,6 +28,11 @@ export function App() {
   const setViewMode = useStore((s) => s.setViewMode);
   const [bomOpen, setBomOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [cableScheduleOpen, setCableScheduleOpen] = useState(false);
+  const [complianceOpen, setComplianceOpen] = useState(false);
+  const [catalogueOpen, setCatalogueOpen] = useState(false);
+  const [costOpen, setCostOpen] = useState(false);
+  const [crossSectionEntityId, setCrossSectionEntityId] = useState<string | null>(null);
   const [bootstrapped, setBootstrapped] = useState(false);
   const [panel3DWidth, setPanel3DWidth] = useState<number>(() => {
     const stored = Number(localStorage.getItem(STORED_3D_WIDTH_KEY));
@@ -60,11 +71,22 @@ export function App() {
   }, [isMobile]);
 
   // Bootstrap: prefer the autosaved project from localStorage; fall back to
-  // the demo sample so a first-time visitor still sees something.
+  // the whole-site demo so a first-time visitor sees a fully-populated
+  // project. The simple sample remains as a safety net should the
+  // whole-site factory ever throw during construction.
   useEffect(() => {
     if (!bootstrapped) {
       const stored = loadStoredProject();
-      setProject(stored ?? createSampleProject());
+      let project = stored;
+      if (!project) {
+        try {
+          project = createWholeSiteSampleProject();
+        } catch (err) {
+          console.error('[opencad] whole-site sample failed, falling back', err);
+          project = createSampleProject();
+        }
+      }
+      setProject(project);
       setBootstrapped(true);
     }
   }, [bootstrapped, setProject]);
@@ -163,7 +185,23 @@ export function App() {
 
   return (
     <div className="app" style={resizing ? { cursor: 'col-resize', userSelect: 'none' } : undefined}>
-      <MenuBar onShowBom={() => setBomOpen(true)} onShowAbout={() => setAboutOpen(true)} />
+      <MenuBar
+        onShowBom={() => setBomOpen(true)}
+        onShowAbout={() => setAboutOpen(true)}
+        onShowCableSchedule={() => setCableScheduleOpen(true)}
+        onShowCompliance={() => setComplianceOpen(true)}
+        onShowCatalogue={() => setCatalogueOpen(true)}
+        onShowCost={() => setCostOpen(true)}
+        onShowCrossSection={() => {
+          const editor = useStore.getState().editor;
+          const sel = Array.from(editor.selection);
+          const project = useStore.getState().project;
+          const sheet = project.sheets[project.activeSheetId];
+          const cont = sel.find((id) => sheet?.entities[id]?.kind === 'containment');
+          if (cont) setCrossSectionEntityId(cont);
+          else alert('Select a containment entity first.');
+        }}
+      />
       <Ribbon />
       <LeftPanel open={leftOpen} />
       <div className="main">
@@ -179,7 +217,7 @@ export function App() {
           {viewMode === 'split' && !isMobile && <Panel3DContainer width={panel3DWidth} />}
           {viewMode === '3d' && <Panel3DContainer fillParent />}
         </div>
-        <SheetTabs />
+        <SiteNavigator />
       </div>
       <RightPanel open={rightOpen} />
       <StatusBar />
@@ -211,6 +249,16 @@ export function App() {
 
       {bomOpen && <BomModal onClose={() => setBomOpen(false)} />}
       {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
+      {cableScheduleOpen && <CableScheduleModal onClose={() => setCableScheduleOpen(false)} />}
+      {complianceOpen && <ComplianceDashboard onClose={() => setComplianceOpen(false)} />}
+      {catalogueOpen && <CatalogueBrowser onClose={() => setCatalogueOpen(false)} />}
+      {costOpen && <CostEstimationModal onClose={() => setCostOpen(false)} />}
+      {crossSectionEntityId && (
+        <CrossSectionEditor
+          entityId={crossSectionEntityId}
+          onClose={() => setCrossSectionEntityId(null)}
+        />
+      )}
     </div>
   );
 }
