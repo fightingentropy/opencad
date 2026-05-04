@@ -2,12 +2,38 @@ import React from 'react';
 import { useStore } from '../state/store';
 import { getSymbol } from '../symbols';
 import type { Entity } from '../types';
+import { CalculationsPanel } from './CalculationsPanel';
+import { FillVisualizationOverlay } from './FillVisualizationOverlay';
+import { PhaseFilter } from './PhaseFilter';
+import { SystemFilter } from './SystemFilter';
+import { MarkupPanel } from './MarkupPanel';
+import { RevisionHistoryPanel } from './RevisionHistoryPanel';
+import { ITPChecklistPanel } from './ITPChecklistPanel';
 
 export function RightPanel({ open = false }: { open?: boolean } = {}) {
   return (
     <div className={`right-panel${open ? ' open' : ''}`}>
       <Properties />
+      <CalculationsPanel />
+      <div className="panel-section">
+        <div className="panel-header">View Filters</div>
+        <PhaseFilter />
+        <SystemFilter />
+      </div>
+      <FillVisualizationOverlay />
       <ProjectInfo />
+    </div>
+  );
+}
+
+// Optional secondary panels — exported so callers can mount them on demand.
+// Not mounted by default to keep the right-rail compact.
+export function ReviewPanels() {
+  return (
+    <div className="right-panel">
+      <RevisionHistoryPanel />
+      <MarkupPanel />
+      <ITPChecklistPanel />
     </div>
   );
 }

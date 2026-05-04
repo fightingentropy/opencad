@@ -9,6 +9,7 @@ import { createEmptyProject, newEntityId } from './state/store';
 import { createSampleCableSchedule } from './sample-cables';
 import { DEFAULT_STANDARDS } from './models/standards';
 import { emptyCableSchedule } from './models/cable';
+import { loadDefaultCatalogues } from './data/catalogues';
 import type {
   Project,
   Entity,
@@ -350,7 +351,7 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
       { x: 600, y: 4400 },
       { w: 3200, h: 800 },
       systems.powerDistribution,
-      { current: 630, voltage: 400, ip: 'IP31' },
+      { current: 630, voltage: 400, ip: 'IP30' },
     );
     addEntity(sheet, mcc);
     equipmentList.push(mcc);
@@ -364,7 +365,7 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
       { x: 4500, y: 4500 },
       { w: 800, h: 250 },
       systems.powerDistribution,
-      { current: 200, voltage: 400, ip: 'IP31' },
+      { current: 200, voltage: 400, ip: 'IP30' },
     );
     addEntity(sheet, dbA);
     equipmentList.push(dbA);
@@ -392,7 +393,7 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
       { x: 1200, y: 5400 },
       { w: 800, h: 250 },
       systems.powerDistribution,
-      { current: 200, voltage: 400, ip: 'IP31' },
+      { current: 200, voltage: 400, ip: 'IP30' },
     );
     addEntity(sheet, dbB);
     equipmentList.push(dbB);
@@ -1129,6 +1130,7 @@ export const createWholeSiteSampleProject = (): Project => {
   project.itpItems = itp;
   project.fireCompartments = {};
   project.markups = {};
+  project.catalogues = loadDefaultCatalogues();
 
   return project;
 };
