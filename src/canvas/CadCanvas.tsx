@@ -604,6 +604,19 @@ export function CadCanvas() {
         return;
       }
 
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'h') {
+        e.preventDefault();
+        state.flipEntities('horizontal');
+        return;
+      }
+
+      // Ctrl+Shift+V for flip vertical. Must check before Ctrl+V (paste).
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'v') {
+        e.preventDefault();
+        state.flipEntities('vertical');
+        return;
+      }
+
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault();
         state.setSelection(sh.entityOrder);

@@ -62,6 +62,10 @@ export function Ribbon() {
   const redo = useStore((s) => s.redo);
   const past = useStore((s) => s.past.length);
   const future = useStore((s) => s.future.length);
+  const selectionSize = useStore((s) => s.editor.selection.size);
+  const alignEntities = useStore((s) => s.alignEntities);
+  const distributeEntities = useStore((s) => s.distributeEntities);
+  const flipEntities = useStore((s) => s.flipEntities);
   const viewBack = useStore((s) => s.viewBack);
   const viewForward = useStore((s) => s.viewForward);
   const viewIndex = useStore((s) => s.viewHistory.index);
@@ -89,6 +93,72 @@ export function Ribbon() {
           <div className="ribbon-group-label">{g}</div>
         </div>
       ))}
+
+      <div className="ribbon-group">
+        <div className="ribbon-buttons">
+          <button className="tool-btn" onClick={() => alignEntities('left')} disabled={selectionSize < 2} title="Align Left">
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><line x1="4" y1="3" x2="4" y2="21"/><rect x="7" y="6" width="10" height="4"/><rect x="7" y="14" width="6" height="4"/></svg>
+            </span>
+            <span className="label">AlnL</span>
+          </button>
+          <button className="tool-btn" onClick={() => alignEntities('center-h')} disabled={selectionSize < 2} title="Align Center Horizontal">
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="3" x2="12" y2="21" strokeDasharray="2 2"/><rect x="5" y="6" width="14" height="4"/><rect x="7" y="14" width="10" height="4"/></svg>
+            </span>
+            <span className="label">AlnCH</span>
+          </button>
+          <button className="tool-btn" onClick={() => alignEntities('right')} disabled={selectionSize < 2} title="Align Right">
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><line x1="20" y1="3" x2="20" y2="21"/><rect x="7" y="6" width="10" height="4"/><rect x="11" y="14" width="6" height="4"/></svg>
+            </span>
+            <span className="label">AlnR</span>
+          </button>
+          <button className="tool-btn" onClick={() => alignEntities('top')} disabled={selectionSize < 2} title="Align Top">
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="4" x2="21" y2="4"/><rect x="5" y="7" width="4" height="10"/><rect x="13" y="7" width="4" height="6"/></svg>
+            </span>
+            <span className="label">AlnT</span>
+          </button>
+          <button className="tool-btn" onClick={() => alignEntities('center-v')} disabled={selectionSize < 2} title="Align Center Vertical">
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="12" x2="21" y2="12" strokeDasharray="2 2"/><rect x="5" y="5" width="4" height="14"/><rect x="13" y="7" width="4" height="10"/></svg>
+            </span>
+            <span className="label">AlnCV</span>
+          </button>
+          <button className="tool-btn" onClick={() => alignEntities('bottom')} disabled={selectionSize < 2} title="Align Bottom">
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="20" x2="21" y2="20"/><rect x="5" y="7" width="4" height="10"/><rect x="13" y="11" width="4" height="6"/></svg>
+            </span>
+            <span className="label">AlnB</span>
+          </button>
+          <button className="tool-btn" onClick={() => distributeEntities('horizontal')} disabled={selectionSize < 3} title="Distribute Horizontal">
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><line x1="4" y1="3" x2="4" y2="21"/><line x1="20" y1="3" x2="20" y2="21"/><rect x="9" y="7" width="6" height="10"/></svg>
+            </span>
+            <span className="label">DstH</span>
+          </button>
+          <button className="tool-btn" onClick={() => distributeEntities('vertical')} disabled={selectionSize < 3} title="Distribute Vertical">
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="4" x2="21" y2="4"/><line x1="3" y1="20" x2="21" y2="20"/><rect x="7" y="9" width="10" height="6"/></svg>
+            </span>
+            <span className="label">DstV</span>
+          </button>
+          <button className="tool-btn" onClick={() => flipEntities('horizontal')} disabled={selectionSize < 1} title="Flip Horizontal (⌘⇧H)">
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><line x1="12" y1="3" x2="12" y2="21"/><polyline points="6,8 3,12 6,16"/><polyline points="18,8 21,12 18,16"/></svg>
+            </span>
+            <span className="label">FlipH</span>
+          </button>
+          <button className="tool-btn" onClick={() => flipEntities('vertical')} disabled={selectionSize < 1} title="Flip Vertical (⌘⇧V)">
+            <span className="icon">
+              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="12" x2="21" y2="12"/><polyline points="8,6 12,3 16,6"/><polyline points="8,18 12,21 16,18"/></svg>
+            </span>
+            <span className="label">FlipV</span>
+          </button>
+        </div>
+        <div className="ribbon-group-label">Arrange</div>
+      </div>
 
       <div className="ribbon-group">
         <div className="ribbon-buttons">
