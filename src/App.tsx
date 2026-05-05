@@ -14,6 +14,9 @@ import { ComplianceDashboard } from './ui/ComplianceDashboard';
 import { CatalogueBrowser } from './ui/CatalogueBrowser';
 import { CostEstimationModal } from './ui/CostEstimationModal';
 import { CrossSectionEditor } from './ui/CrossSectionEditor';
+import { CollaborationModal } from './ui/CollaborationModal';
+import { PresenceLayer } from './ui/PresenceLayer';
+import { onActiveChange as onCollabActiveChange } from './collab/runtime';
 import { Panel3DContainer } from './three/Panel3DContainer';
 import { createSampleProject } from './sample';
 import { createWholeSiteSampleProject } from './sample-whole-site';
@@ -34,6 +37,8 @@ export function App() {
   const [catalogueOpen, setCatalogueOpen] = useState(false);
   const [costOpen, setCostOpen] = useState(false);
   const [crossSectionEntityId, setCrossSectionEntityId] = useState<string | null>(null);
+  const [collabOpen, setCollabOpen] = useState(false);
+  const [collabActive, setCollabActiveLocal] = useState(false);
   const [bootstrapped, setBootstrapped] = useState(false);
   const [panel3DWidth, setPanel3DWidth] = useState<number>(() => {
     const stored = Number(localStorage.getItem(STORED_3D_WIDTH_KEY));
@@ -133,6 +138,23 @@ export function App() {
     };
   }, [bootstrapped]);
 
+  // Track collab active state for the PresenceLayer toggle. The
+  // runtime exposes a tiny pub/sub bridge so we can mount/unmount the
+  // overlay without re-importing the Yjs chunk on every render.
+  useEffect(() => {
+    return onCollabActiveChange(setCollabActiveLocal);
+  }, []);
+
+  // If the page was opened with a #collab=ROOM hash, auto-open the
+  // collaboration modal so the user can join with one click. The
+  // hash only triggers the modal — the user still has to confirm.
+  useEffect(() => {
+    if (!bootstrapped) return;
+    if (typeof window === 'undefined') return;
+    const hash = window.location.hash;
+    if (hash.startsWith('#collab=')) setCollabOpen(true);
+  }, [bootstrapped]);
+
   // Global F-key shortcuts that don't fit in the canvas
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -200,12 +222,17 @@ export function App() {
           if (cont) setCrossSectionEntityId(cont);
           else alert('Select a containment entity first.');
         }}
+        onShowCollaboration={() => setCollabOpen(true)}
       />
       <Ribbon />
       <LeftPanel open={leftOpen} />
       <div className="main">
-        <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
           {viewMode !== '3d' && <CadCanvas />}
+          {/* Remote-cursor + selection overlay. Positioned absolutely
+              over the canvas; pointer-events: none so it never steals
+              clicks. Only renders when a session is active. */}
+          {collabActive && viewMode !== '3d' && <PresenceLayer />}
           {viewMode === 'split' && !isMobile && (
             <div
               className="splitter"

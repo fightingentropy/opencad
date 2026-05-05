@@ -91,6 +91,26 @@ export const pointInRect = (p: Vec2, a: Vec2, b: Vec2): boolean => {
 export const rectsOverlap = (a: Bounds, b: Bounds): boolean =>
   a.maxX >= b.minX && a.minX <= b.maxX && a.maxY >= b.minY && a.minY <= b.maxY;
 
+// Fast AABB overlap check used by viewport culling. Identical semantics to
+// rectsOverlap; the alias is kept so renderer call-sites read intuitively.
+export const boundsOverlap = rectsOverlap;
+
+// Return a new bounds inflated by `factor` (1.0 = no change, 1.1 = +10% on
+// each side). Useful for viewport culling so entities partially in view
+// don't get clipped right at the edge.
+export const inflateBounds = (b: Bounds, factor: number): Bounds => {
+  const cx = (b.minX + b.maxX) / 2;
+  const cy = (b.minY + b.maxY) / 2;
+  const halfW = (b.maxX - b.minX) / 2;
+  const halfH = (b.maxY - b.minY) / 2;
+  return {
+    minX: cx - halfW * factor,
+    minY: cy - halfH * factor,
+    maxX: cx + halfW * factor,
+    maxY: cy + halfH * factor,
+  };
+};
+
 export const expandBounds = (b: Bounds, p: Vec2): Bounds => ({
   minX: Math.min(b.minX, p.x),
   minY: Math.min(b.minY, p.y),

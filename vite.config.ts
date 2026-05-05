@@ -26,6 +26,23 @@ export default defineConfig({
           if (id.includes('node_modules/react') || id.includes('node_modules/scheduler')) return 'react';
           if (id.includes('node_modules/zustand')) return 'zustand';
           if (id.includes('node_modules/nanoid')) return 'vendor-misc';
+          // Collaboration: Yjs + y-webrtc + y-indexeddb + y-protocols
+          // ride together in a deferred chunk that's only fetched when
+          // the user opens the Collaboration modal. Single-player never
+          // pays the bundle cost.
+          if (
+            id.includes('node_modules/yjs') ||
+            id.includes('node_modules/y-webrtc') ||
+            id.includes('node_modules/y-indexeddb') ||
+            id.includes('node_modules/y-protocols') ||
+            id.includes('node_modules/lib0') ||
+            id.includes('node_modules/simple-peer')
+          ) return 'collab';
+          if (id.includes('/src/collab/yjs-doc') ||
+              id.includes('/src/collab/sync') ||
+              id.includes('/src/collab/presence') ||
+              id.includes('/src/collab/session') ||
+              id.includes('/src/collab/index')) return 'collab';
           // App: pull the static-data heavyweights out of the main chunk.
           if (id.includes('/src/symbols/library')) return 'symbols-library';
           if (id.includes('/src/data/catalogues')) return 'catalogues';
