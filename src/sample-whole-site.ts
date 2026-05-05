@@ -462,17 +462,107 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
     );
     addEntity(sheet, idfg);
     equipmentList.push(idfg);
+
+    // End-of-circuit equipment items — used as routing targets for the
+    // lighting, sockets, fire alarm and emergency-lighting cables in the
+    // sample schedule. They're placed inside rooms close to the spine so
+    // the cable router has a real endpoint to terminate at.
+    const lt1 = equipment(
+      layers.panel, 'LT-OF-G-01', 'East office lighting circuit endpoint',
+      'other', { x: 5400, y: 11000 }, { w: 200, h: 200 }, systems.lighting, { ip: 'IP20' },
+    );
+    addEntity(sheet, lt1); equipmentList.push(lt1);
+
+    const lt2 = equipment(
+      layers.panel, 'LT-OF-G-02', 'West office lighting circuit endpoint',
+      'other', { x: 19400, y: 11000 }, { w: 200, h: 200 }, systems.lighting, { ip: 'IP20' },
+    );
+    addEntity(sheet, lt2); equipmentList.push(lt2);
+
+    const skRing = equipment(
+      layers.panel, 'SK-OF-G-RING', 'Office G ring final socket outlet',
+      'other', { x: 5400, y: 12500 }, { w: 200, h: 200 }, systems.powerDistribution, { ip: 'IP20' },
+    );
+    addEntity(sheet, skRing); equipmentList.push(skRing);
+
+    const fa1 = equipment(
+      layers.panel, 'FA-LOOP-1', 'Fire alarm loop 1 first detector',
+      'other', { x: 8000, y: 9000 }, { w: 200, h: 200 }, systems.fireAlarm, { ip: 'IP30' },
+    );
+    addEntity(sheet, fa1); equipmentList.push(fa1);
+
+    const em1 = equipment(
+      layers.panel, 'EM-OF-G-01', 'Emergency lighting circuit endpoint',
+      'other', { x: 16000, y: 11200 }, { w: 200, h: 200 }, systems.emergencyLighting, { ip: 'IP20' },
+    );
+    addEntity(sheet, em1); equipmentList.push(em1);
+
+    // The 11 kV/400 V supply transformer — modelled at the corner of the
+    // plant room so the incomer cable has a real source point. The MCC
+    // branch is the closest containment.
+    const tx = equipment(
+      layers.panel, 'TX-01', '11 kV/400 V package substation transformer',
+      'transformer', { x: 600, y: 800 }, { w: 1500, h: 1500 }, systems.powerDistribution,
+      { current: 1000, voltage: 400, ip: 'IP30' },
+    );
+    addEntity(sheet, tx); equipmentList.push(tx);
+  } else {
+    // Office L1 — endpoint stand-ins for lighting and ring circuits.
+    const lt1 = equipment(
+      layers.panel, 'LT-OF-1-01', 'Level 1 lighting circuit endpoint',
+      'other', { x: 5400, y: 11000 }, { w: 200, h: 200 }, systems.lighting, { ip: 'IP20' },
+    );
+    addEntity(sheet, lt1); equipmentList.push(lt1);
+
+    const skRing = equipment(
+      layers.panel, 'SK-OF-1-RING', 'Level 1 ring final socket outlet',
+      'other', { x: 19400, y: 12500 }, { w: 200, h: 200 }, systems.powerDistribution, { ip: 'IP20' },
+    );
+    addEntity(sheet, skRing); equipmentList.push(skRing);
   }
 
   // Containment routes — main spine in corridor centre
   const corridorY = 8400;
   const containmentList: ContainmentEntity[] = [];
 
+  // Branch x-coordinates — explicit so the spines pick up matching graph
+  // nodes at every drop, allowing the cable router to traverse spine→branch.
+  const brXMCC = 2200;
+  const brXDBg = 4900;
+  const brXFAP = 1000;
+  const brXIDFg = 8900;
+  const brXCR = 15100;
+  const brXDB1 = 1600;
+  const brXIDF1 = 19400;
+  const brXDropEast = 5500;
+  const brXDropWest = 19500;
+  const brXEM = 16000;
+
+  // Spine vertex sequence — must contain every branch attachment so the
+  // containment graph creates shared nodes.
+  const powerSpinePoints: Vec2[] = level === 'G'
+    ? [
+        { x: 1200, y: corridorY },
+        { x: brXMCC, y: corridorY },
+        { x: brXDBg, y: corridorY },
+        { x: brXDropEast, y: corridorY },
+        { x: brXEM, y: corridorY },
+        { x: brXDropWest, y: corridorY },
+        { x: 22800, y: corridorY },
+      ]
+    : [
+        { x: 1200, y: corridorY },
+        { x: brXDB1, y: corridorY },
+        { x: brXDropEast, y: corridorY },
+        { x: brXDropWest, y: corridorY },
+        { x: 22800, y: corridorY },
+      ];
+
   // Power trunking spine
   const trunkSpine = containment(
     layers.containment,
     'trunking',
-    [{ x: 1200, y: corridorY }, { x: 22800, y: corridorY }],
+    powerSpinePoints,
     400,
     250,
     systems.powerDistribution,
@@ -482,11 +572,26 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
   addEntity(sheet, trunkSpine);
   containmentList.push(trunkSpine);
 
-  // Lighting trunking — runs above the same corridor, smaller cross-section
+  // Lighting trunking — runs above the same corridor, smaller cross-section.
+  // Vertices placed at every lighting drop so the graph stitches them in.
+  const lightTrunkPoints: Vec2[] = level === 'G'
+    ? [
+        { x: 1200, y: corridorY + 250 },
+        { x: brXDropEast, y: corridorY + 250 },
+        { x: brXEM, y: corridorY + 250 },
+        { x: brXDropWest, y: corridorY + 250 },
+        { x: 22800, y: corridorY + 250 },
+      ]
+    : [
+        { x: 1200, y: corridorY + 250 },
+        { x: brXDropEast, y: corridorY + 250 },
+        { x: brXDropWest, y: corridorY + 250 },
+        { x: 22800, y: corridorY + 250 },
+      ];
   const lightTrunk = containment(
     layers.containment,
     'trunking',
-    [{ x: 1200, y: corridorY + 250 }, { x: 22800, y: corridorY + 250 }],
+    lightTrunkPoints,
     150,
     100,
     systems.lighting,
@@ -496,11 +601,24 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
   addEntity(sheet, lightTrunk);
   containmentList.push(lightTrunk);
 
-  // Data basket parallel to the spine
+  // Data basket parallel to the spine — vertices at every data-branch drop
+  // so the graph stitches in the IDF / CR / IDF-1 branches as shared nodes.
+  const dataBasketPoints: Vec2[] = level === 'G'
+    ? [
+        { x: 1200, y: corridorY - 250 },
+        { x: brXIDFg, y: corridorY - 250 },
+        { x: brXCR, y: corridorY - 250 },
+        { x: 22800, y: corridorY - 250 },
+      ]
+    : [
+        { x: 1200, y: corridorY - 250 },
+        { x: brXIDF1, y: corridorY - 250 },
+        { x: 22800, y: corridorY - 250 },
+      ];
   const dataBasket = containment(
     layers.containment,
     'basket',
-    [{ x: 1200, y: corridorY - 250 }, { x: 22800, y: corridorY - 250 }],
+    dataBasketPoints,
     300,
     100,
     systems.data,
@@ -510,11 +628,25 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
   addEntity(sheet, dataBasket);
   containmentList.push(dataBasket);
 
-  // Fire alarm conduit running just below the data basket
+  // Fire alarm conduit running just below the data basket — vertex at the
+  // FAP drop and at every FA loop endpoint so the FA branches attach via
+  // shared nodes.
+  const brXFA1 = 8000;
+  const faConduitPoints: Vec2[] = level === 'G'
+    ? [
+        { x: 600, y: corridorY - 450 },
+        { x: brXFAP, y: corridorY - 450 },
+        { x: brXFA1, y: corridorY - 450 },
+        { x: 23400, y: corridorY - 450 },
+      ]
+    : [
+        { x: 600, y: corridorY - 450 },
+        { x: 23400, y: corridorY - 450 },
+      ];
   const faConduit = containment(
     layers.containment,
     'conduit',
-    [{ x: 600, y: corridorY - 450 }, { x: 23400, y: corridorY - 450 }],
+    faConduitPoints,
     25,
     undefined,
     systems.fireAlarm,
@@ -528,7 +660,7 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
   const drop1 = containment(
     layers.containment,
     'conduit',
-    [{ x: 5500, y: corridorY }, { x: 5500, y: 12000 }],
+    [{ x: brXDropEast, y: corridorY }, { x: brXDropEast, y: 12000 }],
     32,
     undefined,
     systems.lighting,
@@ -541,7 +673,7 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
   const drop2 = containment(
     layers.containment,
     'conduit',
-    [{ x: 19500, y: corridorY }, { x: 19500, y: 12000 }],
+    [{ x: brXDropWest, y: corridorY }, { x: brXDropWest, y: 12000 }],
     32,
     undefined,
     systems.lighting,
@@ -551,19 +683,44 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
   addEntity(sheet, drop2);
   containmentList.push(drop2);
 
+  if (level === 'G') {
+    // Emergency lighting drop near the west corridor end
+    const emDrop = containment(
+      layers.containment,
+      'conduit',
+      [{ x: brXEM, y: corridorY }, { x: brXEM, y: 11500 }],
+      25,
+      undefined,
+      systems.emergencyLighting,
+      'Emergency lighting drop',
+      'emergency',
+    );
+    addEntity(sheet, emDrop);
+    containmentList.push(emDrop);
+  }
+
   // Equipment branches — short conduits / trunking dropping from the
   // corridor spine into each room so the cable router can find a node
-  // within snap tolerance of every panel/cabinet.
+  // within snap tolerance of every panel/cabinet. Each branch's first
+  // vertex must coincide exactly with a vertex on the parent spine so
+  // the containment graph stitches them into a connected network.
   if (level === 'G') {
-    // Power branch reaching MCC-01 (in plant @ ~y=4800)
+    // Power branch reaching MCC-01 (in plant @ ~y=4800), continuing on
+    // to the supply transformer TX-01 in the corner so the incomer cable
+    // has a real source-to-MCC route.
     const brMCC = containment(
       layers.containment,
       'trunking',
-      [{ x: 2200, y: corridorY }, { x: 2200, y: 4800 }],
-      150,
-      150,
+      [
+        { x: brXMCC, y: corridorY },
+        { x: brXMCC, y: 4800 },
+        { x: brXMCC, y: 1550 },
+        { x: 1350, y: 1550 },
+      ],
+      300,
+      250,
       systems.powerDistribution,
-      'Branch to MCC-01',
+      'Incomer route TX-01 → MCC-01',
       'power',
     );
     addEntity(sheet, brMCC);
@@ -573,7 +730,7 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
     const brDBg = containment(
       layers.containment,
       'conduit',
-      [{ x: 4900, y: corridorY }, { x: 4900, y: 4625 }],
+      [{ x: brXDBg, y: corridorY }, { x: brXDBg, y: 4625 }],
       63,
       undefined,
       systems.powerDistribution,
@@ -587,7 +744,7 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
     const brFAP = containment(
       layers.containment,
       'conduit',
-      [{ x: 1000, y: corridorY - 450 }, { x: 1000, y: 6325 }],
+      [{ x: brXFAP, y: corridorY - 450 }, { x: brXFAP, y: 6325 }],
       32,
       undefined,
       systems.fireAlarm,
@@ -597,11 +754,25 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
     addEntity(sheet, brFAP);
     containmentList.push(brFAP);
 
+    // Fire-alarm conduit drop to FA-LOOP-1 first detector
+    const brFA1 = containment(
+      layers.containment,
+      'conduit',
+      [{ x: brXFA1, y: corridorY - 450 }, { x: brXFA1, y: 9100 }],
+      25,
+      undefined,
+      systems.fireAlarm,
+      'FA loop 1 drop',
+      'fire-alarm',
+    );
+    addEntity(sheet, brFA1);
+    containmentList.push(brFA1);
+
     // Data basket branch into comms room reaching CR-01 (@ ~(15100,5300))
     const brCR = containment(
       layers.containment,
       'basket',
-      [{ x: 15100, y: corridorY - 250 }, { x: 15100, y: 5300 }],
+      [{ x: brXCR, y: corridorY - 250 }, { x: brXCR, y: 5300 }],
       300,
       100,
       systems.data,
@@ -615,7 +786,7 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
     const brIDFg = containment(
       layers.containment,
       'basket',
-      [{ x: 8900, y: corridorY - 250 }, { x: 8900, y: 10100 }],
+      [{ x: brXIDFg, y: corridorY - 250 }, { x: brXIDFg, y: 10100 }],
       200,
       100,
       systems.data,
@@ -629,7 +800,7 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
     const brDB1 = containment(
       layers.containment,
       'trunking',
-      [{ x: 1600, y: corridorY }, { x: 1600, y: 5525 }],
+      [{ x: brXDB1, y: corridorY }, { x: brXDB1, y: 5525 }],
       150,
       150,
       systems.powerDistribution,
@@ -643,7 +814,7 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
     const brIDF1 = containment(
       layers.containment,
       'basket',
-      [{ x: 19400, y: corridorY - 250 }, { x: 19400, y: 5900 }],
+      [{ x: brXIDF1, y: corridorY - 250 }, { x: brXIDF1, y: 5900 }],
       200,
       100,
       systems.data,
@@ -791,6 +962,21 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
     );
     addEntity(sheet, cabPlant);
     equipmentList.push(cabPlant);
+
+    // FA loop 2 endpoint — first detector in the production hall, placed
+    // close to the FA conduit so the router has a real terminator.
+    const fa2 = equipment(
+      layers.panel,
+      'FA-LOOP-2',
+      'Fire alarm loop 2 first detector (Plant)',
+      'other',
+      { x: 14500, y: 8650 },
+      { w: 200, h: 200 },
+      systems.fireAlarm,
+      { ip: 'IP54' },
+    );
+    addEntity(sheet, fa2);
+    equipmentList.push(fa2);
   } else {
     const dbDeck = equipment(
       layers.panel,
@@ -806,11 +992,25 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
     equipmentList.push(dbDeck);
   }
 
-  // Containment — heavy ladder on long wall plus a basket spur
+  // Branch x-coordinates — must match polyline vertices on the spine.
+  const ahuX = 9500;
+  const pumpX = 18750;
+
+  // Containment — heavy ladder on long wall plus a basket spur. The
+  // ladder polyline has explicit vertices at every drop so the graph
+  // creates shared nodes connecting branches.
+  const ladderPoints: Vec2[] = !isMezzanine
+    ? [
+        { x: 4500, y: 9000 },
+        { x: ahuX, y: 9000 },
+        { x: pumpX, y: 9000 },
+        { x: 27000, y: 9000 },
+      ]
+    : [{ x: 4500, y: 9000 }, { x: 27000, y: 9000 }];
   const ladder = containment(
     layers.containment,
     'ladder',
-    [{ x: 4500, y: 9000 }, { x: 27000, y: 9000 }],
+    ladderPoints,
     600,
     100,
     systems.powerDistribution,
@@ -889,7 +1089,7 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
     const ahuBranch = containment(
       layers.containment,
       'conduit',
-      [{ x: 9500, y: 9000 }, { x: 9500, y: 9500 }],
+      [{ x: ahuX, y: 9000 }, { x: ahuX, y: 9500 }],
       40,
       undefined,
       systems.powerDistribution,
@@ -903,7 +1103,7 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
     const pumpBranch = containment(
       layers.containment,
       'conduit',
-      [{ x: 18750, y: 9000 }, { x: 18750, y: 14250 }],
+      [{ x: pumpX, y: 9000 }, { x: pumpX, y: 14250 }],
       40,
       undefined,
       systems.powerDistribution,
@@ -1368,10 +1568,11 @@ export const createWholeSiteSampleProject = (): Project => {
   // Aggregate every containment in the project (across floors) — risers
   // are deliberately excluded because they're modelled as point markers,
   // not polylines, so the router can't traverse them. Cables that need to
-  // cross floors will fail, which we record as a manual-routing note.
+  // cross buildings will fail and we tag them with a manual-routing note.
   const allContainments: ContainmentEntity[] = [];
   const equipmentCenterById = new Map<string, Vec2>();
   const equipmentCenterByTag = new Map<string, Vec2>();
+  const equipmentBuildingByTag = new Map<string, string | undefined>();
   for (const sid of project.sheetOrder) {
     const sheet = project.sheets[sid];
     if (!sheet) continue;
@@ -1385,6 +1586,7 @@ export const createWholeSiteSampleProject = (): Project => {
         const center: Vec2 = { x: (eq.a.x + eq.b.x) / 2, y: (eq.a.y + eq.b.y) / 2 };
         equipmentCenterById.set(eq.id, center);
         equipmentCenterByTag.set(eq.tag, center);
+        equipmentBuildingByTag.set(eq.tag, sheet.buildingId);
       }
     }
   }
@@ -1405,6 +1607,12 @@ export const createWholeSiteSampleProject = (): Project => {
         'Manual routing required — endpoints not modelled as equipment';
       continue;
     }
+    // Pre-flag cross-building cables — the per-building containment networks
+    // aren't joined in the graph, so the router can't span them.
+    const fromBuilding = equipmentBuildingByTag.get(cable.from);
+    const toBuilding = equipmentBuildingByTag.get(cable.to);
+    const crossesBuilding = !!(fromBuilding && toBuilding && fromBuilding !== toBuilding);
+
     const result = routeCableThroughGraph(graph, fromPos, toPos, cable, allContainments, {
       snapTolerance: 2000,
     });
@@ -1433,9 +1641,11 @@ export const createWholeSiteSampleProject = (): Project => {
       }
     } else {
       cable.route = [];
-      cable.notes = result.warnings[0]
-        ? `Manual routing required — ${result.warnings[0]}`
-        : 'Manual routing required — crosses building boundary';
+      cable.notes = crossesBuilding
+        ? 'Manual routing required — crosses building boundary'
+        : result.warnings[0]
+          ? `Manual routing required — ${result.warnings[0]}`
+          : 'Manual routing required — no compliant path through containment';
     }
   }
 

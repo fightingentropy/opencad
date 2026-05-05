@@ -853,6 +853,82 @@ input[type=color] {
   background: var(--bg-2);
 }
 
+/* BOM / Schedules modal — tabbed multi-schedule layout. */
+.bom-modal { display: flex; flex-direction: column; }
+
+.bom-tabs {
+  display: flex;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-2);
+  gap: 4px;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+.bom-tab {
+  padding: 4px 10px;
+  font-size: 11px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.bom-tab:hover { background: var(--bg-3); }
+
+.bom-tab.active {
+  background: var(--bg-3);
+  /* Catalogue browser uses #5cdcff as the accent — match here for consistency. */
+  color: #5cdcff;
+  border-color: #5cdcff;
+}
+
+/* Each tab table needs to scroll horizontally without bleeding past the
+ * modal boundary; the modal-body wrapper already clips overflow. */
+.bom-modal-body { overflow: auto; }
+.bom-scroll { overflow: auto; max-width: 100%; }
+.bom-scroll .bom-table { min-width: 100%; }
+
+/* View Generator dialog inputs */
+.vg-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  align-items: start;
+}
+.vg-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.vg-field input,
+.vg-field select {
+  background: var(--bg-2);
+  border: 1px solid var(--border-light);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.vg-hint {
+  margin: 12px 0 0;
+  font-size: 11px;
+  color: var(--text-mute);
+}
+
+/* Sub-menu flyout (File → Export, File → Import) */
+.context-menu .item.submenu-anchor { display: flex; align-items: center; }
+.context-menu .submenu {
+  margin-left: 2px;
+  min-width: 240px;
+}
+.context-menu .item.is-open { background: var(--bg-3); }
+
 .kbd {
   font-family: var(--font-mono);
   font-size: 10px;
