@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useStore } from '../state/store';
 import { getSymbol } from '../symbols';
 import type { Entity } from '../types';
@@ -21,7 +21,36 @@ export function RightPanel({ open = false }: { open?: boolean } = {}) {
         <SystemFilter />
       </div>
       <FillVisualizationOverlay />
+      <ReviewSection />
       <ProjectInfo />
+    </div>
+  );
+}
+
+type ReviewTab = 'markups' | 'revisions' | 'itp';
+
+function ReviewSection() {
+  const [tab, setTab] = useState<ReviewTab>('markups');
+  return (
+    <div className="panel-section">
+      <div className="panel-header">Review</div>
+      <div className="catalogue-tabs" style={{ padding: '4px 8px' }}>
+        <button
+          className={`catalogue-tab${tab === 'markups' ? ' active' : ''}`}
+          onClick={() => setTab('markups')}
+        >Markups</button>
+        <button
+          className={`catalogue-tab${tab === 'revisions' ? ' active' : ''}`}
+          onClick={() => setTab('revisions')}
+        >Revisions</button>
+        <button
+          className={`catalogue-tab${tab === 'itp' ? ' active' : ''}`}
+          onClick={() => setTab('itp')}
+        >ITP</button>
+      </div>
+      {tab === 'markups' && <MarkupPanel />}
+      {tab === 'revisions' && <RevisionHistoryPanel />}
+      {tab === 'itp' && <ITPChecklistPanel />}
     </div>
   );
 }
