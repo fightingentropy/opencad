@@ -23,6 +23,16 @@ OpenCAD Electrical is a browser-first design tool for cable containment systems 
 
 A hosted build is available at **<https://opencad.pages.dev>**. Open it directly in the browser — there's no install step and the sample whole-site project loads on first launch.
 
+## Collaboration (Beta)
+
+OpenCAD ships with optional real-time multi-user editing — think Figma cursors for electrical containment design. Open **File → Collaboration…**, share the room code (defaults to your project's ID, but any string works), and any number of peers can join. Cursors, selection outlines and entity edits sync live.
+
+- **Peer-to-peer over WebRTC.** No backend, no account, no install — connections go through free public signalling servers (`wss://signaling.yjs.dev` and friends) which only relay the WebRTC handshake. Once connected, every drawing update flows directly between browsers via [Yjs](https://yjs.dev) CRDTs.
+- **Persistent locally.** While a session is active, the shared document is mirrored into IndexedDB so a refresh re-joins the same room without losing work. Single-player still uses localStorage; the two paths don't interfere.
+- **Lazy-loaded.** The Yjs / WebRTC bundle (~60 kB gzipped) only loads when you actually open the Collaboration modal — pure single-player drawing pays nothing.
+
+This is an MVP. There is **no authentication and no permissions**: anyone with the room code can join and edit. Concurrent edits resolve at the project level (last writer wins) rather than per-entity. Don't use it for sensitive projects yet — generate a fresh hard-to-guess room code per session, or wait for the v2 with auth and per-entity CRDT merging.
+
 ## Run locally
 
 ```bash

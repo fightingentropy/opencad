@@ -1022,9 +1022,19 @@ input[type=color] {
   .menu-bar {
     padding: 0 8px;
     font-size: 12px;
+    overflow-x: auto;
+    /* Hide the scrollbar for a tidier mobile look but keep horizontal
+       scrolling so users can still reach items beyond the right edge. */
+    scrollbar-width: none;
   }
-  .menu-brand { margin-right: 8px; }
+  .menu-bar::-webkit-scrollbar { display: none; }
+  .menu-brand { margin-right: 8px; flex-shrink: 0; }
+  /* Compact the brand on mobile so File/Edit/View/Tools/Settings/Help fit
+     side-by-side on a 375px viewport. The ⌬ logo carries enough identity
+     on its own; the wordmark hides below 480px. */
+  .menu-brand .logo { font-size: 16px; }
   .menu-info { display: none; }
+  .menu-item { flex-shrink: 0; }
 
   .ribbon {
     padding: 4px 6px;
@@ -1136,16 +1146,32 @@ input[type=color] {
     bottom: 196px;
   }
 
-  /* Status bar tighter */
+  /* Status bar tighter — drop the secondary bands and show only
+     coordinates + active tool so the bar fits without horizontal
+     scrolling on a 375px viewport. */
   .status-bar {
     font-size: 10px;
     gap: 6px;
     overflow-x: auto;
     white-space: nowrap;
+    padding: 0 6px;
   }
   .status-section {
     padding: 0 4px;
     flex-shrink: 0;
+  }
+  /* Hide low-value status segments on phone-sized screens. SHEET, ENTITIES,
+     SEL, ZOOM, STANDARD are visible in modals or panels; SNAP / GRID /
+     ORTHO are toggled from the ribbon. */
+  .status-section.status-snap,
+  .status-section.status-grid,
+  .status-section.status-ortho,
+  .status-section.status-sheet,
+  .status-section.status-entities,
+  .status-section.status-selection,
+  .status-section.status-zoom,
+  .status-section.status-standard {
+    display: none;
   }
 
   /* Canvas overlays */
@@ -1178,10 +1204,99 @@ input[type=color] {
   .symbol-tile-preview { width: 44px; height: 44px; }
   .symbol-tile-name { font-size: 9px; height: 18px; }
 
-  /* Modals fill more screen */
+  /* Modals fill the screen on phone-sized devices — width and height. The
+     90vh floor prevents the awkward pancaked look the BOM modal shows
+     when its content is empty. Inline `style` props on individual modals
+     are overridden via !important. Also pin the close button and toolbar
+     to be reachable with a thumb. */
   .modal {
-    min-width: 90vw !important;
+    min-width: 96vw !important;
     max-width: 96vw !important;
+    width: 96vw !important;
+    min-height: 92vh !important;
+    max-height: 92vh !important;
+    height: 92vh !important;
+    border-radius: 8px;
+  }
+  .modal-header {
+    padding: 10px 12px;
+    font-size: 13px;
+    line-height: 1.3;
+  }
+  .modal-footer {
+    padding: 8px 12px;
+    position: sticky;
+    bottom: 0;
+    background: var(--bg-1);
+    border-top: 1px solid var(--border);
+  }
+
+  /* Cable schedule toolbar — wrap controls so each is a full-width row
+     rather than overflowing or shrinking unreadably on small screens. */
+  .cable-schedule-toolbar select,
+  .cable-schedule-toolbar .btn-ghost {
+    min-height: 36px;
+    flex: 1 1 calc(50% - 4px);
+  }
+  .cable-schedule-toolbar { gap: 4px; padding: 6px 8px; }
+  .cable-schedule-spacer { display: none; }
+
+  /* BOM tabs — bigger touch targets, allow scroll. */
+  .bom-tabs { padding: 4px 8px; gap: 2px; }
+  .bom-tab { min-height: 36px; padding: 6px 12px; font-size: 12px; }
+
+  /* Compliance dashboard cards stack to one column. */
+  .compliance-cards { grid-template-columns: 1fr !important; }
+
+  /* Catalogue browser — tabs scroll, filters stack. */
+  .catalogue-tabs { overflow-x: auto; scrollbar-width: none; }
+  .catalogue-tabs::-webkit-scrollbar { display: none; }
+  .catalogue-tab { min-height: 36px; flex-shrink: 0; }
+  .catalogue-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .catalogue-toolbar select,
+  .catalogue-toolbar input { width: 100% !important; min-height: 36px; }
+
+  /* Forms in modals — full-width inputs, labels above. The cable edit
+     dialog uses cable-form-grid; other forms may use form-grid in the
+     future. */
+  .cable-form-grid,
+  .form-grid {
+    grid-template-columns: 1fr !important;
+    gap: 8px !important;
+  }
+  .cable-form-grid label,
+  .form-row label { font-size: 11px; }
+  .cable-form-grid input,
+  .cable-form-grid select,
+  .cable-form-grid textarea,
+  .form-row input,
+  .form-row select,
+  .form-row textarea {
+    min-height: 38px;
+    font-size: 14px;
+  }
+
+  /* Site navigator — bottom of canvas; on mobile it's hidden in favour
+     of the standard SheetTabs which scroll horizontally. */
+  .site-navigator { display: none !important; }
+
+  /* Place ribbon group is hidden on phones to keep the bar usable —
+     the same tools are reachable from the Tools menu. */
+  .ribbon-group[data-group='Place'],
+  .ribbon-group[data-group='Snap'],
+  .ribbon-group[data-group='Nav'] {
+    display: none;
+  }
+
+  /* Ensure all inline buttons in modals/panels meet the 44px touch
+     guideline. Smaller `btn-ghost` instances stay above 36px which
+     still passes Material's 32px floor. */
+  button.primary, button.btn-primary {
+    min-height: 40px;
   }
 }
 
@@ -1191,6 +1306,11 @@ input[type=color] {
   .tool-btn { min-width: 34px; }
   .tool-btn .label { display: none; }
   .symbol-grid { grid-template-columns: repeat(2, 1fr); }
+
+  /* Hide the wordmark — the ⌬ logo is enough identity. This frees ~110px
+     for the menu items so File/Edit/View/Tools/Settings/Help all fit on
+     a 375px viewport. */
+  .menu-brand .brand-name { display: none; }
 }
 
 /* ============================================================

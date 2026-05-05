@@ -12,7 +12,7 @@ export function StatusBar() {
 
   return (
     <div className="status-bar">
-      <span className="status-section">
+      <span className="status-section status-coords">
         <span style={{ color: 'var(--text-mute)' }}>X</span>
         <span style={{ color: 'var(--text)', minWidth: 64 }}>{c.x.toFixed(2)}</span>
         <span style={{ color: 'var(--text-mute)' }}>Y</span>
@@ -20,40 +20,40 @@ export function StatusBar() {
         <span style={{ color: 'var(--text-mute)' }}>{project.units}</span>
       </span>
       <span
-        className={`status-section ${editor.snap.enabled ? 'active' : ''}`}
+        className={`status-section status-snap ${editor.snap.enabled ? 'active' : ''}`}
         onClick={() => setSnap({ enabled: !editor.snap.enabled })}
         style={{ cursor: 'pointer' }}
       >
         SNAP {editor.snap.enabled ? 'ON' : 'OFF'}
       </span>
       <span
-        className={`status-section ${editor.snap.grid ? 'active' : ''}`}
+        className={`status-section status-grid ${editor.snap.grid ? 'active' : ''}`}
         onClick={() => setSnap({ grid: !editor.snap.grid })}
         style={{ cursor: 'pointer' }}
       >
         GRID {editor.snap.gridSize}{project.units}
       </span>
       <span
-        className={`status-section ${editor.ortho ? 'active' : ''}`}
+        className={`status-section status-ortho ${editor.ortho ? 'active' : ''}`}
         onClick={() => setOrtho(!editor.ortho)}
         style={{ cursor: 'pointer' }}
       >
         ORTHO {editor.ortho ? 'ON' : 'OFF'}
       </span>
-      <span className="status-section">
+      <span className="status-section status-tool">
         TOOL <span style={{ color: 'var(--accent)' }}>{editor.tool.toUpperCase()}</span>
       </span>
-      <span className="status-section">
+      <span className="status-section status-sheet">
         SHEET <span style={{ color: 'var(--accent)' }}>{sheet?.number}</span>
       </span>
-      <span className="status-section">
+      <span className="status-section status-entities">
         ENTITIES {totalEntities}
       </span>
-      <span className="status-section">
+      <span className="status-section status-selection">
         SEL {editor.selection.size}
       </span>
       <span className="status-spacer" />
-      <span className="status-section" style={{ borderRight: 'none' }}>
+      <span className="status-section status-zoom" style={{ borderRight: 'none' }}>
         Z{editor.viewport.zoom.toFixed(2)}× • {project.standard}
       </span>
     </div>
