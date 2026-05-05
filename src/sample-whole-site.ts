@@ -1289,7 +1289,7 @@ export const createWholeSiteSampleProject = (): Project => {
     systems: systemMap,
   });
 
-  // ---------- Penetration seals ----------
+  // ---------- Penetration seals (manually authored examples) ----------
   const seals: Record<string, PenetrationSeal> = {};
   const sealRows: Array<{
     ref: string;
@@ -1329,6 +1329,248 @@ export const createWholeSiteSampleProject = (): Project => {
       notes: 'Seal at fire compartment boundary — inspect and certify before closing.',
     };
   }
+
+  // Stitch the seals onto the project up-front so the auto-detection step
+  // below can pick a unique reference (FS-005 onwards) for any newly
+  // detected penetrations without colliding with the manual entries.
+  project.penetrationSeals = seals;
+
+  // ---------- Auto-place fittings, supports, penetrations ----------
+  // Iterate every containment on every sheet and run the three auto-feature
+  // generators. Their output is added to the same sheet, and any newly
+  // detected penetration seals merge into the project-wide seal map.
+  const floorBuilds = [officeG, officeL1, plantG, plantD] as const;
+  for (const fb of floorBuilds) {
+    const sheet = project.sheets[fb.sheet.id];
+    if (!sheet) continue;
+    // Snapshot the containment IDs first — auto-features mutate the sheet
+    // entity list and we don't want to iterate over fittings/supports we
+    // just placed.
+    const containmentIds = fb.containment.map((c) => c.id);
+    for (const cid of containmentIds) {
+      const fittings = autoPlaceFittingsForContainment(project, fb.sheet.id, cid);
+      for (const f of fittings) addEntity(sheet, f as FittingEntity);
+
+      const supports = autoPlaceSupportsForContainment(project, fb.sheet.id, cid);
+      for (const s of supports) addEntity(sheet, s as SupportEntity);
+
+      const detected = autoDetectPenetrationsForContainment(project, fb.sheet.id, cid);
+      for (const p of detected.penetrations) addEntity(sheet, p as PenetrationEntity);
+      for (const sealId of Object.keys(detected.seals)) {
+        seals[sealId] = detected.seals[sealId];
+      }
+      // Update project so the next call's nextSealReference picks unique refs.
+      project.penetrationSeals = seals;
+    }
+  }
+
+  // ---------- Auto-route every cable through the containment graph ----------
+  // Aggregate every containment in the project (across floors) — risers
+  // are deliberately excluded because they're modelled as point markers,
+  // not polylines, so the router can't traverse them. Cables that need to
+  // cross floors will fail, which we record as a manual-routing note.
+  const allContainments: ContainmentEntity[] = [];
+  const equipmentCenterById = new Map<string, Vec2>();
+  const equipmentCenterByTag = new Map<string, Vec2>();
+  for (const sid of project.sheetOrder) {
+    const sheet = project.sheets[sid];
+    if (!sheet) continue;
+    for (const eid of sheet.entityOrder) {
+      const e = sheet.entities[eid];
+      if (!e) continue;
+      if (e.kind === 'containment') {
+        allContainments.push(e as ContainmentEntity);
+      } else if (e.kind === 'equipment') {
+        const eq = e as EquipmentEntity;
+        const center: Vec2 = { x: (eq.a.x + eq.b.x) / 2, y: (eq.a.y + eq.b.y) / 2 };
+        equipmentCenterById.set(eq.id, center);
+        equipmentCenterByTag.set(eq.tag, center);
+      }
+    }
+  }
+  const graph = buildContainmentGraph(allContainments);
+
+  for (const cableId of cableSchedule.cableOrder) {
+    const cable = cableSchedule.cables[cableId];
+    if (!cable) continue;
+    const fromPos =
+      (cable.fromEntityId && equipmentCenterById.get(cable.fromEntityId)) ??
+      equipmentCenterByTag.get(cable.from);
+    const toPos =
+      (cable.toEntityId && equipmentCenterById.get(cable.toEntityId)) ??
+      equipmentCenterByTag.get(cable.to);
+    if (!fromPos || !toPos) {
+      cable.route = [];
+      cable.notes =
+        'Manual routing required — endpoints not modelled as equipment';
+      continue;
+    }
+    const result = routeCableThroughGraph(graph, fromPos, toPos, cable, allContainments, {
+      snapTolerance: 2000,
+    });
+    if (result.found && result.path.length > 0) {
+      cable.route = result.path.map((c) => c.id);
+      // estimatedLength is in metres (1 dp). result.length is in mm.
+      cable.estimatedLength = Math.round(result.length / 100) / 10;
+      // Tag affected containments with the cable id so the fill overlay
+      // and BOM can sum cables-per-containment.
+      for (const c of result.path) {
+        const sheetForC = (() => {
+          for (const sid of project.sheetOrder) {
+            const s = project.sheets[sid];
+            if (s && s.entities[c.id]) return s;
+          }
+          return null;
+        })();
+        if (!sheetForC) continue;
+        const target = sheetForC.entities[c.id];
+        if (target && target.kind === 'containment') {
+          const existing = target.assignedCableIds ?? [];
+          if (!existing.includes(cable.id)) {
+            target.assignedCableIds = [...existing, cable.id];
+          }
+        }
+      }
+    } else {
+      cable.route = [];
+      cable.notes = result.warnings[0]
+        ? `Manual routing required — ${result.warnings[0]}`
+        : 'Manual routing required — crosses building boundary';
+    }
+  }
+
+  // ---------- Annotations: north arrows, scale bars, grid lines, leaders ----------
+  // Floor plans look richer with the standard sheet furniture. We add a
+  // north arrow + scale bar in the bottom-left of every plan, two grid
+  // lines per sheet, and a couple of leader callouts for the spine and
+  // the riser.
+  const arrow = (
+    layer: LayerId,
+    pos: Vec2,
+    size = 600,
+  ): NorthArrowEntity => ({
+    id: newEntityId(),
+    kind: 'north-arrow',
+    layerId: layer,
+    visible: true,
+    locked: false,
+    position: pos,
+    northAngle: 0,
+    size,
+  });
+
+  const scaleBar = (
+    layer: LayerId,
+    pos: Vec2,
+    scale: number,
+    segmentLength: number,
+    segments: number,
+  ): ScaleBarEntity => ({
+    id: newEntityId(),
+    kind: 'scale-bar',
+    layerId: layer,
+    visible: true,
+    locked: false,
+    position: pos,
+    segmentLength,
+    segments,
+    scale,
+  });
+
+  const gridLine = (
+    layer: LayerId,
+    orientation: 'horizontal' | 'vertical',
+    offset: number,
+    start: number,
+    end: number,
+    label: string,
+  ): GridLineEntity => ({
+    id: newEntityId(),
+    kind: 'grid-line',
+    layerId: layer,
+    visible: true,
+    locked: false,
+    orientation,
+    offset,
+    start,
+    end,
+    label,
+  });
+
+  const leader = (
+    layer: LayerId,
+    points: Vec2[],
+    body: string,
+    targetEntityId?: string,
+  ): LeaderEntity => ({
+    id: newEntityId(),
+    kind: 'leader',
+    layerId: layer,
+    visible: true,
+    locked: false,
+    points,
+    text: body,
+    fontSize: 80,
+    arrowStyle: 'arrow',
+    targetEntityId,
+  });
+
+  const annotateOfficeSheet = (
+    sheetRef: Sheet,
+    spine: ContainmentEntity,
+    riserMarker: RiserEntity,
+  ): void => {
+    addEntity(sheetRef, arrow(layers.annotation, { x: 1200, y: 1200 }, 700));
+    addEntity(sheetRef, scaleBar(layers.annotation, { x: 2200, y: 1000 }, 50, 1000, 5));
+    // Office plans are 24m × 16m — gridlines at A/B and 1/2 frame the layout.
+    addEntity(sheetRef, gridLine(layers.annotation, 'vertical', 4000, 0, 16000, 'A'));
+    addEntity(sheetRef, gridLine(layers.annotation, 'vertical', 12000, 0, 16000, 'B'));
+    addEntity(sheetRef, gridLine(layers.annotation, 'vertical', 20000, 0, 16000, 'C'));
+    addEntity(sheetRef, gridLine(layers.annotation, 'horizontal', 4000, 0, 24000, '1'));
+    addEntity(sheetRef, gridLine(layers.annotation, 'horizontal', 12000, 0, 24000, '2'));
+    // Leader callouts pointing to the main spine and riser
+    addEntity(sheetRef, leader(layers.annotation,
+      [{ x: 12000, y: 8400 }, { x: 13000, y: 11000 }, { x: 16000, y: 11000 }],
+      'Main power trunking — 400×250',
+      spine.id,
+    ));
+    addEntity(sheetRef, leader(layers.annotation,
+      [{ x: riserMarker.position.x, y: riserMarker.position.y },
+       { x: 3500, y: 4500 }, { x: 5500, y: 4500 }],
+      'Vertical power riser',
+      riserMarker.id,
+    ));
+  };
+
+  const annotatePlantSheet = (
+    sheetRef: Sheet,
+    spine: ContainmentEntity,
+    riserMarker: RiserEntity,
+  ): void => {
+    addEntity(sheetRef, arrow(layers.annotation, { x: 1500, y: 1500 }, 800));
+    addEntity(sheetRef, scaleBar(layers.annotation, { x: 2700, y: 1300 }, 50, 1000, 5));
+    addEntity(sheetRef, gridLine(layers.annotation, 'vertical', 5000, 0, 18000, 'A'));
+    addEntity(sheetRef, gridLine(layers.annotation, 'vertical', 15000, 0, 18000, 'B'));
+    addEntity(sheetRef, gridLine(layers.annotation, 'vertical', 25000, 0, 18000, 'C'));
+    addEntity(sheetRef, gridLine(layers.annotation, 'horizontal', 5000, 0, 30000, '1'));
+    addEntity(sheetRef, gridLine(layers.annotation, 'horizontal', 12000, 0, 30000, '2'));
+    addEntity(sheetRef, leader(layers.annotation,
+      [{ x: 14000, y: 9000 }, { x: 15000, y: 5000 }, { x: 17500, y: 5000 }],
+      'Plant ladder — 600 mm cable run',
+      spine.id,
+    ));
+    addEntity(sheetRef, leader(layers.annotation,
+      [{ x: riserMarker.position.x, y: riserMarker.position.y },
+       { x: 3000, y: 5000 }, { x: 5500, y: 5000 }],
+      'Plant vertical riser',
+      riserMarker.id,
+    ));
+  };
+
+  annotateOfficeSheet(project.sheets[officeG.sheet.id], officeG.containment[0], officeRiser);
+  annotateOfficeSheet(project.sheets[officeL1.sheet.id], officeL1.containment[0], officeRiserL1);
+  annotatePlantSheet(project.sheets[plantG.sheet.id], plantG.containment[0], plantRiser);
+  annotatePlantSheet(project.sheets[plantD.sheet.id], plantD.containment[0], plantRiserDeck);
 
   // ---------- ITP items ----------
   const itp: Record<string, ITPItem> = {};

@@ -2,7 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { useStore } from '../state/store';
 import type { Cable, CableConstruction, CableCircuitType } from '../models/cable';
 import { STANDARD_CSA } from '../models/cable';
-import { estimateAmpacity, estimateVdrop, fmtNum } from './whole-site-helpers';
+import { computeVoltageDrop, suggestCableSize } from '../calc';
+import { fmtNum, projectStandardsCode } from './whole-site-helpers';
 
 const CONSTRUCTIONS: CableConstruction[] = [
   'XLPE/SWA/LSOH',
@@ -32,6 +33,8 @@ const CIRCUIT_TYPES: CableCircuitType[] = [
   'power', 'control', 'data', 'fire-alarm', 'emergency',
   'instrumentation', 'comms', 'av', 'earthing',
 ];
+
+const PREVIEW_LENGTH_M = 50;
 
 export function CableEditDialog({
   cable,
@@ -67,13 +70,42 @@ export function CableEditDialog({
     setDraft((d) => ({ ...d, [key]: val }));
   };
 
-  const ampacity = useMemo(() => estimateAmpacity(draft), [draft]);
-  const vdrop = useMemo(() => estimateVdrop(draft, 50), [draft]);
+  const standardsCode = projectStandardsCode(project);
+
+  const vdrop = useMemo(() => computeVoltageDrop({
+    construction: draft.construction,
+    csa: draft.csa,
+    lengthM: PREVIEW_LENGTH_M,
+    designCurrentA: draft.designCurrent ?? 0,
+    systemVoltageV: draft.voltage || 230,
+    phasing: draft.cores >= 3 ? 'three' : 'single',
+    loadCategory: 'other',
+    standardsCode,
+  }), [draft.construction, draft.csa, draft.designCurrent, draft.voltage, draft.cores, standardsCode]);
+
+  const suggestion = useMemo(() => {
+    if (!draft.designCurrent || draft.designCurrent <= 0) return null;
+    return suggestCableSize({
+      designCurrentA: draft.designCurrent,
+      ambientC: 30,
+      numCircuits: 1,
+      installationMethod: 'tray',
+      construction: draft.construction,
+    });
+  }, [draft.designCurrent, draft.construction]);
+
+  const ampacityOk = suggestion ? suggestion.ampacity >= (draft.designCurrent ?? 0) && draft.csa >= suggestion.csa : true;
+  const ampacityIz = suggestion ? suggestion.ampacity : 0;
 
   const handleSave = () => {
     if (!draft.reference.trim()) return alert('Reference is required');
     onSave(draft);
     onClose();
+  };
+
+  const applySuggestion = () => {
+    if (!suggestion) return;
+    set('csa', suggestion.csa);
   };
 
   return (
@@ -123,12 +155,25 @@ export function CableEditDialog({
               />
             </Field>
             <Field label="CSA (mm²)">
-              <select
-                value={draft.csa}
-                onChange={(e) => set('csa', parseFloat(e.target.value))}
-              >
-                {STANDARD_CSA.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <span style={{ display: 'flex', gap: 4 }}>
+                <select
+                  value={draft.csa}
+                  onChange={(e) => set('csa', parseFloat(e.target.value))}
+                >
+                  {STANDARD_CSA.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+                {suggestion && (
+                  <button
+                    type="button"
+                    className="btn-ghost btn-tiny"
+                    title={`Suggested size for ${draft.designCurrent} A: ${suggestion.csa} mm² (Iz ${fmtNum(suggestion.ampacity, 0)} A)`}
+                    onClick={applySuggestion}
+                    disabled={draft.csa === suggestion.csa}
+                  >
+                    Suggest {suggestion.csa}
+                  </button>
+                )}
+              </span>
             </Field>
             <Field label="Has Earth">
               <input
@@ -213,21 +258,25 @@ export function CableEditDialog({
           </div>
           <div className="cable-calc-preview">
             <div className="calc-card">
-              <div className="calc-card-label">Ampacity</div>
-              <div className={`calc-card-value ${ampacity.ok ? 'ok' : 'fail'}`}>
-                Iz {fmtNum(ampacity.iz, 0)} A {ampacity.ib > 0 && `· Ib ${fmtNum(ampacity.ib, 0)} A`}
+              <div className="calc-card-label">Suggested ampacity</div>
+              <div className={`calc-card-value ${ampacityOk ? 'ok' : 'fail'}`}>
+                {suggestion
+                  ? `Iz ${fmtNum(ampacityIz, 0)} A${draft.designCurrent ? ` · Ib ${fmtNum(draft.designCurrent, 0)} A` : ''}`
+                  : 'Set Ib to size'}
               </div>
               <div className="calc-card-status">
-                {ampacity.iz === 0 ? 'No table data' : ampacity.ok ? 'OK' : 'Iz < Ib'}
+                {suggestion
+                  ? `Suggested CSA ${suggestion.csa} mm² · current CSA ${draft.csa} mm² · ${ampacityOk ? 'OK' : 'Undersized'}`
+                  : ''}
               </div>
             </div>
             <div className="calc-card">
-              <div className="calc-card-label">V-drop @ 50 m</div>
-              <div className={`calc-card-value ${vdrop.ok ? 'ok' : 'fail'}`}>
-                {fmtNum(vdrop.vdropV, 2)} V · {fmtNum(vdrop.vdropPct * 100, 2)}%
+              <div className="calc-card-label">V-drop @ {PREVIEW_LENGTH_M} m</div>
+              <div className={`calc-card-value ${vdrop.withinLimits ? 'ok' : 'fail'}`}>
+                {fmtNum(vdrop.vdropV, 2)} V · {fmtNum(vdrop.vdropPct, 2)}%
               </div>
               <div className="calc-card-status">
-                Limit {fmtNum(vdrop.limit * 100, 0)}% · {vdrop.ok ? 'OK' : 'Exceeds'}
+                Limit {fmtNum(vdrop.limitPct, 1)}% · {vdrop.withinLimits ? 'OK' : 'Exceeds'}
               </div>
             </div>
           </div>
