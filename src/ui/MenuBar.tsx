@@ -379,7 +379,7 @@ export function MenuBar({
     <div className="menu-bar">
       <div className="menu-brand">
         <span className="logo">⌬</span>
-        OpenCAD <span style={{ color: '#3ba3ff' }}>Electrical</span>
+        <span className="brand-name">OpenCAD <span style={{ color: '#3ba3ff' }}>Electrical</span></span>
       </div>
       <input ref={fileInputRef} type="file" accept=".json" onChange={onFileChosen} style={{ display: 'none' }} />
       <input ref={dxfInputRef} type="file" accept=".dxf" onChange={onDXFChosen} style={{ display: 'none' }} />
