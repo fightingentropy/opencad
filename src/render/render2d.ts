@@ -10,9 +10,9 @@ import type {
   SymbolPrimitive,
 } from '../types';
 import { worldToScreen } from '../lib/viewport';
-import type { SymbolDef } from '../types';
+import type { SymbolDef, Bounds } from '../types';
 import { transformSymbolPoint } from '../lib/hittest';
-import { entityBounds } from '../lib/math';
+import { entityBounds, boundsOverlap, inflateBounds } from '../lib/math';
 import { computeOrthogonalRoute } from '../lib/autoroute';
 
 export interface RenderOptions {
@@ -32,12 +32,85 @@ const PIN_COLOR = '#3ba3ff';
 const SNAP_COLOR = '#00ff00';
 const SNAP_GRID_COLOR = '#ffd84d';
 
+// Performance budgets (per-frame, on a recent dev laptop):
+//   <8ms  at 1000 entities (full whole-site view)
+//   <16ms at 5000 entities (large multi-floor project)
+// Hot paths to protect: viewport culling, the entity bounds cache, and
+// avoiding `ctx.measureText` calls inside the hot loop. See `?perf=1`.
+
+// Inflate the visible-world rect by 10% so entities partially in view
+// don't clip at the edge while panning.
+const VIEWPORT_INFLATE_FACTOR = 1.1;
+
+// Set on first render and consulted thereafter to avoid touching `window`
+// in environments where it isn't defined (SSR, headless export). The
+// `?perf=1` query-param turns on per-frame console.log instrumentation.
+let perfEnabled: boolean | null = null;
+const isPerfEnabled = (): boolean => {
+  if (perfEnabled !== null) return perfEnabled;
+  try {
+    perfEnabled =
+      typeof window !== 'undefined' &&
+      typeof window.location !== 'undefined' &&
+      /(?:^|[?&])perf=1(?:&|$)/.test(window.location.search);
+  } catch {
+    perfEnabled = false;
+  }
+  return perfEnabled;
+};
+
+// Cache of measured text widths keyed by `${size}:${font}:${text}`. Reset
+// when the font set changes (rare). measureText is one of the slower
+// canvas calls, so we memoise it across the lifetime of the renderer.
+const textWidthCache = new Map<string, number>();
+export const measureTextCached = (
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  size: number,
+  font: string
+): number => {
+  const key = `${size}|${font}|${text}`;
+  const hit = textWidthCache.get(key);
+  if (hit !== undefined) return hit;
+  const prev = ctx.font;
+  ctx.font = `${size}px ${font}`;
+  const w = ctx.measureText(text).width;
+  ctx.font = prev;
+  textWidthCache.set(key, w);
+  // Bound the cache so a churning text input doesn't leak. 4096 is more
+  // than enough for any sane drawing.
+  if (textWidthCache.size > 4096) {
+    const firstKey = textWidthCache.keys().next().value;
+    if (firstKey !== undefined) textWidthCache.delete(firstKey);
+  }
+  return w;
+};
+
+// Per-render entity-bounds cache. The map is rebuilt at the start of each
+// render; entity references are stable until edited (immutable updates),
+// so reference equality is safe as a cache key. We use Entity directly as
+// the key (a Map keyed by Entity) so different sheets and store updates
+// don't pollute each other.
+let boundsCache: Map<Entity, Bounds> = new Map();
+const getEntityBoundsCached = (e: Entity): Bounds => {
+  const hit = boundsCache.get(e);
+  if (hit !== undefined) return hit;
+  const b = entityBounds(e);
+  boundsCache.set(e, b);
+  return b;
+};
+
 export const render2d = (
   ctx: CanvasRenderingContext2D,
   project: Project,
   editor: EditorState,
   opts: RenderOptions
 ): void => {
+  const perf = isPerfEnabled();
+  const tStart = perf ? performance.now() : 0;
+  // Reset the per-render bounds cache so we never serve stale entries
+  // from a previous edit.
+  boundsCache = new Map();
   const { width, height, dpr } = opts;
   ctx.save();
   // Clear
@@ -91,6 +164,25 @@ export const render2d = (
     | 'support-spacing'
     | undefined;
 
+  // Visible world rectangle — used to cull off-screen entities below.
+  // screenToWorld is exactly the inverse of the world transform set above,
+  // so computing the four corners is enough to bound the visible area.
+  // Y flips between screen and world; min/max are computed defensively so
+  // we don't depend on which pair ends up smaller.
+  const wx0 = (-width / 2) / v.zoom + v.x;
+  const wx1 = (width / 2) / v.zoom + v.x;
+  const wy0 = -(height / 2) / v.zoom + v.y;
+  const wy1 = (height / 2) / v.zoom + v.y;
+  const visibleRect = inflateBounds(
+    {
+      minX: Math.min(wx0, wx1),
+      minY: Math.min(wy0, wy1),
+      maxX: Math.max(wx0, wx1),
+      maxY: Math.max(wy0, wy1),
+    },
+    VIEWPORT_INFLATE_FACTOR
+  );
+
   // Render underlays first (so they sit behind everything else), then the
   // remaining entities in their natural order. Auto-generated fittings get
   // a slight transparency so manual placements stand out.
@@ -104,6 +196,9 @@ export const render2d = (
   }
   const orderedIds = [...underlayIds, ...otherIds];
 
+  let culledCount = 0;
+  let drawnCount = 0;
+
   for (const entityId of orderedIds) {
     const e = sheet.entities[entityId];
     if (!e || !e.visible) continue;
@@ -111,6 +206,18 @@ export const render2d = (
     if (!layer || !layer.visible) continue;
     const isSelected = editor.selection.has(entityId);
     const isHovered = editor.hover === entityId && !isSelected;
+
+    // Viewport culling — skip entities whose AABB doesn't overlap the
+    // visible (inflated) world rect. Selected entities always draw so
+    // partial-edge selection rendering still works while panning.
+    if (!isSelected) {
+      const bb = getEntityBoundsCached(e);
+      if (isFinite(bb.minX) && !boundsOverlap(bb, visibleRect)) {
+        culledCount++;
+        continue;
+      }
+    }
+    drawnCount++;
 
     // Filter handling: render filtered-out entities at low opacity grey so
     // the user can still see the surrounding context without losing
@@ -193,6 +300,15 @@ export const render2d = (
   drawCrosshair(ctx, editor, opts);
 
   ctx.restore();
+
+  if (perf) {
+    const dt = performance.now() - tStart;
+    const total = sheet.entityOrder.length;
+    // eslint-disable-next-line no-console
+    console.log(
+      `[render2d] ${dt.toFixed(2)}ms  entities=${total}  drawn=${drawnCount}  culled=${culledCount}  zoom=${v.zoom.toFixed(2)}`
+    );
+  }
 };
 
 const drawGrid = (

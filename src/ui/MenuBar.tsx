@@ -39,6 +39,7 @@ export function MenuBar({
   onShowCatalogue,
   onShowCost,
   onShowCrossSection,
+  onShowCollaboration,
 }: {
   onShowBom: () => void;
   onShowAbout: () => void;
@@ -47,6 +48,7 @@ export function MenuBar({
   onShowCatalogue?: () => void;
   onShowCost?: () => void;
   onShowCrossSection?: () => void;
+  onShowCollaboration?: () => void;
 }) {
   const project = useStore((s) => s.project);
   const setProject = useStore((s) => s.setProject);
@@ -416,6 +418,12 @@ export function MenuBar({
           <MenuOpt label="Import IFC Reference…" onClick={action(onImportIFC)} hint="" />
           <MenuOpt label="Import Cables (CSV)…" onClick={action(onImportCables)} hint="" />
         </SubMenu>
+        {onShowCollaboration && (
+          <>
+            <Divider />
+            <MenuOpt label="Collaboration…" onClick={action(onShowCollaboration)} hint="" />
+          </>
+        )}
       </MenuButton>
       <MenuButton label="Edit" open={openMenu === 'edit'} onClick={click('edit')}>
         <MenuOpt label="Undo" onClick={action(undo)} hint="⌘Z" />
