@@ -92,7 +92,7 @@ export function Ribbon() {
   return (
     <div className="ribbon">
       {GROUPS.map((g) => (
-        <div className="ribbon-group" key={g}>
+        <div className="ribbon-group" key={g} data-group={g}>
           <div className="ribbon-buttons">
             {TOOL_DEFS.filter((t) => t.group === g).map((t) => (
               <button
@@ -124,7 +124,7 @@ export function Ribbon() {
         </div>
       ))}
 
-      <div className="ribbon-group">
+      <div className="ribbon-group" data-group="Arrange">
         <div className="ribbon-buttons">
           <button className="tool-btn" onClick={() => alignEntities('left')} disabled={selectionSize < 2} title="Align Left">
             <span className="icon">
@@ -190,7 +190,7 @@ export function Ribbon() {
         <div className="ribbon-group-label">Arrange</div>
       </div>
 
-      <div className="ribbon-group">
+      <div className="ribbon-group" data-group="History">
         <div className="ribbon-buttons">
           <button className="tool-btn" onClick={undo} disabled={past === 0} title="Undo (⌘Z)">
             <span className="icon">
@@ -208,7 +208,7 @@ export function Ribbon() {
         <div className="ribbon-group-label">History</div>
       </div>
 
-      <div className="ribbon-group">
+      <div className="ribbon-group" data-group="Snap">
         <div className="ribbon-buttons">
           <button className={`tool-btn${ortho ? ' active' : ''}`} onClick={() => setOrtho(!ortho)} title="Ortho (F8)">
             <span className="icon">
@@ -238,7 +238,7 @@ export function Ribbon() {
         <div className="ribbon-group-label">Snap</div>
       </div>
 
-      <div className="ribbon-group">
+      <div className="ribbon-group" data-group="Nav">
         <div className="ribbon-buttons">
           <button
             className="tool-btn"
@@ -266,7 +266,7 @@ export function Ribbon() {
         <div className="ribbon-group-label">Nav</div>
       </div>
 
-      <div className="ribbon-group">
+      <div className="ribbon-group" data-group="View">
         <div className="ribbon-buttons">
           <button className={`tool-btn${viewMode === '2d' ? ' active' : ''}`} onClick={() => setViewMode('2d')} title="2D schematic only">
             <span className="icon">
