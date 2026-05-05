@@ -63,7 +63,7 @@ export function CrossSectionEditor({ entityId, onClose }: { entityId: string; on
   const [dragId, setDragId] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
-  const fill = useMemo(() => computeFill(cont, cables), [cont, cables]);
+  const fill = useMemo(() => computeFill(cont, cables, project), [cont, cables, project]);
 
   // Render scale: fit width to ~480 px
   const scale = innerW > 0 ? Math.min(8, 480 / w) : 4;

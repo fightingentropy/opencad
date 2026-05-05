@@ -1,91 +1,126 @@
 // Shared helpers for whole-site UI panels.
 //
-// These functions are intentionally inline / lightweight: a parallel calc
-// engine in `src/calc/*` is being built. UI components import these helpers
-// directly so the panels render even before the calc engine ships, and they
-// gracefully promote to the real engine when it's available.
+// Thin facade over the engineering calculations engine in `src/calc/*`.
+// Bodies delegate to the real engine; the UI imports from this module so
+// the public API stays stable while internals can evolve.
 
 import type { Project, Entity, Sheet, ContainmentEntity } from '../types';
 import type { Cable } from '../models/cable';
-import { FILL_LIMITS, VDROP_LIMITS, AMPACITY_REF_C_PVC_COPPER, AMPACITY_REF_C_XLPE_COPPER, VDROP_MV_A_M_PVC_SP } from '../models/standards';
-import type { StandardsCode } from '../models/standards';
+import {
+  AMPACITY_REF_C_PVC_COPPER,
+  AMPACITY_REF_C_XLPE_COPPER,
+  DEFAULT_STANDARDS,
+} from '../models/standards';
+import type { StandardsCode, StandardsProfile } from '../models/standards';
+import {
+  computeContainmentFill,
+  computeVoltageDrop,
+  computeDeratingFactors,
+  polylineLength,
+  type InstallationMethod,
+} from '../calc';
 
 export const fmtPct = (v: number): string => `${(v * 100).toFixed(1)}%`;
 export const fmtMm = (v: number | undefined): string => (v == null ? '—' : `${v.toFixed(0)}`);
 export const fmtNum = (v: number | undefined, digits = 1): string => (v == null ? '—' : v.toFixed(digits));
 
-// Project standards code (defaults to BS7671 if no profile set).
+// Resolve the active standards profile for a project (defaults to BS 7671).
 export const projectStandardsCode = (p: Project): StandardsCode =>
   p.standardsProfile?.code ?? 'BS7671';
 
+const projectStandardsProfile = (p: Project): StandardsProfile =>
+  p.standardsProfile ?? DEFAULT_STANDARDS.BS7671;
+
 // Compute fill ratio for a single containment given list of cables routed
-// through it. Returns 0..1. Uses the simple OD² approximation for non-tray
-// runs and "single-layer touching" for tray/ladder/basket.
+// through it. Returns 0..1. Delegates to `computeContainmentFill` and adapts
+// the result to the legacy {fill, limit, ok} shape the UI expects.
 export const computeFill = (
   cont: ContainmentEntity,
   cables: Cable[],
+  project?: Project,
 ): { fill: number; limit: number; ok: boolean } => {
-  const code = 'BS7671' as StandardsCode;
-  const limits = FILL_LIMITS[code];
-  let limit = 0.45;
-  switch (cont.containmentType) {
-    case 'trunking': limit = limits.trunking; break;
-    case 'conduit': limit = limits.conduit; break;
-    case 'tray': limit = limits.cableTray; break;
-    case 'ladder': limit = limits.cableLadder; break;
-    case 'basket': limit = limits.cableBasket; break;
-    default: limit = 0.45;
-  }
-  // Inner CSA — fall back to width × height
-  let innerCsa = cont.innerCsaMm2;
-  if (!innerCsa) {
-    const w = cont.width ?? 100;
-    const h = cont.height ?? 50;
-    innerCsa = w * h * 0.95; // 5% wall reduction for closed sections
-  }
-  if (innerCsa <= 0) return { fill: 0, limit, ok: true };
-  let occupied = 0;
-  for (const c of cables) {
-    const od = c.outerDiameter || 0;
-    if (od <= 0) continue;
-    occupied += Math.PI * (od / 2) ** 2;
-  }
-  const fill = occupied / innerCsa;
-  return { fill, limit, ok: fill <= limit };
+  const standards = project ? projectStandardsProfile(project) : DEFAULT_STANDARDS.BS7671;
+  const r = computeContainmentFill(cont, cables, standards);
+  return {
+    fill: r.fillPct / 100,
+    limit: r.limit,
+    ok: r.fillStatus !== 'over',
+  };
 };
 
-// Quick voltage-drop estimate using mV/A/m table (PVC SP single-phase,
-// copper). Conservative for unknown installations.
-export const estimateVdrop = (cable: Cable, lengthM: number): {
-  vdropV: number;
-  vdropPct: number;
-  ok: boolean;
-  limit: number;
-} => {
+const installationMethodFor = (cable: Cable): InstallationMethod => {
+  // Approximate installation method from the cable's first containment.
+  // The UI doesn't have a richer hint; fall back to a tray/clipped default.
+  return 'tray';
+};
+
+// Voltage-drop estimate. Adapts `computeVoltageDrop` to the legacy
+// {vdropV, vdropPct (fraction), ok, limit (fraction)} shape.
+export const estimateVdrop = (
+  cable: Cable,
+  lengthM: number,
+  project?: Project,
+): { vdropV: number; vdropPct: number; ok: boolean; limit: number } => {
   const ib = cable.designCurrent ?? 0;
-  const mvAm = VDROP_MV_A_M_PVC_SP[cable.csa] ?? 0;
-  const vdropV = (mvAm * ib * lengthM) / 1000;
-  const v = cable.voltage || 230;
-  const pct = vdropV / v;
-  const isLighting = cable.circuitType === 'power' ? false : false;
-  const limit = (isLighting ? VDROP_LIMITS.BS7671.lighting : VDROP_LIMITS.BS7671.other);
-  return { vdropV, vdropPct: pct, ok: pct <= limit, limit };
+  const standardsCode = project ? projectStandardsCode(project) : 'BS7671';
+  const loadCategory = cable.circuitType === 'fire-alarm' || cable.circuitType === 'emergency'
+    ? 'other'
+    : 'other';
+  const r = computeVoltageDrop({
+    construction: cable.construction,
+    csa: cable.csa,
+    lengthM,
+    designCurrentA: ib,
+    systemVoltageV: cable.voltage || 230,
+    phasing: cable.cores >= 3 ? 'three' : 'single',
+    loadCategory,
+    standardsCode,
+  });
+  return {
+    vdropV: r.vdropV,
+    vdropPct: r.vdropPct / 100,
+    ok: r.withinLimits,
+    limit: r.limitPct / 100,
+  };
 };
 
-// Quick ampacity check: derated ampacity from BS 7671 ref-method-C.
-export const estimateAmpacity = (cable: Cable): {
-  iz: number;
-  ib: number;
-  ok: boolean;
-} => {
+// Quick ampacity check using BS 7671 Reference Method C base ampacity table
+// combined with the derating factors engine (grouping based on cables on the
+// same containment when a project is supplied).
+export const estimateAmpacity = (
+  cable: Cable,
+  project?: Project,
+): { iz: number; ib: number; ok: boolean } => {
   const ib = cable.designCurrent ?? 0;
   const isXlpe = cable.construction.startsWith('XLPE');
-  const table = isXlpe ? AMPACITY_REF_C_XLPE_COPPER : AMPACITY_REF_C_PVC_COPPER;
-  const iz = table[cable.csa] ?? 0;
+  const baseTable = isXlpe ? AMPACITY_REF_C_XLPE_COPPER : AMPACITY_REF_C_PVC_COPPER;
+  const baseIz = baseTable[cable.csa] ?? 0;
+  // Estimate group size: the largest count of cables sharing any containment
+  // segment on this cable's route. Falls back to 1 when no project provided.
+  let numCircuits = 1;
+  if (project && cable.route.length > 0) {
+    const cables = project.cableSchedule?.cables ?? {};
+    const cableList = Object.values(cables);
+    let maxShared = 1;
+    for (const cid of cable.route) {
+      const shared = cableList.filter((c) => c.route.includes(cid)).length;
+      if (shared > maxShared) maxShared = shared;
+    }
+    numCircuits = maxShared;
+  }
+  const factors = computeDeratingFactors({
+    numCircuits,
+    ambientC: 30,
+    installationMethod: installationMethodFor(cable),
+    insulation: isXlpe ? 'XLPE' : 'PVC',
+  });
+  const iz = baseIz * factors.totalFactor;
   return { iz, ib, ok: iz >= ib };
 };
 
-// Estimate cable run length from route entities (sum polyline lengths in mm).
+// Estimate cable run length from route entities (sum polyline lengths in m).
+// Uses `polylineLength` from the supports calc module so this stays
+// consistent with what the compliance engine measures.
 export const estimateCableLength = (cable: Cable, project: Project): number => {
   let mm = 0;
   for (const sheetId of project.sheetOrder) {
@@ -97,15 +132,11 @@ export const estimateCableLength = (cable: Cable, project: Project): number => {
       if (e.kind === 'containment' || e.kind === 'wire') {
         const pts = (e as ContainmentEntity).points;
         if (!pts) continue;
-        for (let i = 1; i < pts.length; i++) {
-          const a = pts[i - 1];
-          const b = pts[i];
-          mm += Math.hypot(b.x - a.x, b.y - a.y);
-        }
+        mm += polylineLength(pts);
       }
     }
   }
-  return (mm / 1000) + (cable.lengthAllowance ?? 0);
+  return mm / 1000 + (cable.lengthAllowance ?? 0);
 };
 
 // Find the sheet that contains a given entity ID — used by drill-down
@@ -122,7 +153,9 @@ export const findSheetForEntity = (
 };
 
 // Filter helpers for the panels.
-export const allContainmentEntities = (project: Project): { entity: ContainmentEntity; sheetId: string }[] => {
+export const allContainmentEntities = (
+  project: Project,
+): { entity: ContainmentEntity; sheetId: string }[] => {
   const out: { entity: ContainmentEntity; sheetId: string }[] = [];
   for (const sid of project.sheetOrder) {
     const s = project.sheets[sid];
