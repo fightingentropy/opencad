@@ -846,6 +846,8 @@ export type ToolId =
   | 'leader'
   | 'section-marker'
   | 'level-marker'
+  | 'north-arrow'
+  | 'scale-bar'
   | 'revision-cloud'
   | 'fire-barrier';
 

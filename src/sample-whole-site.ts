@@ -21,11 +21,25 @@ import type {
   EntityId,
   EquipmentEntity,
   ContainmentEntity,
+  FittingEntity,
+  SupportEntity,
+  PenetrationEntity,
   WallEntity,
   RoomEntity,
   RiserEntity,
   TextEntity,
+  LeaderEntity,
+  NorthArrowEntity,
+  ScaleBarEntity,
+  GridLineEntity,
 } from './types';
+import {
+  autoPlaceFittingsForContainment,
+  autoPlaceSupportsForContainment,
+  autoDetectPenetrationsForContainment,
+} from './lib/auto-features';
+import { buildContainmentGraph } from './lib/containment-graph';
+import { routeCableThroughGraph } from './lib/cable-router';
 import type {
   Site,
   Building,
@@ -83,6 +97,7 @@ const wallSegment = (
   points: Vec2[],
   thickness: number,
   external = false,
+  fireRating?: WallEntity['fireRating'],
 ): WallEntity => ({
   id: newEntityId(),
   kind: 'wall',
@@ -93,6 +108,7 @@ const wallSegment = (
   thickness,
   height: 3000,
   external,
+  fireRating,
 });
 
 const room = (
@@ -329,15 +345,18 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
   addEntity(sheet, wallSegment(layers.wall, [{ x: 15000, y: 9400 }, { x: 19000, y: 9400 }], 150));
   addEntity(sheet, wallSegment(layers.wall, [{ x: 20000, y: 9400 }, { x: 24000, y: 9400 }], 150));
 
-  // South corridor wall (gaps for plant, meeting and comms doors)
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 0, y: 7400 }, { x: 2000, y: 7400 }], 150));
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 3000, y: 7400 }, { x: 8500, y: 7400 }], 150));
+  // South corridor wall (gaps for plant, meeting and comms doors).
+  // The plant / electrical-riser room is a separate fire compartment, so
+  // its boundary walls are 90-min fire rated. Comms is rated at 60.
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 0, y: 7400 }, { x: 2000, y: 7400 }], 150, false, 90));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 3000, y: 7400 }, { x: 8500, y: 7400 }], 150, false, 90));
   addEntity(sheet, wallSegment(layers.wall, [{ x: 9500, y: 7400 }, { x: 15500, y: 7400 }], 150));
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 16500, y: 7400 }, { x: 24000, y: 7400 }], 150));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 16500, y: 7400 }, { x: 24000, y: 7400 }], 150, false, 60));
 
-  // South dividers (between plant / meeting / comms)
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 6750, y: 0 }, { x: 6750, y: 7400 }], 200));
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 13750, y: 0 }, { x: 13750, y: 7400 }], 200));
+  // South dividers (between plant / meeting / comms). The plant divider is
+  // a fire compartment boundary at 90 min; the comms divider at 60 min.
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 6750, y: 0 }, { x: 6750, y: 7400 }], 200, false, 90));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 13750, y: 0 }, { x: 13750, y: 7400 }], 200, false, 60));
   // North divider between east and west open-plan offices
   addEntity(sheet, wallSegment(layers.wall, [{ x: 12000, y: 9400 }, { x: 12000, y: 16000 }], 150));
 
@@ -532,6 +551,109 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
   addEntity(sheet, drop2);
   containmentList.push(drop2);
 
+  // Equipment branches — short conduits / trunking dropping from the
+  // corridor spine into each room so the cable router can find a node
+  // within snap tolerance of every panel/cabinet.
+  if (level === 'G') {
+    // Power branch reaching MCC-01 (in plant @ ~y=4800)
+    const brMCC = containment(
+      layers.containment,
+      'trunking',
+      [{ x: 2200, y: corridorY }, { x: 2200, y: 4800 }],
+      150,
+      150,
+      systems.powerDistribution,
+      'Branch to MCC-01',
+      'power',
+    );
+    addEntity(sheet, brMCC);
+    containmentList.push(brMCC);
+
+    // Power branch reaching DB-OF-G (in plant @ ~y=4625)
+    const brDBg = containment(
+      layers.containment,
+      'conduit',
+      [{ x: 4900, y: corridorY }, { x: 4900, y: 4625 }],
+      63,
+      undefined,
+      systems.powerDistribution,
+      'Branch to DB-OF-G',
+      'power',
+    );
+    addEntity(sheet, brDBg);
+    containmentList.push(brDBg);
+
+    // Fire-alarm conduit branch to FAP-01 (in plant @ ~y=6325)
+    const brFAP = containment(
+      layers.containment,
+      'conduit',
+      [{ x: 1000, y: corridorY - 450 }, { x: 1000, y: 6325 }],
+      32,
+      undefined,
+      systems.fireAlarm,
+      'Branch to FAP-01',
+      'fire-alarm',
+    );
+    addEntity(sheet, brFAP);
+    containmentList.push(brFAP);
+
+    // Data basket branch into comms room reaching CR-01 (@ ~(15100,5300))
+    const brCR = containment(
+      layers.containment,
+      'basket',
+      [{ x: 15100, y: corridorY - 250 }, { x: 15100, y: 5300 }],
+      300,
+      100,
+      systems.data,
+      'Branch to CR-01',
+      'data',
+    );
+    addEntity(sheet, brCR);
+    containmentList.push(brCR);
+
+    // Data basket branch reaching IDF-OF-G in east office (~y=10100)
+    const brIDFg = containment(
+      layers.containment,
+      'basket',
+      [{ x: 8900, y: corridorY - 250 }, { x: 8900, y: 10100 }],
+      200,
+      100,
+      systems.data,
+      'Branch to IDF-OF-G',
+      'data',
+    );
+    addEntity(sheet, brIDFg);
+    containmentList.push(brIDFg);
+  } else {
+    // Office L1 — branch reaching DB-OF-1 near riser (~(1600,5525))
+    const brDB1 = containment(
+      layers.containment,
+      'trunking',
+      [{ x: 1600, y: corridorY }, { x: 1600, y: 5525 }],
+      150,
+      150,
+      systems.powerDistribution,
+      'Branch to DB-OF-1',
+      'power',
+    );
+    addEntity(sheet, brDB1);
+    containmentList.push(brDB1);
+
+    // Data basket branch reaching IDF-OF-1 (~(19400,5900))
+    const brIDF1 = containment(
+      layers.containment,
+      'basket',
+      [{ x: 19400, y: corridorY - 250 }, { x: 19400, y: 5900 }],
+      200,
+      100,
+      systems.data,
+      'Branch to IDF-OF-1',
+      'data',
+    );
+    addEntity(sheet, brIDF1);
+    containmentList.push(brIDF1);
+  }
+
   // Riser positions — top-left corner of plant on level G, same point on L1
   const riserPositions: Vec2[] = level === 'G' ? [{ x: 1200, y: 6800 }] : [{ x: 1200, y: 6800 }];
 
@@ -607,9 +729,10 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
     { x: 0, y: 0 },
   ], 300, true));
 
-  // MCC partition wall with a doorway
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 4400, y: 0 }, { x: 4400, y: 7000 }], 200));
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 4400, y: 8000 }, { x: 4400, y: 18000 }], 200));
+  // MCC partition wall with a doorway. The MCC / electrical-riser room is
+  // a 90-min fire compartment, so its boundary wall is rated.
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 4400, y: 0 }, { x: 4400, y: 7000 }], 200, false, 90));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 4400, y: 8000 }, { x: 4400, y: 18000 }], 200, false, 90));
 
   const equipmentList: EquipmentEntity[] = [];
   const containmentList: ContainmentEntity[] = [];
@@ -722,6 +845,92 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
   );
   addEntity(sheet, conduit);
   containmentList.push(conduit);
+
+  if (!isMezzanine) {
+    // MCC-room riser feeder — runs from ladder across the partition wall
+    // (penetration!) into the electrical-riser room and drops to DB-PL-G
+    // (~y=9175) and the comms cabinet CAB-PL-G (~y=6900).
+    const mccFeeder = containment(
+      layers.containment,
+      'trunking',
+      [
+        { x: 4500, y: 9000 },
+        { x: 1100, y: 9000 },
+        { x: 1100, y: 9175 },
+      ],
+      200,
+      150,
+      systems.powerDistribution,
+      'MCC-room sub-main feeder',
+      'power',
+    );
+    addEntity(sheet, mccFeeder);
+    containmentList.push(mccFeeder);
+
+    // Data branch into the MCC room reaching CAB-PL-G
+    const cabBranch = containment(
+      layers.containment,
+      'basket',
+      [
+        { x: 4500, y: 9300 },
+        { x: 1000, y: 9300 },
+        { x: 1000, y: 6900 },
+      ],
+      200,
+      100,
+      systems.data,
+      'Branch to CAB-PL-G',
+      'data',
+    );
+    addEntity(sheet, cabBranch);
+    containmentList.push(cabBranch);
+
+    // AHU drop — short conduit from ladder to AHU-01 connection (~y=9500)
+    const ahuBranch = containment(
+      layers.containment,
+      'conduit',
+      [{ x: 9500, y: 9000 }, { x: 9500, y: 9500 }],
+      40,
+      undefined,
+      systems.powerDistribution,
+      'Branch to AHU-01',
+      'power',
+    );
+    addEntity(sheet, ahuBranch);
+    containmentList.push(ahuBranch);
+
+    // Pump P-01 branch — runs from ladder to pump (~y=14250)
+    const pumpBranch = containment(
+      layers.containment,
+      'conduit',
+      [{ x: 18750, y: 9000 }, { x: 18750, y: 14250 }],
+      40,
+      undefined,
+      systems.powerDistribution,
+      'Branch to P-01',
+      'power',
+    );
+    addEntity(sheet, pumpBranch);
+    containmentList.push(pumpBranch);
+  } else {
+    // Plant deck DB sub-main — short branch from ladder up to DB-PL-D
+    const dbDeckBranch = containment(
+      layers.containment,
+      'trunking',
+      [
+        { x: 4500, y: 9000 },
+        { x: 1100, y: 9000 },
+        { x: 1100, y: 9175 },
+      ],
+      150,
+      150,
+      systems.powerDistribution,
+      'Branch to DB-PL-D',
+      'power',
+    );
+    addEntity(sheet, dbDeckBranch);
+    containmentList.push(dbDeckBranch);
+  }
 
   // Title block
   addEntity(sheet, text(layers.annotation, { x: 600, y: 17500 },

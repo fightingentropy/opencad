@@ -25,6 +25,12 @@ const ICONS: Partial<Record<ToolId, JSX.Element>> = {
   'conduit':   <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2.5" strokeLinecap="round"><line x1="3" y1="12" x2="21" y2="12"/></svg>,
   'wall':      <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="1.5"><rect x="3" y="10" width="18" height="4" fill="currentColor" fillOpacity="0.3"/></svg>,
   'room':      <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="1.5"><rect x="4" y="6" width="16" height="12"/><line x1="4" y1="12" x2="20" y2="12"/></svg>,
+  'equipment': <svg viewBox="0 0 16 16" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="10" height="10"/><line x1="6" y1="6" x2="10" y2="6"/><line x1="6" y1="10" x2="10" y2="10"/></svg>,
+  'support':   <svg viewBox="0 0 16 16" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v10M3 13h10"/><path d="M3 6l4 4"/></svg>,
+  'leader':    <svg viewBox="0 0 16 16" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="13" x2="7" y2="9"/><polyline points="3,13 5,11 3,9"/><line x1="7" y1="9" x2="13" y2="9"/></svg>,
+  'level-marker': <svg viewBox="0 0 16 16" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="8,4 12,10 4,10"/><line x1="2" y1="13" x2="14" y2="13"/></svg>,
+  'north-arrow': <svg viewBox="0 0 16 16" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6"/><line x1="8" y1="3" x2="8" y2="13"/><polyline points="6,5 8,3 10,5"/></svg>,
+  'scale-bar': <svg viewBox="0 0 16 16" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="6" width="12" height="4"/><line x1="6" y1="6" x2="6" y2="10"/><line x1="10" y1="6" x2="10" y2="10"/></svg>,
 };
 
 const TOOL_DEFS: { id: ToolId; label: string; group: string; key?: string }[] = [
@@ -44,12 +50,18 @@ const TOOL_DEFS: { id: ToolId; label: string; group: string; key?: string }[] = 
   { id: 'conduit', label: 'Conduit', group: 'Contain' },
   { id: 'wall', label: 'Wall', group: 'Building' },
   { id: 'room', label: 'Room', group: 'Building' },
+  { id: 'equipment', label: 'Equip', group: 'Place' },
+  { id: 'support', label: 'Sup', group: 'Place' },
+  { id: 'leader', label: 'Leader', group: 'Place' },
+  { id: 'level-marker', label: 'Level', group: 'Place' },
+  { id: 'north-arrow', label: 'North', group: 'Place' },
+  { id: 'scale-bar', label: 'Scale', group: 'Place' },
   { id: 'text', label: 'Text', group: 'Annot', key: 'T' },
   { id: 'dimension', label: 'Dim', group: 'Annot', key: 'D' },
   { id: 'measure', label: 'Measure', group: 'Annot', key: 'M' },
 ];
 
-const GROUPS = ['Edit', 'Draw', 'Wire', 'Contain', 'Building', 'Annot'];
+const GROUPS = ['Edit', 'Draw', 'Wire', 'Contain', 'Building', 'Place', 'Annot'];
 
 export function Ribbon() {
   const tool = useStore((s) => s.editor.tool);

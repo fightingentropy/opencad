@@ -1,6 +1,7 @@
 import type { Project } from '../types';
 import { emptyCableSchedule } from '../models/cable';
 import { DEFAULT_STANDARDS } from '../models/standards';
+import { loadDefaultCatalogues } from '../data/catalogues';
 
 // Bump this whenever the bundled sample project changes meaningfully —
 // users with an autosave from a previous demo will skip it and load the
@@ -19,12 +20,18 @@ function migrateProject(parsed: Project): Project {
   const next: Project = { ...parsed };
   if (!next.cableSchedule) next.cableSchedule = emptyCableSchedule();
   if (!next.standardsProfile) next.standardsProfile = DEFAULT_STANDARDS.BS7671;
+  // Catalogues are large but bundled with the app — we always rehydrate
+  // them so the Catalogue Browser populates after a reload (saved
+  // projects don't need to round-trip 366 products through localStorage).
+  if (!next.catalogues || Object.keys(next.catalogues).length === 0) {
+    next.catalogues = loadDefaultCatalogues();
+  }
   // sites / buildings / floors / zones / systems are intentionally left
   // undefined — the UI handles their absence and treats the project as a
   // single-sheet drawing rather than a whole-site project.
-  // catalogues / penetrationSeals / itpItems / markups likewise stay
-  // undefined; introducing empty records would burden every consumer with
-  // a "show empty list" branch.
+  // penetrationSeals / itpItems / markups likewise stay undefined;
+  // introducing empty records would burden every consumer with a "show
+  // empty list" branch.
   return next;
 }
 
@@ -70,9 +77,14 @@ export interface SaveResult {
 let quotaWarned = false;
 
 export function saveStoredProject(p: Project): SaveResult {
+  // Strip the catalogues before serialising — they're 100KB+ of static
+  // product data we re-load from the bundle on the next visit. Cuts the
+  // typical save from ~250KB to ~150KB and leaves more room before
+  // hitting the localStorage 5MB quota.
+  const { catalogues: _omit, ...stripped } = p;
   let serialized = '';
   try {
-    serialized = JSON.stringify(p);
+    serialized = JSON.stringify(stripped);
   } catch {
     return { ok: false, reason: 'unknown' };
   }
