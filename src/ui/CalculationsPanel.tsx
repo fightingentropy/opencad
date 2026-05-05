@@ -1,14 +1,25 @@
 import React, { useMemo } from 'react';
 import { useStore } from '../state/store';
 import type { ContainmentEntity, Entity } from '../types';
+import type { Cable } from '../models/cable';
+import {
+  computeContainmentFill,
+  computeDeratingFactors,
+  computeVoltageDrop,
+  polylineLength,
+  type InstallationMethod,
+} from '../calc';
+import {
+  AMPACITY_REF_C_PVC_COPPER,
+  AMPACITY_REF_C_XLPE_COPPER,
+  DEFAULT_STANDARDS,
+} from '../models/standards';
 import {
   cablesOnContainment,
-  computeFill,
-  estimateAmpacity,
   estimateCableLength,
-  estimateVdrop,
   fmtNum,
   fmtPct,
+  projectStandardsCode,
 } from './whole-site-helpers';
 
 export function CalculationsPanel() {
@@ -44,16 +55,13 @@ function ContainmentCalcs({ entity }: { entity: ContainmentEntity }) {
   const sheet = project.sheets[project.activeSheetId];
 
   const cables = useMemo(() => cablesOnContainment(project, entity.id), [project, entity.id]);
-  const fill = useMemo(() => computeFill(entity, cables), [entity, cables]);
+  const standards = project.standardsProfile ?? DEFAULT_STANDARDS.BS7671;
+  const fill = useMemo(
+    () => computeContainmentFill(entity, cables, standards),
+    [entity, cables, standards],
+  );
 
-  const lengthM = useMemo(() => {
-    let mm = 0;
-    const pts = entity.points ?? [];
-    for (let i = 1; i < pts.length; i++) {
-      mm += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
-    }
-    return mm / 1000;
-  }, [entity.points]);
+  const lengthM = useMemo(() => polylineLength(entity.points ?? []) / 1000, [entity.points]);
 
   // Count fittings & supports tied to this containment
   const { fittings, supports } = useMemo(() => {
@@ -67,6 +75,10 @@ function ContainmentCalcs({ entity }: { entity: ContainmentEntity }) {
     return { fittings: f, supports: s };
   }, [sheet, entity.id]);
 
+  const fillStatus = fill.fillStatus;
+  const fillAccent: 'good' | 'fail' | undefined =
+    fillStatus === 'over' ? 'fail' : fillStatus === 'ok' ? 'good' : undefined;
+
   return (
     <div className="calc-section">
       <Row label="Type" value={entity.containmentType} />
@@ -74,15 +86,22 @@ function ContainmentCalcs({ entity }: { entity: ContainmentEntity }) {
       <Row label="Length" value={`${fmtNum(lengthM, 2)} m`} />
       <Row
         label="Fill"
-        value={`${fmtPct(fill.fill)} / ${fmtPct(fill.limit)}`}
-        accent={fill.ok ? 'good' : 'fail'}
+        value={`${fmtNum(fill.fillPct, 1)}% / ${fmtPct(fill.limit)}`}
+        accent={fillAccent}
       />
+      <Row label="Inner area" value={`${fmtNum(fill.innerAreaMm2, 0)} mm²`} />
       <Row label="Cables" value={`${cables.length}`} />
       <Row label="Fittings" value={`${fittings}`} />
       <Row label="Supports" value={`${supports}`} />
     </div>
   );
 }
+
+const installationMethodFor = (cable: Cable): InstallationMethod => {
+  // The wire might pass through any containment; default to tray which
+  // matches the BS 7671 Reference Method C ampacity table we use for Iz.
+  return 'tray';
+};
 
 function WireCalcs({ entity }: { entity: any }) {
   const project = useStore((s) => s.project);
@@ -96,9 +115,49 @@ function WireCalcs({ entity }: { entity: any }) {
     );
   }
 
-  const len = estimateCableLength(cable, project);
-  const amp = estimateAmpacity(cable);
-  const vd = estimateVdrop(cable, len);
+  const len = useMemo(
+    () => cable.estimatedLength ?? estimateCableLength(cable, project),
+    [cable, project],
+  );
+
+  const standardsCode = projectStandardsCode(project);
+  const isXlpe = cable.construction.startsWith('XLPE');
+  const baseTable = isXlpe ? AMPACITY_REF_C_XLPE_COPPER : AMPACITY_REF_C_PVC_COPPER;
+  const baseAmp = baseTable[cable.csa] ?? 0;
+
+  // Estimate group size from cables sharing route
+  const numCircuits = useMemo(() => {
+    if (cable.route.length === 0) return 1;
+    const cables = Object.values(project.cableSchedule?.cables ?? {});
+    let max = 1;
+    for (const cid of cable.route) {
+      const shared = cables.filter((c) => c.route.includes(cid)).length;
+      if (shared > max) max = shared;
+    }
+    return max;
+  }, [cable, project]);
+
+  const derating = useMemo(() => computeDeratingFactors({
+    numCircuits,
+    ambientC: 30,
+    installationMethod: installationMethodFor(cable),
+    insulation: isXlpe ? 'XLPE' : 'PVC',
+  }), [cable, numCircuits, isXlpe]);
+
+  const deratedAmp = baseAmp * derating.totalFactor;
+  const ib = cable.designCurrent ?? 0;
+  const ampacityOk = deratedAmp >= ib;
+
+  const vdrop = useMemo(() => computeVoltageDrop({
+    construction: cable.construction,
+    csa: cable.csa,
+    lengthM: len,
+    designCurrentA: ib,
+    systemVoltageV: cable.voltage || 230,
+    phasing: cable.cores >= 3 ? 'three' : 'single',
+    loadCategory: 'other',
+    standardsCode,
+  }), [cable, len, ib, standardsCode]);
 
   return (
     <div className="calc-section">
@@ -106,15 +165,17 @@ function WireCalcs({ entity }: { entity: any }) {
       <Row label="From → To" value={`${cable.from} → ${cable.to}`} />
       <Row label="Cores × CSA" value={`${cable.cores} × ${cable.csa} mm²`} />
       <Row label="Length" value={`${fmtNum(len, 2)} m`} />
+      <Row label="Base Iz" value={`${fmtNum(baseAmp, 0)} A`} />
+      <Row label="Derate factors" value={`Cg ${fmtNum(derating.Cg, 2)} · Ca ${fmtNum(derating.Ca, 2)} · Cc ${fmtNum(derating.Cc, 2)}`} />
       <Row
-        label="Ampacity"
-        value={`Iz ${fmtNum(amp.iz, 0)} A · Ib ${fmtNum(amp.ib, 0)} A`}
-        accent={amp.ok ? 'good' : 'fail'}
+        label="Derated Iz"
+        value={`${fmtNum(deratedAmp, 0)} A · Ib ${fmtNum(ib, 0)} A`}
+        accent={ampacityOk ? 'good' : 'fail'}
       />
       <Row
         label="V-drop"
-        value={`${fmtNum(vd.vdropV, 2)} V · ${fmtNum(vd.vdropPct * 100, 2)}%`}
-        accent={vd.ok ? 'good' : 'fail'}
+        value={`${fmtNum(vdrop.vdropV, 2)} V · ${fmtNum(vdrop.vdropPct, 2)}% / ${fmtNum(vdrop.limitPct, 1)}%`}
+        accent={vdrop.withinLimits ? 'good' : 'fail'}
       />
     </div>
   );

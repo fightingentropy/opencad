@@ -5,6 +5,7 @@ import type { Cable, CableCircuitType, CableSchedule } from '../models/cable';
 import type { ContainmentEntity, EquipmentEntity, Vec2 } from '../types';
 import { CableEditDialog } from './CableEditDialog';
 import { estimateAmpacity, estimateCableLength, estimateVdrop, fmtNum } from './whole-site-helpers';
+import { computeVoltageDrop } from '../calc';
 import { buildContainmentGraph } from '../lib/containment-graph';
 import { routeCableThroughGraph } from '../lib/cable-router';
 
@@ -285,12 +286,21 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
                 </td></tr>
               )}
               {visible.map((c) => {
-                const len = estimateCableLength(c, project);
-                const amp = estimateAmpacity(c);
-                const vd = estimateVdrop(c, len);
+                const len = c.estimatedLength ?? estimateCableLength(c, project);
+                const amp = estimateAmpacity(c, project);
+                const vd = computeVoltageDrop({
+                  construction: c.construction,
+                  csa: c.csa,
+                  lengthM: len,
+                  designCurrentA: c.designCurrent ?? 0,
+                  systemVoltageV: c.voltage || 230,
+                  phasing: c.cores >= 3 ? 'three' : 'single',
+                  loadCategory: 'other',
+                  standardsCode: project.standardsProfile?.code ?? 'BS7671',
+                });
                 const failures: string[] = [];
                 if (!amp.ok && amp.ib > 0) failures.push('ampacity');
-                if (!vd.ok) failures.push('vdrop');
+                if (!vd.withinLimits) failures.push('vdrop');
                 const sysName = c.systemId ? project.systems?.[c.systemId]?.name ?? c.systemId : '—';
                 return (
                   <tr key={c.id} className={failures.length ? 'has-warn' : ''}>
@@ -357,7 +367,7 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
                         onChange={(e) => inlineSet(c.id, 'designCurrent', parseFloat(e.target.value) || undefined)}
                       />
                     </td>
-                    <td className={vd.ok ? '' : 'fail'}>{fmtNum(vd.vdropPct * 100, 2)}%</td>
+                    <td className={vd.withinLimits ? '' : 'fail'}>{fmtNum(vd.vdropPct, 2)}%</td>
                     <td>{c.status ?? 'design'}</td>
                     <td>
                       <button className="btn-ghost btn-tiny" onClick={() => setEditing(c)}>Edit</button>
