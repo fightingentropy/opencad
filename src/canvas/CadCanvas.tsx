@@ -16,6 +16,7 @@ import {
   autoPlaceSupportsForContainment,
   autoDetectPenetrationsForContainment,
 } from '../lib/auto-features';
+import { publishPresence as publishCollabPresence } from '../collab/runtime';
 
 // After committing one or more containments, derive their fittings,
 // supports, and fire-stop penetrations and dispatch them as a single
@@ -89,6 +90,10 @@ export function CadCanvas() {
   // Transient ref: when true, the auto-route L-shape direction is flipped
   // (toggled by Tab while drawing a wire). Reset when the wire finishes.
   const autoRouteFlipRef = useRef(false);
+
+  // Throttle for collab presence publishing — keep the cursor smooth
+  // for remote peers without flooding awareness. ~30ms = 33Hz.
+  const lastPresencePublishRef = useRef(0);
 
   const sheet = project.sheets[project.activeSheetId];
   const activeLayerId = project.activeLayerId;
@@ -202,6 +207,20 @@ export function CadCanvas() {
       symbolLookup: getSymbol,
     }, (id) => project.layers[id]?.visible ?? true);
     setCursor(world, snap.kind === 'none' ? null : snap.point, snap.kind);
+
+    // Publish cursor to collaboration peers (no-op if collab inactive).
+    // Throttled so high-frequency mousemove events don't saturate the
+    // awareness channel. The runtime helper short-circuits when no
+    // session is active, so single-player pays nothing here.
+    const now = Date.now();
+    if (now - lastPresencePublishRef.current >= 30) {
+      lastPresencePublishRef.current = now;
+      publishCollabPresence({
+        sheetId: project.activeSheetId,
+        cursor: snap.kind === 'none' ? world : snap.point,
+        selection: Array.from(editor.selection),
+      });
+    }
 
     if (panning) {
       const v = editor.viewport;
