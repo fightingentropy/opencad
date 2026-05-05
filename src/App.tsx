@@ -285,6 +285,7 @@ export function App() {
           onClose={() => setCrossSectionEntityId(null)}
         />
       )}
+      {collabOpen && <CollaborationModal onClose={() => setCollabOpen(false)} />}
     </div>
   );
 }
