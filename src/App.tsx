@@ -18,6 +18,7 @@ import { Panel3DContainer } from './three/Panel3DContainer';
 import { createSampleProject } from './sample';
 import { createWholeSiteSampleProject } from './sample-whole-site';
 import { loadStoredProject, saveStoredProject } from './io/persist';
+import { fitViewportToSheet } from './lib/fit';
 
 const STORED_3D_WIDTH_KEY = 'opencad.panel3dWidth';
 const MOBILE_BREAKPOINT = 900;
@@ -178,9 +179,7 @@ export function App() {
     const canvas = document.querySelector('canvas.canvas-2d') as HTMLCanvasElement | null;
     const w = canvas?.clientWidth ?? window.innerWidth - 500;
     const h = canvas?.clientHeight ?? window.innerHeight - 200;
-    import('./lib/fit').then(({ fitViewportToSheet }) => {
-      state.setViewport(fitViewportToSheet(sheet, w, h));
-    });
+    state.setViewport(fitViewportToSheet(sheet, w, h));
   };
 
   return (

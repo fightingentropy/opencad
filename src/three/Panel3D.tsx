@@ -17,39 +17,15 @@ import type {
   Vec2,
 } from '../types';
 
-// We want to look up the symbol category by id. The library file may not
-// exist yet, so we attempt a soft import and fall back gracefully.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let _getSymbolImpl: ((id: string) => any) | null = null;
-try {
-  // Using a dynamic-ish require pattern via top-level import is not allowed
-  // for optional modules under Vite, so we use a synchronous-looking import
-  // wrapped in try/catch. Vite bundles this if the file exists.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-  // Note: actual lookup is done at runtime via a registry approach if missing.
-} catch {
-  _getSymbolImpl = null;
-}
+// Symbol library is statically bundled — `getSymbol` returns null when an
+// id isn't registered, so we just call it directly. The previous dynamic
+// import dance prevented Vite from putting the library in its own chunk.
+import { getSymbol as _getSymbolImpl } from '../symbols';
 
-// Asynchronously try to load the symbols library so we can read categories.
-// This is fire-and-forget; the component re-uses heuristics from symbolId
-// names if the library is unavailable.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let _symbolRegistry: Record<string, any> | null = null;
-async function ensureSymbolLibrary() {
-  if (_symbolRegistry !== null || _getSymbolImpl) return;
-  try {
-    const mod = (await import(/* @vite-ignore */ '../symbols/library')) as {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      getSymbol?: (id: string) => any;
-    };
-    if (mod && typeof mod.getSymbol === 'function') {
-      _getSymbolImpl = mod.getSymbol;
-    }
-  } catch {
-    // library not available — we'll rely on heuristics
-    _symbolRegistry = {};
-  }
+// Stub kept for call-site compatibility — the static import means the
+// library is always available.
+async function ensureSymbolLibrary(): Promise<void> {
+  return;
 }
 
 // Heuristic category mapping from symbolId substrings.
