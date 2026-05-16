@@ -74,6 +74,14 @@ describe('renderFitting3D', () => {
     expect(meshesContaining(obj, new THREE.Vector3(0, 0, 0))).toHaveLength(0);
   });
 
+  it('renders tray flat bends as side plates instead of a bulky tube', () => {
+    const tray = containment('tray-1', 'tray');
+    const obj = renderFitting3D(fitting('flat-bend', tray.id), { parent: tray });
+
+    expect(meshCount(obj)).toBe(4);
+    expect(meshesContaining(obj, new THREE.Vector3(0, 0, 0))).toHaveLength(0);
+  });
+
   it('keeps closed trunking end caps visible', () => {
     const trunking = containment('trunking-1', 'trunking');
     const obj = renderFitting3D(fitting('end-cap', trunking.id), { parent: trunking });
