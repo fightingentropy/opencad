@@ -2,7 +2,7 @@
 // Uses Three.js (already in package.json). Receives the active project
 // and renders the active sheet's symbol entities as 3D components on a
 // DIN-rail enclosure.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import type {
   Project,
@@ -1872,6 +1872,7 @@ export function Panel3D({
   viewPreset = 'iso',
 }: Panel3DProps): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
 
   // Persistent three.js refs across renders/effects
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -1988,11 +1989,23 @@ export function Panel3D({
     cameraRef.current = camera;
 
     // Renderer
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: false,
-      powerPreference: 'high-performance',
-    });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: false,
+        powerPreference: 'high-performance',
+      });
+      setRenderError(null);
+    } catch {
+      setRenderError('3D rendering is unavailable because WebGL could not start in this browser.');
+      disposeObject(scene);
+      sceneRef.current = null;
+      cameraRef.current = null;
+      skyMeshRef.current = null;
+      skyMatRef.current = null;
+      return;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(initialW, initialH, false);
     renderer.shadowMap.enabled = true;
@@ -2537,7 +2550,11 @@ export function Panel3D({
     cursor: 'grab',
   };
 
-  return <div ref={mountRef} style={style} />;
+  return (
+    <div ref={mountRef} style={style}>
+      {renderError && <div className="canvas-3d-fallback">{renderError}</div>}
+    </div>
+  );
 }
 
 export default Panel3D;
