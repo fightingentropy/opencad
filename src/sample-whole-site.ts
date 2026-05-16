@@ -1564,26 +1564,127 @@ export const createWholeSiteSampleProject = (): Project => {
     }
   }
 
+  // ---------- Inter-building services ----------
+  // The campus is two separate buildings. Model the physical connection as
+  // underground ducts from the Office corridor containment to Plant west-wall
+  // entry sleeves, then short Plant-side duct entries into the internal ladder,
+  // basket and FA routes.
+  const undergroundDuct = (
+    label: string,
+    points: Vec2[],
+    systemId: SystemId,
+    cableCategory: ContainmentEntity['cableCategory'],
+    width = 180,
+  ): ContainmentEntity => ({
+    ...containment(layers.containment, 'duct', points, width, 100, systemId, label, cableCategory),
+    subType: 'underground-duct',
+    elevation: 80,
+    material: 'grp',
+    loadClass: 'D',
+  });
+
+  const officeGroundSheet = project.sheets[officeG.sheet.id];
+  const plantGroundSheet = project.sheets[plantG.sheet.id];
+  if (officeGroundSheet && plantGroundSheet) {
+    const siteLvDuct = undergroundDuct(
+      'Site LV duct bank — Office to Plant',
+      [
+        { x: 22800, y: 8400 },
+        { x: 24000, y: 8400 },
+        { x: 30000, y: 9000 },
+      ],
+      systemPower.id,
+      'power',
+      300,
+    );
+    const plantLvEntry = undergroundDuct(
+      'Plant LV duct entry sleeve',
+      [{ x: 0, y: 9000 }, { x: 4500, y: 9000 }],
+      systemPower.id,
+      'power',
+      300,
+    );
+    const siteDataDuct = undergroundDuct(
+      'Site data duct bank — Office to Plant',
+      [
+        { x: 22800, y: 8150 },
+        { x: 24000, y: 8150 },
+        { x: 30000, y: 9300 },
+      ],
+      systemData.id,
+      'data',
+      220,
+    );
+    const plantDataEntry = undergroundDuct(
+      'Plant data duct entry sleeve',
+      [{ x: 0, y: 9300 }, { x: 4500, y: 9300 }],
+      systemData.id,
+      'data',
+      220,
+    );
+    const siteFaDuct = undergroundDuct(
+      'Site fire alarm duct — Office to Plant',
+      [
+        { x: 23400, y: 7950 },
+        { x: 24000, y: 7950 },
+        { x: 30000, y: 8800 },
+      ],
+      systemFA.id,
+      'fire-alarm',
+      120,
+    );
+    const plantFaEntry = undergroundDuct(
+      'Plant fire alarm duct entry sleeve',
+      [{ x: 0, y: 8800 }, { x: 4500, y: 8800 }],
+      systemFA.id,
+      'fire-alarm',
+      120,
+    );
+
+    for (const duct of [siteLvDuct, siteDataDuct, siteFaDuct]) {
+      addEntity(officeGroundSheet, duct);
+      officeG.containment.push(duct);
+    }
+    for (const duct of [plantLvEntry, plantDataEntry, plantFaEntry]) {
+      addEntity(plantGroundSheet, duct);
+      plantG.containment.push(duct);
+    }
+  }
+
   // ---------- Auto-route every cable through the containment graph ----------
-  // Aggregate every containment in the project (across floors) — risers
-  // are deliberately excluded because they're modelled as point markers,
-  // not polylines, so the router can't traverse them. Cables that need to
-  // cross buildings will fail and we tag them with a manual-routing note.
+  // Aggregate every containment in the project (across floors) in site
+  // coordinates. Risers are deliberately excluded because they're modelled as
+  // point markers, not polylines, so the 2D router can't traverse them.
   const allContainments: ContainmentEntity[] = [];
   const equipmentCenterById = new Map<string, Vec2>();
   const equipmentCenterByTag = new Map<string, Vec2>();
   const equipmentBuildingByTag = new Map<string, string | undefined>();
+  const sheetOrigin = (sheet: Sheet): Vec2 => {
+    const building = sheet.buildingId ? buildings[sheet.buildingId] : undefined;
+    return {
+      x: building?.gridOriginX ?? 0,
+      y: building?.gridOriginY ?? 0,
+    };
+  };
   for (const sid of project.sheetOrder) {
     const sheet = project.sheets[sid];
     if (!sheet) continue;
+    const origin = sheetOrigin(sheet);
     for (const eid of sheet.entityOrder) {
       const e = sheet.entities[eid];
       if (!e) continue;
       if (e.kind === 'containment') {
-        allContainments.push(e as ContainmentEntity);
+        const c = e as ContainmentEntity;
+        allContainments.push({
+          ...c,
+          points: c.points.map((p) => ({ x: p.x + origin.x, y: p.y + origin.y })),
+        });
       } else if (e.kind === 'equipment') {
         const eq = e as EquipmentEntity;
-        const center: Vec2 = { x: (eq.a.x + eq.b.x) / 2, y: (eq.a.y + eq.b.y) / 2 };
+        const center: Vec2 = {
+          x: origin.x + (eq.a.x + eq.b.x) / 2,
+          y: origin.y + (eq.a.y + eq.b.y) / 2,
+        };
         equipmentCenterById.set(eq.id, center);
         equipmentCenterByTag.set(eq.tag, center);
         equipmentBuildingByTag.set(eq.tag, sheet.buildingId);
@@ -1607,8 +1708,6 @@ export const createWholeSiteSampleProject = (): Project => {
         'Manual routing required — endpoints not modelled as equipment';
       continue;
     }
-    // Pre-flag cross-building cables — the per-building containment networks
-    // aren't joined in the graph, so the router can't span them.
     const fromBuilding = equipmentBuildingByTag.get(cable.from);
     const toBuilding = equipmentBuildingByTag.get(cable.to);
     const crossesBuilding = !!(fromBuilding && toBuilding && fromBuilding !== toBuilding);
@@ -1642,7 +1741,7 @@ export const createWholeSiteSampleProject = (): Project => {
     } else {
       cable.route = [];
       cable.notes = crossesBuilding
-        ? 'Manual routing required — crosses building boundary'
+        ? 'Manual routing required — no modelled inter-building duct path'
         : result.warnings[0]
           ? `Manual routing required — ${result.warnings[0]}`
           : 'Manual routing required — no compliant path through containment';
