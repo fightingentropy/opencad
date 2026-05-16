@@ -767,7 +767,7 @@ function formatLevelMm(value: number): string {
   return `${rounded > 0 ? '+' : '-'}${Math.abs(rounded).toLocaleString('en-GB')}`;
 }
 
-function makeDatumLabelSprite(text: string): THREE.Sprite {
+function makeDatumLabelSprite(text: string, opacity = 0.72): THREE.Sprite {
   if (typeof document === 'undefined') {
     const fallback = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, opacity: 0 }));
     fallback.scale.set(900, 220, 1);
@@ -796,10 +796,12 @@ function makeDatumLabelSprite(text: string): THREE.Sprite {
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
     map: texture,
     transparent: true,
-    depthTest: false,
+    opacity,
+    depthTest: true,
+    depthWrite: false,
   }));
   sprite.scale.set(900, 220, 1);
-  sprite.renderOrder = 20;
+  sprite.renderOrder = 6;
   sprite.userData.layer = 'labels';
   return sprite;
 }
@@ -821,14 +823,14 @@ function buildFflMarker(floor: Floor, bounds: Bounds2D | null): THREE.Group {
   const lineMat = new THREE.LineBasicMaterial({
     color: 0x1677ff,
     transparent: true,
-    opacity: 0.95,
-    depthTest: false,
+    opacity: 0.38,
+    depthTest: true,
   });
   const tickMat = new THREE.LineBasicMaterial({
     color: 0xf6f8fb,
     transparent: true,
-    opacity: 0.95,
-    depthTest: false,
+    opacity: 0.58,
+    depthTest: true,
   });
 
   const addLine = (
@@ -840,7 +842,7 @@ function buildFflMarker(floor: Floor, bounds: Bounds2D | null): THREE.Group {
     const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
     const line = new THREE.Line(geo, mat);
     line.name = name;
-    line.renderOrder = 20;
+    line.renderOrder = 6;
     line.userData.layer = 'labels';
     root.add(line);
   };
@@ -862,19 +864,6 @@ function buildFflMarker(floor: Floor, bounds: Bounds2D | null): THREE.Group {
       [new THREE.Vector3(px0, py1, datumZ), new THREE.Vector3(px0, py0, datumZ)],
     ] as const;
     perimeter.forEach(([a, b], index) => addLine(a, b, lineMat, `ffl-perimeter:${index}`));
-
-    const labelPositions = [
-      new THREE.Vector3((px0 + px1) / 2, py0, 90),
-      new THREE.Vector3(px1, (py0 + py1) / 2, 90),
-      new THREE.Vector3((px0 + px1) / 2, py1, 90),
-      new THREE.Vector3(px0, (py0 + py1) / 2, 90),
-    ];
-    for (const position of labelPositions) {
-      const label = makeDatumLabelSprite('FFL ±0 mm');
-      label.position.copy(position);
-      label.scale.set(680, 160, 1);
-      root.add(label);
-    }
   }
 
   const floorLabel = makeDatumLabelSprite(`FFL ${formatLevelMm(0)} mm`);
