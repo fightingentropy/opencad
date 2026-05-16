@@ -27,6 +27,7 @@ const VERTEX_SUPPORT_DISTANCE_MM = 300;
 
 // Default trapeze rod length in mm — assumes a 600 mm ceiling void.
 const DEFAULT_ROD_LENGTH_MM = 500;
+const MIN_TRAPEZE_SIDE_CLEARANCE_MM = 180;
 
 export interface SupportPlacerOptions {
   // Override the calculated max span (mm).
@@ -96,10 +97,8 @@ export function maxSpanForContainment(
 }
 
 // Pick a sensible support kind based on the containment shape.
-function pickSupportKind(c: ContainmentEntity): SupportKind {
+export function pickSupportKind(c: ContainmentEntity): SupportKind {
   if (c.containmentType === 'conduit') return 'saddle-clip';
-  const w = c.width ?? 0;
-  if (w < 300) return 'wall-bracket';
   return 'trapeze-hanger';
 }
 
@@ -127,6 +126,14 @@ function tooCloseTo(existing: Vec2[], candidate: Vec2, tol: number): boolean {
     if (dist(e, candidate) <= tol) return true;
   }
   return false;
+}
+
+export function trapezeChannelLength(width: number): number {
+  return width + Math.max(MIN_TRAPEZE_SIDE_CLEARANCE_MM, width * 0.25) * 2;
+}
+
+function wallBracketChannelLength(width: number): number {
+  return width + Math.max(MIN_TRAPEZE_SIDE_CLEARANCE_MM, width * 0.25);
 }
 
 // Auto-place supports along a containment polyline.
@@ -213,9 +220,9 @@ function makeSupport(
   };
   if (supportKind === 'trapeze-hanger') {
     support.rodLength = DEFAULT_ROD_LENGTH_MM;
-    support.channelLength = (containment.width ?? 200) + 100;
+    support.channelLength = trapezeChannelLength(containment.width ?? 200);
   } else if (supportKind === 'wall-bracket') {
-    support.channelLength = (containment.width ?? 200) + 50;
+    support.channelLength = wallBracketChannelLength(containment.width ?? 200);
   }
   return support;
 }

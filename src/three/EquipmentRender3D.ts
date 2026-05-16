@@ -66,7 +66,7 @@ const STYLES: Record<EquipmentKind, Style> = {
     color: 0xc62d2d, metalness: 0.5, roughness: 0.55, defaultHeight: 800,
   },
   'comms-rack': {
-    color: 0x18181a, metalness: 0.4, roughness: 0.55, defaultHeight: 2200, hasDoor: true, doorRows: 8,
+    color: 0x343b46, metalness: 0.45, roughness: 0.5, defaultHeight: 2200, hasDoor: true, doorRows: 8,
   },
   cabinet: {
     color: 0xb8bcc2, metalness: 0.55, roughness: 0.5, defaultHeight: 1800, hasDoor: true,
@@ -103,6 +103,11 @@ function makeMat(spec: { color: number; metalness: number; roughness: number }):
 // Build a label sprite using a 2D canvas. Cheap and works without font
 // loading. The sprite is sized in world units so it stays readable.
 function makeLabelSprite(text: string): THREE.Sprite {
+  if (typeof document === 'undefined') {
+    const fallback = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, opacity: 0 }));
+    fallback.scale.set(800, 200, 1);
+    return fallback;
+  }
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   const fontSize = 64;

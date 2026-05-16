@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "preview:dist": "vite preview",
     "lint": "tsc --noEmit",
+    "visual:smoke": "node scripts/visual-smoke.mjs",
     "deploy": "wrangler pages deploy dist --project-name=opencad",
     "test": "vitest run",
     "test:watch": "vitest"

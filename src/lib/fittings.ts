@@ -103,7 +103,35 @@ function nearlyEqual(a: Vec2, b: Vec2, tol = ENDPOINT_TOL_MM): boolean {
   return dist(a, b) <= tol;
 }
 
-// Count how many other containments have an endpoint at `p` (excluding self).
+function pointToSegmentDistance(p: Vec2, a: Vec2, b: Vec2): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < 1e-9) return dist(p, a);
+  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
+  return dist(p, { x: a.x + dx * t, y: a.y + dy * t });
+}
+
+export function containmentTouchesPoint(
+  containment: ContainmentEntity,
+  p: Vec2,
+  tol = ENDPOINT_TOL_MM,
+): boolean {
+  if (!containment.points || containment.points.length < 2) return false;
+  for (const vertex of containment.points) {
+    if (nearlyEqual(p, vertex, tol)) return true;
+  }
+  for (let i = 0; i < containment.points.length - 1; i++) {
+    if (pointToSegmentDistance(p, containment.points[i], containment.points[i + 1]) <= tol) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Count how many other containments touch `p` (excluding self). Branches
+// often join a spine at an interior vertex or along a straight segment, not
+// only at the spine endpoint.
 function endpointConnections(
   p: Vec2,
   selfId: EntityId,
@@ -112,10 +140,7 @@ function endpointConnections(
   const hits: ContainmentEntity[] = [];
   for (const o of others) {
     if (o.id === selfId) continue;
-    if (!o.points || o.points.length < 2) continue;
-    const first = o.points[0];
-    const last = o.points[o.points.length - 1];
-    if (nearlyEqual(p, first) || nearlyEqual(p, last)) hits.push(o);
+    if (containmentTouchesPoint(o, p)) hits.push(o);
   }
   return hits;
 }

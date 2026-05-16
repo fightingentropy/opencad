@@ -1,13 +1,13 @@
 // Support / hanger 3D renderer. Returns a THREE.Object3D for one
-// SupportEntity — a trapeze hanger with two rods + a horizontal channel,
-// a wall bracket with a horizontal arm + diagonal stay, a beam clamp, a
-// saddle clip wrapping a conduit, …
+// SupportEntity — a trapeze hanger/channel, a wall bracket with a
+// horizontal arm + diagonal stay, a beam clamp, a saddle clip wrapping a
+// conduit, …
 //
 // All hardware is rendered in a dark-grey metallic finish that contrasts
-// with containment runs above them. The caller positions the returned
-// object using support.position (XY) and a Z baseline (typically the
-// floor's FFL); rod / channel lengths are derived from the support's
-// elevation and rodLength fields.
+// with containment runs above them. Geometry is centered on the support
+// origin; the scene builder applies support.position after any floor-space
+// transforms such as CAD-y flipping. Rod / channel lengths are derived from
+// the support's elevation and rodLength fields.
 
 import * as THREE from 'three';
 import type { SupportEntity } from '../types';
@@ -15,10 +15,15 @@ import type { SupportEntity } from '../types';
 export interface SupportRenderOpts {
   /** Bottom-of-containment Z used as anchor for the support top. Default 2400. */
   containmentBottomZ?: number;
+  /** Parent containment width in mm, used to keep hanger rods clear of side faces. */
+  containmentWidth?: number;
+  /** Hide vertical hanger rods for generated route supports in walkthrough views. */
+  hideHangerRods?: boolean;
 }
 
 const HARDWARE_COLOR = 0x60656b;
 const HARDWARE_DARK = 0x3a3d42;
+const MIN_SIDE_CLEARANCE_MM = 180;
 
 function tagPicking(obj: THREE.Object3D, entityId: string): void {
   obj.userData.entityId = entityId;
@@ -35,38 +40,72 @@ function makeMat(color = HARDWARE_COLOR): THREE.MeshStandardMaterial {
   });
 }
 
+function containmentSideClearance(width?: number): number {
+  const w = width && Number.isFinite(width) ? Math.max(0, width) : 0;
+  return Math.max(MIN_SIDE_CLEARANCE_MM, w * 0.25);
+}
+
+function hangerSpan(s: SupportEntity, containmentWidth?: number, fallback = 600): number {
+  const configured = s.channelLength ?? 0;
+  if (containmentWidth && containmentWidth > 0) {
+    return Math.max(
+      configured,
+      containmentWidth + containmentSideClearance(containmentWidth) * 2,
+    );
+  }
+  return configured > 0 ? configured : fallback;
+}
+
+function bracketArmLength(s: SupportEntity, containmentWidth?: number, fallback = 400): number {
+  const configured = s.channelLength ?? 0;
+  if (containmentWidth && containmentWidth > 0) {
+    return Math.max(
+      configured,
+      containmentWidth + containmentSideClearance(containmentWidth),
+    );
+  }
+  return configured > 0 ? configured : fallback;
+}
+
 // ---------- Builders --------------------------------------------------------
 
 function buildTrapezeHanger(
   s: SupportEntity,
   topZ: number,
   mat: THREE.MeshStandardMaterial,
+  containmentWidth?: number,
+  hideRods = false,
 ): THREE.Group {
   const grp = new THREE.Group();
-  const span = s.channelLength ?? 600;
+  const span = hangerSpan(s, containmentWidth);
   const rodLen = s.rodLength ?? Math.max(50, topZ - (s.elevation ?? topZ));
   const rodRadius = 5;
   const channelThk = 40;
 
-  // Two vertical rods (left/right). They drop from the structure (topZ +
-  // rodLen) to the channel centre at topZ.
-  for (const sx of [-1, 1]) {
-    const rod = new THREE.Mesh(
-      new THREE.CylinderGeometry(rodRadius, rodRadius, rodLen, 8),
-      mat,
-    );
-    rod.position.set((sx * span) / 2, 0, topZ + rodLen / 2 - channelThk);
-    // Cylinder axis is +Y by default; we want it vertical (+Z).
-    rod.rotation.x = Math.PI / 2;
-    rod.castShadow = true;
-    grp.add(rod);
+  if (!hideRods) {
+    // Two vertical rods (left/right). They drop from the structure (topZ +
+    // rodLen) to the channel centre at topZ.
+    for (const sx of [-1, 1]) {
+      const rod = new THREE.Mesh(
+        new THREE.CylinderGeometry(rodRadius, rodRadius, rodLen, 8),
+        mat,
+      );
+      rod.position.set((sx * span) / 2, 0, topZ + rodLen / 2 - channelThk);
+      rod.userData.supportPart = 'hanger-rod';
+      // Cylinder axis is +Y by default; we want it vertical (+Z).
+      rod.rotation.x = Math.PI / 2;
+      rod.castShadow = true;
+      grp.add(rod);
+    }
   }
+
   // Horizontal channel below containment
   const chan = new THREE.Mesh(
     new THREE.BoxGeometry(span, 41, channelThk),
     mat,
   );
   chan.position.set(0, 0, topZ - channelThk / 2);
+  chan.userData.supportPart = 'support-channel';
   chan.castShadow = true;
   chan.receiveShadow = true;
   grp.add(chan);
@@ -77,30 +116,32 @@ function buildWallBracket(
   s: SupportEntity,
   topZ: number,
   mat: THREE.MeshStandardMaterial,
+  containmentWidth?: number,
 ): THREE.Group {
   const grp = new THREE.Group();
-  const armLen = s.channelLength ?? 400;
+  const armLen = bracketArmLength(s, containmentWidth);
   const armThk = 40;
   const stayLen = armLen * 0.85;
-  // Horizontal arm — extends in +X.
+  const wallX = -armLen / 2;
+  // Horizontal arm. The local origin is the containment centreline, so
+  // the arm sits under the tray instead of starting from its centre.
   const arm = new THREE.Mesh(
     new THREE.BoxGeometry(armLen, 41, armThk),
     mat,
   );
-  arm.position.set(armLen / 2, 0, topZ - armThk / 2);
+  arm.position.set(0, 0, topZ - armThk / 2);
   arm.castShadow = true;
   grp.add(arm);
-  // Wall plate at -X end.
+  // Wall plate at the side/end of the bracket.
   const plate = new THREE.Mesh(new THREE.BoxGeometry(8, 80, 120), mat);
-  plate.position.set(0, 0, topZ - 60);
+  plate.position.set(wallX, 0, topZ - 60);
   plate.castShadow = true;
   grp.add(plate);
   // Diagonal stay — from base of plate to underside of arm.
   const stayGeom = new THREE.BoxGeometry(stayLen, 25, 6);
   const stay = new THREE.Mesh(stayGeom, mat);
-  // Position at 45° from wall to underside of arm.
   const angle = Math.atan2(armThk + 60, armLen);
-  stay.position.set(armLen / 2 - 20, 0, topZ - armThk - 30);
+  stay.position.set(wallX + stayLen / 2 - 20, 0, topZ - armThk - 30);
   stay.rotation.y = -angle;
   grp.add(stay);
   return grp;
@@ -110,9 +151,10 @@ function buildCantileverArm(
   s: SupportEntity,
   topZ: number,
   mat: THREE.MeshStandardMaterial,
+  containmentWidth?: number,
 ): THREE.Group {
   // Same as wall bracket but with a longer arm and beefier stay.
-  const grp = buildWallBracket(s, topZ, mat);
+  const grp = buildWallBracket(s, topZ, mat, containmentWidth);
   return grp;
 }
 
@@ -211,23 +253,29 @@ function buildUnistrutFrame(
   s: SupportEntity,
   topZ: number,
   mat: THREE.MeshStandardMaterial,
+  containmentWidth?: number,
+  hideVerticals = false,
 ): THREE.Group {
   const grp = new THREE.Group();
-  const span = s.channelLength ?? 800;
+  const span = hangerSpan(s, containmentWidth, 800);
   const verticalLen = s.rodLength ?? 1500;
-  // Two verticals
-  for (const sx of [-1, 1]) {
-    const v = new THREE.Mesh(
-      new THREE.BoxGeometry(41, 41, verticalLen),
-      mat,
-    );
-    v.position.set((sx * span) / 2, 0, topZ - verticalLen / 2);
-    v.castShadow = true;
-    grp.add(v);
+  if (!hideVerticals) {
+    // Two verticals
+    for (const sx of [-1, 1]) {
+      const v = new THREE.Mesh(
+        new THREE.BoxGeometry(41, 41, verticalLen),
+        mat,
+      );
+      v.position.set((sx * span) / 2, 0, topZ - verticalLen / 2);
+      v.userData.supportPart = 'hanger-rod';
+      v.castShadow = true;
+      grp.add(v);
+    }
   }
   // Horizontal cross-piece
   const horiz = new THREE.Mesh(new THREE.BoxGeometry(span + 41, 41, 41), mat);
   horiz.position.set(0, 0, topZ - 20);
+  horiz.userData.supportPart = 'support-channel';
   horiz.castShadow = true;
   grp.add(horiz);
   return grp;
@@ -287,9 +335,9 @@ function buildAFrame(
 // ---------- Public entry point ----------------------------------------------
 
 /**
- * Render a support as a 3D Object3D. The returned object is positioned
- * at support.position (XY) with z=0. Hardware extends upward to the
- * containment underside so it visually carries the run.
+ * Render a support as a 3D Object3D centered at local XY origin. The caller
+ * positions the returned object at support.position after applying the same
+ * coordinate transform used for the parent containment.
  */
 export function renderSupport3D(
   support: SupportEntity,
@@ -305,13 +353,19 @@ export function renderSupport3D(
   let body: THREE.Group;
   switch (support.supportKind) {
     case 'trapeze-hanger':
-      body = buildTrapezeHanger(support, topZ, mat);
+      body = buildTrapezeHanger(
+        support,
+        topZ,
+        mat,
+        opts.containmentWidth,
+        opts.hideHangerRods,
+      );
       break;
     case 'wall-bracket':
-      body = buildWallBracket(support, topZ, mat);
+      body = buildWallBracket(support, topZ, mat, opts.containmentWidth);
       break;
     case 'cantilever-arm':
-      body = buildCantileverArm(support, topZ, mat);
+      body = buildCantileverArm(support, topZ, mat, opts.containmentWidth);
       break;
     case 'beam-clamp':
       body = buildBeamClamp(support, topZ, mat);
@@ -326,7 +380,13 @@ export function renderSupport3D(
       body = buildChannelBracket(support, topZ, mat);
       break;
     case 'unistrut-frame':
-      body = buildUnistrutFrame(support, topZ, mat);
+      body = buildUnistrutFrame(
+        support,
+        topZ,
+        mat,
+        opts.containmentWidth,
+        opts.hideHangerRods,
+      );
       break;
     case 'floor-stand':
       body = buildFloorStand(support, topZ, mat);
@@ -341,7 +401,6 @@ export function renderSupport3D(
   }
 
   body.rotation.z = support.rotation ?? 0;
-  body.position.set(support.position.x, support.position.y, 0);
   root.add(body);
   tagPicking(root, support.id);
   return root;

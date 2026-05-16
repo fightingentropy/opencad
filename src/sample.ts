@@ -135,7 +135,7 @@ const containment = (
 
 // Per-type colors picked to read clearly in 3D BIM-style views.
 const COLOR = {
-  trunking: '#d4894a',
+  trunking: '#bcc1c8',
   basket: '#bcc1c8',
   tray: '#7fb24a',
   conduit: '#3a6db8',
@@ -200,7 +200,7 @@ const populateFloorPlan = (
       { x: 3500,  y: 3800 },   // drops through doorway into corridor
       { x: 11400, y: 3800 },   // runs east along corridor
     ],
-    400, 250,
+    100, 100,
     COLOR.trunking,
   ));
 

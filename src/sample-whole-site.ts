@@ -77,7 +77,7 @@ const SYSTEM_COLORS = {
 } as const;
 
 const CONTAINMENT_COLORS = {
-  trunking: '#d4894a',
+  trunking: '#bcc1c8',
   basket: '#bcc1c8',
   tray: '#7fb24a',
   conduit: '#3a6db8',
@@ -563,18 +563,18 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
     layers.containment,
     'trunking',
     powerSpinePoints,
-    400,
-    250,
+    100,
+    100,
     systems.powerDistribution,
-    'Main power trunking — 400×250',
+    'Main power trunking — 100×100',
     'power',
   );
   addEntity(sheet, trunkSpine);
   containmentList.push(trunkSpine);
 
-  // Lighting trunking — runs above the same corridor, smaller cross-section.
+  // Lighting basket — runs on the left of the corridor spine, smaller cross-section.
   // Vertices placed at every lighting drop so the graph stitches them in.
-  const lightTrunkPoints: Vec2[] = level === 'G'
+  const lightBasketPoints: Vec2[] = level === 'G'
     ? [
         { x: 1200, y: corridorY + 250 },
         { x: brXDropEast, y: corridorY + 250 },
@@ -588,18 +588,18 @@ const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
         { x: brXDropWest, y: corridorY + 250 },
         { x: 22800, y: corridorY + 250 },
       ];
-  const lightTrunk = containment(
+  const lightBasket = containment(
     layers.containment,
-    'trunking',
-    lightTrunkPoints,
+    'basket',
+    lightBasketPoints,
     150,
     100,
     systems.lighting,
-    'Lighting feeder trunking — 150×100',
+    'Lighting basket — 150×100',
     'power',
   );
-  addEntity(sheet, lightTrunk);
-  containmentList.push(lightTrunk);
+  addEntity(sheet, lightBasket);
+  containmentList.push(lightBasket);
 
   // Data basket parallel to the spine — vertices at every data-branch drop
   // so the graph stitches in the IDF / CR / IDF-1 branches as shared nodes.
@@ -1741,7 +1741,7 @@ export const createWholeSiteSampleProject = (): Project => {
     // Leader callouts pointing to the main spine and riser
     addEntity(sheetRef, leader(layers.annotation,
       [{ x: 12000, y: 8400 }, { x: 13000, y: 11000 }, { x: 16000, y: 11000 }],
-      'Main power trunking — 400×250',
+      'Main power trunking — 100×100',
       spine.id,
     ));
     addEntity(sheetRef, leader(layers.annotation,

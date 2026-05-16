@@ -404,7 +404,7 @@ const initialEditor = (): EditorState => ({
   cursorSnap: null,
   cursorSnapKind: 'none' as const,
   ortho: false,
-  viewMode: '2d',
+  viewMode: '3d',
   commandHistory: [],
   statusMessage: 'Welcome to OpenCAD Electrical',
   phaseFilter: 'all',

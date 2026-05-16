@@ -4,9 +4,9 @@
 // bend, every junction becomes a tee or cross. The renderer is colour-
 // matched to the parent.
 //
-// Fittings live on the same Z plane as the containment's centre line,
-// so the caller positions the returned object using fitting.position
-// (XY) and the parent's bottom-of-section + h/2 (Z).
+// Fittings live on the same Z plane as the containment's centre line.
+// Geometry is centred on the local origin; the scene builder positions
+// the returned object after applying floor-space transforms such as Y flip.
 
 import * as THREE from 'three';
 import type { ContainmentEntity, FittingEntity } from '../types';
@@ -41,6 +41,44 @@ function dimsFor(f: FittingEntity, parent?: ContainmentEntity): { w: number; h: 
   const w = f.width ?? parent?.width ?? 100;
   const h = f.height ?? parent?.height ?? 50;
   return { w, h };
+}
+
+function isOpenContainment(parent?: ContainmentEntity): boolean {
+  return (
+    parent?.containmentType === 'tray' ||
+    parent?.containmentType === 'basket' ||
+    parent?.containmentType === 'ladder'
+  );
+}
+
+function buildSideJoinerPlates(
+  parent: ContainmentEntity | undefined,
+  width: number,
+  height: number,
+  mat: THREE.MeshStandardMaterial,
+  length: number,
+): THREE.Group {
+  const grp = new THREE.Group();
+  const plateThickness = 5;
+  const plateHeight = parent?.containmentType === 'basket'
+    ? Math.min(30, height)
+    : Math.min(Math.max(24, height * 0.45), height);
+  const plateZ = parent?.containmentType === 'basket'
+    ? -height / 2 + plateHeight / 2
+    : 0;
+
+  for (const sy of [-1, 1]) {
+    const plate = new THREE.Mesh(
+      new THREE.BoxGeometry(length, plateThickness, plateHeight),
+      mat,
+    );
+    plate.position.set(0, sy * (width / 2 + plateThickness / 2), plateZ);
+    plate.castShadow = true;
+    plate.receiveShadow = true;
+    grp.add(plate);
+  }
+
+  return grp;
 }
 
 // ---------- Builders --------------------------------------------------------
@@ -171,6 +209,7 @@ function buildEndCap(
   mat: THREE.MeshStandardMaterial,
 ): THREE.Group {
   const grp = new THREE.Group();
+  if (isOpenContainment(parent)) return grp;
   const { w, h } = dimsFor(f, parent);
   const plate = new THREE.Mesh(new THREE.BoxGeometry(3, w, h), mat);
   plate.castShadow = true;
@@ -186,6 +225,10 @@ function buildCoupler(
 ): THREE.Group {
   const grp = new THREE.Group();
   const { w, h } = dimsFor(f, parent);
+  if (isOpenContainment(parent)) {
+    grp.add(buildSideJoinerPlates(parent, w, h, mat, Math.max(120, w * 0.55)));
+    return grp;
+  }
   // Slightly oversized short overlap, in lighter colour.
   const lighter = new THREE.MeshStandardMaterial({
     color: new THREE.Color(mat.color).lerp(new THREE.Color(0xffffff), 0.25).getHex(),
@@ -222,9 +265,9 @@ function buildPullBox(
 // ---------- Public entry point ----------------------------------------------
 
 /**
- * Render a fitting as a 3D Group. The returned object is centred on the
- * fitting's position (XY) at z=0. Caller is expected to translate it to
- * the containment's centre-line elevation.
+ * Render a fitting as a 3D Group centred on local XY origin. Caller is
+ * expected to translate it to the fitting position and containment
+ * centre-line elevation.
  */
 export function renderFitting3D(
   fitting: FittingEntity,
@@ -271,7 +314,6 @@ export function renderFitting3D(
   }
 
   body.rotation.z = fitting.rotation ?? 0;
-  body.position.set(fitting.position.x, fitting.position.y, 0);
   root.add(body);
   tagPicking(root, fitting.id);
   return root;

@@ -2,7 +2,7 @@
 //
 // In real BIM models containment hangs at conventional heights above the
 // finished floor — high-level trays just below the slab, basket below
-// that, conduits at services or low-level. These defaults match the
+// that, conduits wall-mounted at local services. These defaults match the
 // hard-coded values in Panel3D's BUILDING_ELEVATION map but are aware of
 // the floor's ceilingVoid / ceiling height for sites where 3 m floor
 // heights aren't appropriate.
@@ -11,8 +11,6 @@ import type { ContainmentEntity, ContainmentType } from '../types';
 import type { Floor } from '../models/site';
 
 // Reference defaults (mm) for a nominal 3000 mm floor-to-floor height.
-// Conduits depend on routing context; we expose two values and pick by
-// containment subType / orientation hint.
 const DEFAULT_BY_TYPE: Record<ContainmentType, number> = {
   ladder: 2700,
   trunking: 2700,
@@ -20,16 +18,8 @@ const DEFAULT_BY_TYPE: Record<ContainmentType, number> = {
   tray: 2100,
   duct: 300, // floor / underground duct sits low
   busbar: 2700, // overhead busway
-  conduit: 1800, // wall-mounted default; ceiling override below
+  conduit: 1800, // wall-mounted local drops, not high-level route spines
 };
-
-// Hint to pick the conduit elevation. When the containment's subType is
-// any of these we treat the conduit as ceiling-routed rather than wall.
-const CEILING_CONDUIT_SUBTYPES = new Set<string>([
-  'rigid-pvc',
-  'rigid-steel',
-  'lsoh-conduit',
-]);
 
 // Hint to pick a low-level / floor route — used by floor trunking/duct.
 const LOW_LEVEL_SUBTYPES = new Set<string>([
@@ -45,7 +35,7 @@ const LOW_LEVEL_SUBTYPES = new Set<string>([
  *
  *   1. If the entity has an explicit `elevation`, return it.
  *   2. Otherwise look up the per-type default.
- *   3. Apply subType / floor adjustments (conduit-on-ceiling, low-level
+ *   3. Apply subType / floor adjustments (wall conduit, low-level
  *      trunking, tight ceiling void, etc.).
  *
  * The returned value is the *bottom* of the containment cross-section
@@ -65,8 +55,7 @@ export function defaultElevation(
   // Conduit refinements ----------------------------------------------------
   if (type === 'conduit') {
     const sub = containment.subType ?? '';
-    if (CEILING_CONDUIT_SUBTYPES.has(sub)) z = 2400;
-    else if (sub === 'flexible-metal' || sub === 'flexible-plastic') z = 1800;
+    if (sub === 'flexible-metal' || sub === 'flexible-plastic') z = 1800;
   }
 
   // Low-level trunking / duct ---------------------------------------------
@@ -90,10 +79,7 @@ export function defaultElevation(
       type === 'basket' ||
       type === 'tray' ||
       type === 'busbar';
-    const isCeilingConduit =
-      type === 'conduit' &&
-      CEILING_CONDUIT_SUBTYPES.has(containment.subType ?? '');
-    if (isHighLevelType || isCeilingConduit) {
+    if (isHighLevelType) {
       // Treat 'tray' separately so TS narrowing keeps it in the union.
       const t: string = type;
       const offsetBelowSlab = t === 'tray' ? 600 : t === 'basket' ? 400 : 200;

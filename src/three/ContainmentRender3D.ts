@@ -1,10 +1,9 @@
 // Parametric extruded 3D containment renderer.
 //
-// One ContainmentEntity → one THREE.Object3D (a Group). Each polyline
-// segment is built independently with the right cross-section profile
-// for the containment type. The render is driven entirely by the entity
-// and a small RenderOpts bag — no React, no scene state. Callers add the
-// returned object to a scene and dispose it when done.
+// One ContainmentEntity → one THREE.Object3D (a Group). Horizontal
+// containment types extrude each polyline segment. Conduit is deliberately
+// not rendered as physical 3D geometry here because the plan polyline is a
+// routing aid, not a reliable wall/surface-mounted BIM path.
 //
 // Supported containmentTypes: tray, ladder, basket, trunking, conduit,
 // duct, busbar. Sub-types apply visual variations (perforated tray,
@@ -36,7 +35,7 @@ const DEFAULT_TYPE_COLOR: Record<ContainmentType, number> = {
   tray: 0xb8bcc2,
   ladder: 0xa6acb4,
   basket: 0xc2c6cc,
-  trunking: 0x8a8e94,
+  trunking: 0xc2c6cc,
   conduit: 0x9aa0a8,
   duct: 0x6c7480,
   busbar: 0xc4a86b,
@@ -65,8 +64,6 @@ const MATERIAL_LOOK: Record<
 // ---------- Public render options -------------------------------------------
 
 export interface RenderOpts {
-  /** Optional override for conduit / busbar tube radius (mm). */
-  tubeRadiusOverride?: number;
   /** Material palette overrides (per-system colour, per-material look). */
   materials?: MaterialPalette;
   /** Whether to colour cables-in-tray as an overlay. */
@@ -276,8 +273,8 @@ function buildLadderSegment(
   return wrap;
 }
 
-// Basket: a low-profile mesh tray. Approximated with a thin bottom plate,
-// short side flanges, and a few longitudinal rails to suggest weave.
+// Basket: a low-profile tray. Keep the mesh detail understated in 3D;
+// cross wires read as stray rods in first-person views.
 function buildBasketSegment(
   width: number,
   height: number,
@@ -297,8 +294,9 @@ function buildBasketSegment(
     side.position.set(0, sy * (width / 2 - tk / 2), -height / 2 + flangeH / 2);
     wrap.add(side);
   }
-  // Weave hint — longitudinal cylinders along the bottom, plus cross
-  // wires at a coarse pitch to suggest the mesh.
+  // Subtle longitudinal rails along the bottom. Do not add transverse
+  // wire rods here: from a walkthrough camera they look like random
+  // vertical pins through the tray.
   const longCount = 4;
   for (let r = 0; r < longCount; r++) {
     const t = (r + 0.5) / longCount;
@@ -310,18 +308,6 @@ function buildBasketSegment(
     rail.rotation.z = Math.PI / 2;
     rail.position.set(0, y, -height / 2 + tk + 0.7);
     wrap.add(rail);
-  }
-  const crossPitch = 60;
-  const crossCount = Math.max(2, Math.floor(len / crossPitch));
-  for (let k = 0; k < crossCount; k++) {
-    const x = -len / 2 + (k + 0.5) * (len / crossCount);
-    const cross = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.6, 0.6, width - tk * 2, 6),
-      mat,
-    );
-    cross.rotation.x = Math.PI / 2;
-    cross.position.set(x, 0, -height / 2 + tk + 0.7);
-    wrap.add(cross);
   }
   return wrap;
 }
@@ -366,46 +352,6 @@ function buildTrunkingSegment(
       );
       div.position.set(0, y, 0);
       wrap.add(div);
-    }
-  }
-  return wrap;
-}
-
-// Conduit: cylindrical tube. Tube radius = OD/2 (or override).
-function buildConduitSegment(
-  diameter: number,
-  len: number,
-  mat: THREE.MeshStandardMaterial,
-  subType: string | undefined,
-  radiusOverride?: number,
-): THREE.Group {
-  const wrap = new THREE.Group();
-  const radius = radiusOverride ?? diameter / 2;
-  // Flexible conduit gets corrugation rings; rigid is smooth.
-  const tube = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius, radius, len, 16, 1, false),
-    mat,
-  );
-  tube.rotation.z = Math.PI / 2;
-  tube.castShadow = true;
-  tube.receiveShadow = true;
-  wrap.add(tube);
-  if (subType === 'flexible-metal' || subType === 'flexible-plastic') {
-    const ringMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(mat.color).multiplyScalar(0.7).getHex(),
-      metalness: mat.metalness,
-      roughness: 0.6,
-    });
-    const ringPitch = Math.max(8, radius * 1.2);
-    const ringCount = Math.floor(len / ringPitch);
-    for (let k = 0; k < ringCount; k++) {
-      const ring = new THREE.Mesh(
-        new THREE.TorusGeometry(radius * 1.04, radius * 0.08, 6, 16),
-        ringMat,
-      );
-      ring.rotation.y = Math.PI / 2;
-      ring.position.set(-len / 2 + (k + 0.5) * (len / ringCount), 0, 0);
-      wrap.add(ring);
     }
   }
   return wrap;
@@ -530,6 +476,11 @@ export function renderContainment3D(
   const w = containment.width ?? 100;
   const h = containment.height ?? 50;
 
+  if (containment.containmentType === 'conduit') {
+    tagPicking(root, containment.id);
+    return root;
+  }
+
   const colorSpec = pickColor(containment, opts);
   const baseMat = makeMat(colorSpec);
 
@@ -563,12 +514,6 @@ export function renderContainment3D(
           colorSpec.color,
         );
         break;
-      case 'conduit': {
-        const radius = opts.tubeRadiusOverride ?? w / 2;
-        segGroup = buildConduitSegment(w, seg.len, baseMat, containment.subType, radius);
-        centerZ = baseZ + radius;
-        break;
-      }
       case 'duct':
         segGroup = buildDuctSegment(w, h, seg.len, baseMat);
         break;
