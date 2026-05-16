@@ -93,32 +93,60 @@ function buildFlatBend(
   const angle = ((f.angleDeg ?? 90) * Math.PI) / 180;
   const radius = DEFAULT_RADIUS;
   const isConduit = parent?.containmentType === 'conduit';
-  // Build a quarter-arc curve in the XY plane, centred on the fitting.
-  const pts: THREE.Vector3[] = [];
-  const segments = 16;
-  for (let i = 0; i <= segments; i++) {
-    const t = (i / segments) * angle;
-    pts.push(new THREE.Vector3(radius * Math.cos(t) - radius, radius * Math.sin(t), 0));
-  }
-  const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.0);
   if (isConduit) {
+    // Conduit bends are genuinely round, so keep the tube bend only here.
+    const pts: THREE.Vector3[] = [];
+    const segments = 16;
+    for (let i = 0; i <= segments; i++) {
+      const t = (i / segments) * angle;
+      pts.push(new THREE.Vector3(radius * Math.cos(t) - radius, radius * Math.sin(t), 0));
+    }
+    const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.0);
     const tubeRadius = w / 2;
     const tube = new THREE.TubeGeometry(curve, segments, tubeRadius, 12, false);
     const mesh = new THREE.Mesh(tube, mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     grp.add(mesh);
+    return grp;
+  }
+
+  const leg = Math.max(radius, Math.max(w, h) * 1.4);
+  const addLeg = (obj: THREE.Object3D, rotation: number, offset: THREE.Vector3): void => {
+    obj.rotation.z = rotation;
+    obj.position.copy(offset);
+    grp.add(obj);
+  };
+
+  if (isOpenContainment(parent)) {
+    const incoming = buildSideJoinerPlates(parent, w, h, mat, leg);
+    addLeg(incoming, 0, new THREE.Vector3(-leg / 2, 0, 0));
+
+    const outgoing = buildSideJoinerPlates(parent, w, h, mat, leg);
+    addLeg(outgoing, angle, new THREE.Vector3(
+      Math.cos(angle) * leg / 2,
+      Math.sin(angle) * leg / 2,
+      0,
+    ));
   } else {
-    // Box-section bend — extrude a rectangular tube along the curve.
-    const tube = new THREE.TubeGeometry(curve, segments, Math.max(w, h) / 2, 4, false);
-    // Orient the cross-section so the longer side is horizontal — by
-    // default TubeGeometry uses a circular cross-section so this is an
-    // approximation. Rectangular bends are visually similar at panel
-    // overview scale.
-    const mesh = new THREE.Mesh(tube, mat);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    grp.add(mesh);
+    const incoming = new THREE.Mesh(new THREE.BoxGeometry(leg, w, h), mat);
+    incoming.castShadow = true;
+    incoming.receiveShadow = true;
+    addLeg(incoming, 0, new THREE.Vector3(-leg / 2, 0, 0));
+
+    const outgoing = new THREE.Mesh(new THREE.BoxGeometry(leg, w, h), mat);
+    outgoing.castShadow = true;
+    outgoing.receiveShadow = true;
+    addLeg(outgoing, angle, new THREE.Vector3(
+      Math.cos(angle) * leg / 2,
+      Math.sin(angle) * leg / 2,
+      0,
+    ));
+
+    const hub = new THREE.Mesh(new THREE.BoxGeometry(w, w, h), mat);
+    hub.castShadow = true;
+    hub.receiveShadow = true;
+    grp.add(hub);
   }
   return grp;
 }
