@@ -68,9 +68,22 @@ interface VisibleContainmentBox {
   label: string;
   box: THREE.Box3;
   bounds: ScreenBounds;
+  distanceToCamera: number;
 }
 
 type ViewScope = 'site' | 'floor';
+
+const LINE_PICK_THRESHOLD_MM = 18;
+const MAX_SITE_MEASUREMENT_DISTANCE_MM = 22000;
+const MAX_FLOOR_MEASUREMENT_DISTANCE_MM = 28000;
+const DIRECT_HOVER_MIN_MINOR_PX = 22;
+const DIRECT_HOVER_MIN_AREA_PX = 9000;
+const CLEARANCE_HOVER_MIN_MINOR_PX = 18;
+const CLEARANCE_HOVER_MIN_AREA_PX = 7000;
+const CLEARANCE_MIN_GAP_MM = 25;
+const CLEARANCE_MAX_GAP_MM = 2500;
+const CLEARANCE_MAX_BOX_DISTANCE_PX = 52;
+const CLEARANCE_MAX_SEGMENT_DISTANCE_PX = 56;
 
 const WALK_KEYS: Record<string, WalkDirection> = {
   ArrowUp: 'forward',
@@ -251,6 +264,20 @@ const entityIdFromObject = (obj: THREE.Object3D): string | null => {
   return null;
 };
 
+const containmentRootFromObject = (
+  obj: THREE.Object3D,
+  root: THREE.Object3D,
+  entityId: string,
+): THREE.Object3D | null => {
+  let cursor: THREE.Object3D | null = obj;
+  while (cursor) {
+    if (cursor.name === `containment:${entityId}`) return cursor;
+    if (cursor === root) break;
+    cursor = cursor.parent;
+  }
+  return null;
+};
+
 const isVisibleWithin = (obj: THREE.Object3D, root: THREE.Object3D): boolean => {
   let cursor: THREE.Object3D | null = obj;
   while (cursor) {
@@ -318,6 +345,40 @@ const distanceToScreenSegment = (point: ScreenPoint, a: ScreenPoint, b: ScreenPo
   const y = a.y + dy * t;
   return Math.hypot(point.x - x, point.y - y);
 };
+
+const screenBoundsMetrics = (bounds: ScreenBounds): {
+  width: number;
+  height: number;
+  minor: number;
+  area: number;
+  finite: boolean;
+} => {
+  const width = Math.max(0, bounds.maxX - bounds.minX);
+  const height = Math.max(0, bounds.maxY - bounds.minY);
+  return {
+    width,
+    height,
+    minor: Math.min(width, height),
+    area: width * height,
+    finite: Number.isFinite(width) &&
+      Number.isFinite(height) &&
+      Number.isFinite(bounds.center.x) &&
+      Number.isFinite(bounds.center.y),
+  };
+};
+
+const hasReadableScreenScale = (
+  bounds: ScreenBounds,
+  minMinorPx: number,
+  minAreaPx: number,
+): boolean => {
+  const metrics = screenBoundsMetrics(bounds);
+  return metrics.finite && metrics.minor >= minMinorPx && metrics.area >= minAreaPx;
+};
+
+const maxMeasurementDistance = (scope: ViewScope): number => (
+  scope === 'floor' ? MAX_FLOOR_MEASUREMENT_DISTANCE_MM : MAX_SITE_MEASUREMENT_DISTANCE_MM
+);
 
 export function SiteSceneViewer({ project, width, height }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -447,7 +508,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     renderer.domElement.style.height = '100%';
 
     const raycaster = new THREE.Raycaster();
-    raycaster.params.Line.threshold = 80;
+    raycaster.params.Line.threshold = LINE_PICK_THRESHOLD_MM;
 
     const activePickRoot = (): THREE.Object3D | null => {
       const group = sceneGroupRef.current;
@@ -472,11 +533,16 @@ export function SiteSceneViewer({ project, width, height }: Props) {
         if (!containment) return;
         const box = new THREE.Box3().setFromObject(obj);
         if (box.isEmpty()) return;
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        const bounds = projectBoxToScreen(box, camera, rect);
+        if (!screenBoundsMetrics(bounds).finite) return;
         out.push({
           id,
           label: containment.label || id,
           box,
-          bounds: projectBoxToScreen(box, camera, rect),
+          bounds,
+          distanceToCamera: camera.position.distanceTo(center),
         });
       });
       return out;
@@ -492,13 +558,18 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       root: THREE.Object3D,
       rect: DOMRect,
     ): HoverInfo | null => {
-      const boxes = visibleContainmentBoxes(root, rect);
+      const maxDistance = maxMeasurementDistance(viewScopeRef.current);
+      const boxes = visibleContainmentBoxes(root, rect).filter((box) => (
+        box.distanceToCamera <= maxDistance &&
+        hasReadableScreenScale(box.bounds, CLEARANCE_HOVER_MIN_MINOR_PX, CLEARANCE_HOVER_MIN_AREA_PX)
+      ));
       if (boxes.length < 2) return null;
       const pointer = { x: event.clientX, y: event.clientY };
       const nearest = boxes
         .map((box) => ({ box, screenDistance: distanceToScreenBounds(pointer, box.bounds) }))
+        .filter((item) => item.screenDistance <= CLEARANCE_MAX_BOX_DISTANCE_PX)
         .sort((a, b) => a.screenDistance - b.screenDistance)
-        .slice(0, 8);
+        .slice(0, 6);
 
       let best:
         | {
@@ -515,26 +586,28 @@ export function SiteSceneViewer({ project, width, height }: Props) {
           const a = nearest[i].box;
           const b = nearest[j].box;
           const faceClearance = horizontalClearanceMm(a.box, b.box);
-          if (faceClearance > 5000) continue;
-          const segmentDistance = distanceToScreenSegment(pointer, a.bounds.center, b.bounds.center);
-          const screenDistance = nearest[i].screenDistance + nearest[j].screenDistance;
-          const score = segmentDistance + screenDistance * 0.35 + faceClearance / 70;
-          if (segmentDistance > 150 && nearest[i].screenDistance > 80 && nearest[j].screenDistance > 80) {
+          const verticalClearance = verticalClearanceMm(a.box, b.box);
+          if (faceClearance < CLEARANCE_MIN_GAP_MM && verticalClearance < CLEARANCE_MIN_GAP_MM) {
             continue;
           }
+          if (faceClearance > CLEARANCE_MAX_GAP_MM) continue;
+          const segmentDistance = distanceToScreenSegment(pointer, a.bounds.center, b.bounds.center);
+          if (segmentDistance > CLEARANCE_MAX_SEGMENT_DISTANCE_PX) continue;
+          const screenDistance = nearest[i].screenDistance + nearest[j].screenDistance;
+          const score = segmentDistance + screenDistance * 0.75 + faceClearance / 90;
           if (!best || score < best.score) {
             best = {
               a,
               b,
               faceClearance,
-              verticalClearance: verticalClearanceMm(a.box, b.box),
+              verticalClearance,
               score,
             };
           }
         }
       }
 
-      if (!best || best.score > 220) return null;
+      if (!best || best.score > 95) return null;
       return {
         ...tooltipPosition(event),
         title: 'Clearance between containments',
@@ -566,6 +639,19 @@ export function SiteSceneViewer({ project, width, height }: Props) {
         if (!entityId) continue;
         const containment = findContainment(projectRef.current, entityId);
         if (!containment) continue;
+        const containmentRoot = containmentRootFromObject(hit.object, root, entityId);
+        if (!containmentRoot) continue;
+        const containmentBox = new THREE.Box3().setFromObject(containmentRoot);
+        if (containmentBox.isEmpty()) continue;
+        const containmentBounds = projectBoxToScreen(containmentBox, camera, rect);
+        const containmentCenter = new THREE.Vector3();
+        containmentBox.getCenter(containmentCenter);
+        if (
+          camera.position.distanceTo(containmentCenter) > maxMeasurementDistance(viewScopeRef.current) ||
+          !hasReadableScreenScale(containmentBounds, DIRECT_HOVER_MIN_MINOR_PX, DIRECT_HOVER_MIN_AREA_PX)
+        ) {
+          continue;
+        }
         const floor = floorForContainment(
           projectRef.current,
           containment.id,
