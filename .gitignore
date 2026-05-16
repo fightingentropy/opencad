@@ -14,4 +14,4 @@ dist-ssr
 .env
 .env.local
 tsconfig.tsbuildinfo
-.claude/
+visual-artifacts/

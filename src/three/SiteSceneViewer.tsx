@@ -25,12 +25,67 @@ import {
   buildBuildingScene,
   type SceneControls,
 } from './BuildingScene';
+import {
+  containmentMeasurement,
+  findContainment,
+  floorForContainment,
+  formatMm,
+  horizontalClearanceMm,
+  verticalClearanceMm,
+  type MeasurementRow,
+} from './measurements';
 
 interface Props {
   project: Project;
   width: number;
   height: number;
 }
+
+type WalkDirection = 'forward' | 'back' | 'left' | 'right';
+
+interface HoverInfo {
+  x: number;
+  y: number;
+  title: string;
+  rows: MeasurementRow[];
+}
+
+interface ScreenPoint {
+  x: number;
+  y: number;
+}
+
+interface ScreenBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  center: ScreenPoint;
+}
+
+interface VisibleContainmentBox {
+  id: string;
+  label: string;
+  box: THREE.Box3;
+  bounds: ScreenBounds;
+}
+
+type ViewScope = 'site' | 'floor';
+
+const WALK_KEYS: Record<string, WalkDirection> = {
+  ArrowUp: 'forward',
+  w: 'forward',
+  W: 'forward',
+  ArrowDown: 'back',
+  s: 'back',
+  S: 'back',
+  ArrowLeft: 'left',
+  a: 'left',
+  A: 'left',
+  ArrowRight: 'right',
+  d: 'right',
+  D: 'right',
+};
 
 // Compute the bounding sphere of a Three.js object for camera framing.
 const objectBoundingSphere = (obj: THREE.Object3D): THREE.Sphere => {
@@ -63,6 +118,207 @@ const frameObject = (
   controls.update();
 };
 
+const placeWalkCamera = (
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls,
+  obj: THREE.Object3D,
+): void => {
+  const box = visibleBoundingBox(obj);
+  if (box.isEmpty()) {
+    frameObject(camera, controls, obj);
+    return;
+  }
+
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+
+  const eyeHeight = 1650;
+  const targetHeight = Math.min(box.max.z - 100, box.min.z + 2300);
+  const eye = new THREE.Vector3(
+    THREE.MathUtils.lerp(box.min.x, box.max.x, 0.22),
+    THREE.MathUtils.lerp(box.min.y, box.max.y, 0.44),
+    box.min.z + eyeHeight,
+  );
+  const target = new THREE.Vector3(center.x, center.y, targetHeight);
+  if (target.distanceTo(eye) < 1000) {
+    target.x = Math.min(box.max.x, eye.x + 3000);
+  }
+
+  camera.position.copy(eye);
+  controls.target.copy(target);
+  camera.near = 20;
+  camera.far = Math.max(50000, Math.max(size.x, size.y, size.z) * 8);
+  camera.updateProjectionMatrix();
+  controls.update();
+};
+
+const walkStep = (
+  camera: THREE.PerspectiveCamera,
+  controls: OrbitControls,
+  direction: WalkDirection,
+  multiplier = 1,
+  bounds?: THREE.Box3 | null,
+): void => {
+  const forward = new THREE.Vector3().subVectors(controls.target, camera.position);
+  forward.z = 0;
+  if (forward.lengthSq() < 1e-6) {
+    camera.getWorldDirection(forward);
+    forward.z = 0;
+  }
+  if (forward.lengthSq() < 1e-6) return;
+  forward.normalize();
+
+  const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
+  const distance = camera.position.distanceTo(controls.target);
+  const step = Math.max(250, Math.min(2500, distance * 0.06)) * multiplier;
+  const delta = new THREE.Vector3();
+
+  switch (direction) {
+    case 'forward':
+      delta.copy(forward).multiplyScalar(step);
+      break;
+    case 'back':
+      delta.copy(forward).multiplyScalar(-step);
+      break;
+    case 'left':
+      delta.copy(right).multiplyScalar(-step);
+      break;
+    case 'right':
+      delta.copy(right).multiplyScalar(step);
+      break;
+  }
+
+  const nextCamera = camera.position.clone().add(delta);
+  const nextTarget = controls.target.clone().add(delta);
+  if (bounds && !bounds.isEmpty()) {
+    const margin = 600;
+    const minX = bounds.min.x + margin;
+    const maxX = bounds.max.x - margin;
+    const minY = bounds.min.y + margin;
+    const maxY = bounds.max.y - margin;
+    if (maxX > minX && maxY > minY) {
+      const clampedX = THREE.MathUtils.clamp(nextCamera.x, minX, maxX);
+      const clampedY = THREE.MathUtils.clamp(nextCamera.y, minY, maxY);
+      const correction = new THREE.Vector3(
+        clampedX - nextCamera.x,
+        clampedY - nextCamera.y,
+        0,
+      );
+      nextCamera.add(correction);
+      nextTarget.add(correction);
+    }
+  }
+
+  camera.position.copy(nextCamera);
+  controls.target.copy(nextTarget);
+  controls.update();
+};
+
+const isTypingTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement)) return false;
+  return (
+    target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.tagName === 'SELECT' ||
+    target.isContentEditable
+  );
+};
+
+const visibleBoundingBox = (obj: THREE.Object3D): THREE.Box3 => {
+  const box = new THREE.Box3();
+  obj.updateWorldMatrix(true, true);
+  const visit = (node: THREE.Object3D, ancestorsVisible: boolean): void => {
+    const visible = ancestorsVisible && node.visible;
+    if (!visible) return;
+    if (node instanceof THREE.Mesh || node instanceof THREE.Line || node instanceof THREE.Sprite) {
+      box.expandByObject(node);
+    }
+    for (const child of node.children) visit(child, visible);
+  };
+  visit(obj, true);
+  return box;
+};
+
+const entityIdFromObject = (obj: THREE.Object3D): string | null => {
+  let cursor: THREE.Object3D | null = obj;
+  while (cursor) {
+    if (typeof cursor.userData.entityId === 'string') return cursor.userData.entityId;
+    if (cursor.name.startsWith('containment:')) return cursor.name.slice('containment:'.length);
+    cursor = cursor.parent;
+  }
+  return null;
+};
+
+const isVisibleWithin = (obj: THREE.Object3D, root: THREE.Object3D): boolean => {
+  let cursor: THREE.Object3D | null = obj;
+  while (cursor) {
+    if (!cursor.visible) return false;
+    if (cursor === root) return true;
+    cursor = cursor.parent;
+  }
+  return false;
+};
+
+const projectPointToScreen = (
+  point: THREE.Vector3,
+  camera: THREE.PerspectiveCamera,
+  rect: DOMRect,
+): ScreenPoint => {
+  const p = point.clone().project(camera);
+  return {
+    x: rect.left + ((p.x + 1) / 2) * rect.width,
+    y: rect.top + ((1 - p.y) / 2) * rect.height,
+  };
+};
+
+const projectBoxToScreen = (
+  box: THREE.Box3,
+  camera: THREE.PerspectiveCamera,
+  rect: DOMRect,
+): ScreenBounds => {
+  const corners = [
+    new THREE.Vector3(box.min.x, box.min.y, box.min.z),
+    new THREE.Vector3(box.min.x, box.min.y, box.max.z),
+    new THREE.Vector3(box.min.x, box.max.y, box.min.z),
+    new THREE.Vector3(box.min.x, box.max.y, box.max.z),
+    new THREE.Vector3(box.max.x, box.min.y, box.min.z),
+    new THREE.Vector3(box.max.x, box.min.y, box.max.z),
+    new THREE.Vector3(box.max.x, box.max.y, box.min.z),
+    new THREE.Vector3(box.max.x, box.max.y, box.max.z),
+  ].map((corner) => projectPointToScreen(corner, camera, rect));
+
+  const minX = Math.min(...corners.map((p) => p.x));
+  const minY = Math.min(...corners.map((p) => p.y));
+  const maxX = Math.max(...corners.map((p) => p.x));
+  const maxY = Math.max(...corners.map((p) => p.y));
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    center: { x: (minX + maxX) / 2, y: (minY + maxY) / 2 },
+  };
+};
+
+const distanceToScreenBounds = (point: ScreenPoint, bounds: ScreenBounds): number => {
+  const dx = Math.max(bounds.minX - point.x, 0, point.x - bounds.maxX);
+  const dy = Math.max(bounds.minY - point.y, 0, point.y - bounds.maxY);
+  return Math.hypot(dx, dy);
+};
+
+const distanceToScreenSegment = (point: ScreenPoint, a: ScreenPoint, b: ScreenPoint): number => {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < 1e-6) return Math.hypot(point.x - a.x, point.y - a.y);
+  const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
+  const x = a.x + dx * t;
+  const y = a.y + dy * t;
+  return Math.hypot(point.x - x, point.y - y);
+};
+
 export function SiteSceneViewer({ project, width, height }: Props) {
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -72,21 +328,44 @@ export function SiteSceneViewer({ project, width, height }: Props) {
   const sceneGroupRef = useRef<THREE.Group | null>(null);
   const sceneControlsRef = useRef<SceneControls | null>(null);
   const animationRef = useRef<number | null>(null);
+  const walkHoldRef = useRef<number | null>(null);
+  const walkBoundsRef = useRef<THREE.Box3 | null>(null);
+  const framedOnceRef = useRef(false);
+  const lastProjectIdRef = useRef<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
 
   // Toolbar state (visible to the React UI). The actual scene is mutated
   // imperatively via SceneControls — these refs/state are just the latest
   // user-driven settings so a rebuild can re-apply them.
-  const [singleFloor, setSingleFloor] = useState(false);
-  const [floorId, setFloorId] = useState<FloorId | ''>('');
+  const [viewScope, setViewScope] = useState<ViewScope>('site');
+  const singleFloor = viewScope === 'floor';
+  const [floorId, setFloorId] = useState<FloorId | ''>(project.activeFloorId ?? '');
   const [systemId, setSystemId] = useState<SystemId | ''>('');
-  const [wallOpacity, setWallOpacity] = useState(1);
+  const [wallOpacity, setWallOpacity] = useState(0.45);
+  const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
+  const projectRef = useRef(project);
+  const floorIdRef = useRef<FloorId | ''>(floorId);
+  const viewScopeRef = useRef<ViewScope>(viewScope);
   // Bumped to force a scene rebuild from the live project. We rebuild
   // when the underlying site / building / floor / sheets change.
   const [resetTick, setResetTick] = useState(0);
 
+  useEffect(() => {
+    projectRef.current = project;
+  }, [project]);
+
+  useEffect(() => {
+    floorIdRef.current = floorId;
+  }, [floorId]);
+
+  useEffect(() => {
+    viewScopeRef.current = viewScope;
+  }, [viewScope]);
+
   // Signature triggering a scene rebuild. We don't deep-compare the whole
   // project; instead we hash the parts that actually drive geometry.
   const projectSig = useMemo(() => {
+    const modified = project.modified ?? 0;
     const sites = project.sites ? Object.keys(project.sites).join(',') : '';
     const buildings = project.buildings ? Object.keys(project.buildings).join(',') : '';
     const floors = project.floors
@@ -98,8 +377,22 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       if (!s) continue;
       sheetEntities += s.entityOrder.length;
     }
-    return `${sites}#${buildings}#${floors}#${sheetEntities}`;
+    return `${project.id}#${modified}#${sites}#${buildings}#${floors}#${sheetEntities}`;
   }, [project]);
+
+  const activeSceneObject = (): THREE.Object3D | null => {
+    const group = sceneGroupRef.current;
+    if (!group) return null;
+    if (singleFloor && floorId) {
+      return group.getObjectByName(`floor:${floorId}`) ?? group;
+    }
+    return group;
+  };
+
+  const refreshWalkBounds = (): void => {
+    const obj = activeSceneObject();
+    walkBoundsRef.current = obj ? visibleBoundingBox(obj) : null;
+  };
 
   // ---------- One-time renderer / camera / lights setup -------------------
   useEffect(() => {
@@ -126,11 +419,20 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      alpha: false,
-      powerPreference: 'high-performance',
-    });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: false,
+        powerPreference: 'high-performance',
+      });
+      setRenderError(null);
+    } catch {
+      setRenderError('3D rendering is unavailable because WebGL could not start in this browser.');
+      sceneRef.current = null;
+      cameraRef.current = null;
+      return;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(initialW, initialH, false);
     renderer.shadowMap.enabled = true;
@@ -143,6 +445,147 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     renderer.domElement.style.display = 'block';
     renderer.domElement.style.width = '100%';
     renderer.domElement.style.height = '100%';
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.params.Line.threshold = 80;
+
+    const activePickRoot = (): THREE.Object3D | null => {
+      const group = sceneGroupRef.current;
+      if (!group) return null;
+      const currentFloorId = floorIdRef.current;
+      if (viewScopeRef.current === 'floor' && currentFloorId) {
+        return group.getObjectByName(`floor:${currentFloorId}`) ?? group;
+      }
+      return group;
+    };
+
+    const visibleContainmentBoxes = (
+      root: THREE.Object3D,
+      rect: DOMRect,
+    ): VisibleContainmentBox[] => {
+      const out: VisibleContainmentBox[] = [];
+      root.updateWorldMatrix(true, true);
+      root.traverse((obj) => {
+        if (!isVisibleWithin(obj, root) || !obj.name.startsWith('containment:')) return;
+        const id = obj.name.slice('containment:'.length);
+        const containment = findContainment(projectRef.current, id);
+        if (!containment) return;
+        const box = new THREE.Box3().setFromObject(obj);
+        if (box.isEmpty()) return;
+        out.push({
+          id,
+          label: containment.label || id,
+          box,
+          bounds: projectBoxToScreen(box, camera, rect),
+        });
+      });
+      return out;
+    };
+
+    const tooltipPosition = (event: PointerEvent): Pick<HoverInfo, 'x' | 'y'> => ({
+      x: Math.min(event.clientX, Math.max(12, window.innerWidth - 380)),
+      y: Math.min(event.clientY, Math.max(12, window.innerHeight - 240)),
+    });
+
+    const clearanceHover = (
+      event: PointerEvent,
+      root: THREE.Object3D,
+      rect: DOMRect,
+    ): HoverInfo | null => {
+      const boxes = visibleContainmentBoxes(root, rect);
+      if (boxes.length < 2) return null;
+      const pointer = { x: event.clientX, y: event.clientY };
+      const nearest = boxes
+        .map((box) => ({ box, screenDistance: distanceToScreenBounds(pointer, box.bounds) }))
+        .sort((a, b) => a.screenDistance - b.screenDistance)
+        .slice(0, 8);
+
+      let best:
+        | {
+            a: VisibleContainmentBox;
+            b: VisibleContainmentBox;
+            faceClearance: number;
+            verticalClearance: number;
+            score: number;
+          }
+        | null = null;
+
+      for (let i = 0; i < nearest.length; i++) {
+        for (let j = i + 1; j < nearest.length; j++) {
+          const a = nearest[i].box;
+          const b = nearest[j].box;
+          const faceClearance = horizontalClearanceMm(a.box, b.box);
+          if (faceClearance > 5000) continue;
+          const segmentDistance = distanceToScreenSegment(pointer, a.bounds.center, b.bounds.center);
+          const screenDistance = nearest[i].screenDistance + nearest[j].screenDistance;
+          const score = segmentDistance + screenDistance * 0.35 + faceClearance / 70;
+          if (segmentDistance > 150 && nearest[i].screenDistance > 80 && nearest[j].screenDistance > 80) {
+            continue;
+          }
+          if (!best || score < best.score) {
+            best = {
+              a,
+              b,
+              faceClearance,
+              verticalClearance: verticalClearanceMm(a.box, b.box),
+              score,
+            };
+          }
+        }
+      }
+
+      if (!best || best.score > 220) return null;
+      return {
+        ...tooltipPosition(event),
+        title: 'Clearance between containments',
+        rows: [
+          { label: 'Face-to-face', value: formatMm(best.faceClearance) },
+          { label: 'Vertical gap', value: formatMm(best.verticalClearance) },
+          { label: 'A', value: best.a.label },
+          { label: 'B', value: best.b.label },
+        ],
+      };
+    };
+
+    const handlePointerMove = (event: PointerEvent): void => {
+      const root = activePickRoot();
+      if (!root) {
+        setHoverInfo(null);
+        return;
+      }
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      const x = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+      const y = -(((event.clientY - rect.top) / Math.max(1, rect.height)) * 2 - 1);
+      raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+      const hits = raycaster.intersectObjects(root.children, true);
+
+      for (const hit of hits) {
+        if (!isVisibleWithin(hit.object, root)) continue;
+        const entityId = entityIdFromObject(hit.object);
+        if (!entityId) continue;
+        const containment = findContainment(projectRef.current, entityId);
+        if (!containment) continue;
+        const floor = floorForContainment(
+          projectRef.current,
+          containment.id,
+          floorIdRef.current || undefined,
+        );
+        const measurement = containmentMeasurement(projectRef.current, containment, floor);
+        setHoverInfo({
+          ...tooltipPosition(event),
+          title: measurement.title,
+          rows: measurement.rows,
+        });
+        return;
+      }
+
+      setHoverInfo(clearanceHover(event, root, rect));
+    };
+
+    const handlePointerLeave = (): void => setHoverInfo(null);
+    renderer.domElement.addEventListener('pointermove', handlePointerMove);
+    renderer.domElement.addEventListener('pointerleave', handlePointerLeave);
 
     // Lights — a daylight-interior look matching Panel3D's building mode.
     const ambient = new THREE.AmbientLight(0xffffff, 0.55);
@@ -172,9 +615,9 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.screenSpacePanning = true;
-    controls.minDistance = 500;
+    controls.minDistance = 100;
     controls.maxDistance = 200000;
-    controls.maxPolarAngle = Math.PI * 0.495; // keep camera above the slabs
+    controls.maxPolarAngle = Math.PI * 0.51; // allow a level walkthrough view
     orbitRef.current = controls;
 
     const animate = () => {
@@ -198,7 +641,13 @@ export function SiteSceneViewer({ project, width, height }: Props) {
         cancelAnimationFrame(animationRef.current);
         animationRef.current = null;
       }
+      if (walkHoldRef.current !== null) {
+        window.clearInterval(walkHoldRef.current);
+        walkHoldRef.current = null;
+      }
       ro.disconnect();
+      renderer.domElement.removeEventListener('pointermove', handlePointerMove);
+      renderer.domElement.removeEventListener('pointerleave', handlePointerLeave);
       controls.dispose();
       orbitRef.current = null;
       // Dispose the active scene group via SceneControls
@@ -219,12 +668,48 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const moveWalk = (direction: WalkDirection, multiplier = 1): void => {
+    const camera = cameraRef.current;
+    const orbit = orbitRef.current;
+    if (!camera || !orbit) return;
+    walkStep(camera, orbit, direction, multiplier, walkBoundsRef.current);
+  };
+
+  const startWalkHold = (direction: WalkDirection): void => {
+    moveWalk(direction);
+    if (walkHoldRef.current !== null) window.clearInterval(walkHoldRef.current);
+    walkHoldRef.current = window.setInterval(() => moveWalk(direction, 0.65), 55);
+  };
+
+  const stopWalkHold = (): void => {
+    if (walkHoldRef.current === null) return;
+    window.clearInterval(walkHoldRef.current);
+    walkHoldRef.current = null;
+  };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
+      const direction = WALK_KEYS[e.key];
+      if (!direction) return;
+      e.preventDefault();
+      moveWalk(direction, e.shiftKey ? 2 : 1);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   // ---------- Rebuild scene group when project changes --------------------
   useEffect(() => {
     const scene = sceneRef.current;
     const camera = cameraRef.current;
     const orbit = orbitRef.current;
     if (!scene || !camera || !orbit) return;
+
+    if (lastProjectIdRef.current !== project.id) {
+      framedOnceRef.current = false;
+      lastProjectIdRef.current = project.id;
+    }
 
     // Tear down previous build.
     if (sceneControlsRef.current) {
@@ -246,14 +731,17 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     else controls.isolateFloor(null);
     if (systemId) controls.filterSystem(systemId);
     else controls.filterSystem(null);
-    if (wallOpacity < 1) controls.setTransparency('walls', wallOpacity);
+    controls.setTransparency('walls', wallOpacity);
 
     // Frame on first build / explicit reset only — preserves user pose
     // when sheets get edited but the project structure stays the same.
-    if (resetTick > 0 || !group.userData.framedOnce) {
-      frameObject(camera, orbit, group);
-      group.userData.framedOnce = true;
+    if (resetTick > 0 || !framedOnceRef.current) {
+      const frameTarget = activeSceneObject() ?? group;
+      if (singleFloor && floorId) placeWalkCamera(camera, orbit, frameTarget);
+      else frameObject(camera, orbit, frameTarget);
+      framedOnceRef.current = true;
     }
+    refreshWalkBounds();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectSig, resetTick]);
 
@@ -263,12 +751,21 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     if (!c) return;
     if (singleFloor && floorId) c.isolateFloor(floorId);
     else c.isolateFloor(null);
+    refreshWalkBounds();
+    const obj = activeSceneObject();
+    const camera = cameraRef.current;
+    const orbit = orbitRef.current;
+    if (obj && camera && orbit) {
+      if (singleFloor && floorId) placeWalkCamera(camera, orbit, obj);
+      else frameObject(camera, orbit, obj);
+    }
   }, [singleFloor, floorId]);
 
   useEffect(() => {
     const c = sceneControlsRef.current;
     if (!c) return;
     c.filterSystem(systemId || null);
+    refreshWalkBounds();
   }, [systemId]);
 
   useEffect(() => {
@@ -299,36 +796,67 @@ export function SiteSceneViewer({ project, width, height }: Props) {
 
   // Keep a sane default floor selection — first floor in the list, if any.
   useEffect(() => {
-    if (!floorId && floors.length > 0) setFloorId(floors[0].id);
-  }, [floors, floorId]);
+    if (floorId && floors.some((f) => f.id === floorId)) return;
+    if (project.activeFloorId && floors.some((f) => f.id === project.activeFloorId)) {
+      setFloorId(project.activeFloorId);
+      return;
+    }
+    if (floors.length > 0) setFloorId(floors[0].id);
+  }, [floors, floorId, project.activeFloorId]);
 
   const handleResetView = () => {
-    setResetTick((t) => t + 1);
+    const obj = activeSceneObject();
+    const camera = cameraRef.current;
+    const orbit = orbitRef.current;
+    if (obj && camera && orbit) {
+      frameObject(camera, orbit, obj);
+      refreshWalkBounds();
+    } else {
+      setResetTick((t) => t + 1);
+    }
   };
 
   return (
     <>
       <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
-      <div className="canvas-3d-overlay">
-        Whole-Site View · drag to orbit · scroll to zoom
-      </div>
-      <div className="canvas-3d-controls" style={{ minWidth: 200 }}>
-        <div className="group" role="group" aria-label="Floor mode">
+      {renderError && <div className="canvas-3d-fallback">{renderError}</div>}
+      {!renderError && (
+        <div className="canvas-3d-overlay">
+          3D View · hover for size/clearance · arrows/WASD to move · drag to look
+        </div>
+      )}
+      {!renderError && hoverInfo && (
+        <div
+          className="canvas-3d-tooltip"
+          style={{ left: hoverInfo.x, top: hoverInfo.y }}
+        >
+          <div className="title">{hoverInfo.title}</div>
+          {hoverInfo.rows.map((row) => (
+            <div className="row" key={`${row.label}:${row.value}`}>
+              <span>{row.label}</span>
+              <strong>{row.value}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+      {!renderError && (
+        <div className="canvas-3d-controls" style={{ minWidth: 200 }}>
+        <div className="group" role="group" aria-label="3D scope">
           <button
             type="button"
-            className={singleFloor ? '' : 'active'}
-            onClick={() => setSingleFloor(false)}
-            title="Show all floors stacked"
+            className={viewScope === 'site' ? 'active' : ''}
+            onClick={() => setViewScope('site')}
+            title="Frame the full project"
           >
-            Whole Site
+            Project
           </button>
           <button
             type="button"
-            className={singleFloor ? 'active' : ''}
-            onClick={() => setSingleFloor(true)}
-            title="Isolate a single floor"
+            className={viewScope === 'floor' ? 'active' : ''}
+            onClick={() => setViewScope('floor')}
+            title="Inspect one floor"
           >
-            Single Floor
+            Floor
           </button>
         </div>
         {singleFloor && floors.length > 0 && (
@@ -389,11 +917,62 @@ export function SiteSceneViewer({ project, width, height }: Props) {
           </label>
         </div>
         <div className="group" role="group" aria-label="Reset view">
-          <button type="button" onClick={handleResetView} title="Frame the whole site">
-            Reset View
+          <button type="button" onClick={handleResetView} title="Frame the active 3D view">
+            Fit View
           </button>
         </div>
-      </div>
+        <div className="group walk-pad" role="group" aria-label="First-person movement">
+          <button
+            type="button"
+            className="walk-forward"
+            onClick={(e) => { if (e.detail === 0) moveWalk('forward'); }}
+            onPointerDown={() => startWalkHold('forward')}
+            onPointerUp={stopWalkHold}
+            onPointerLeave={stopWalkHold}
+            onPointerCancel={stopWalkHold}
+            title="Move forward"
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className="walk-left"
+            onClick={(e) => { if (e.detail === 0) moveWalk('left'); }}
+            onPointerDown={() => startWalkHold('left')}
+            onPointerUp={stopWalkHold}
+            onPointerLeave={stopWalkHold}
+            onPointerCancel={stopWalkHold}
+            title="Move left"
+          >
+            ←
+          </button>
+          <button
+            type="button"
+            className="walk-back"
+            onClick={(e) => { if (e.detail === 0) moveWalk('back'); }}
+            onPointerDown={() => startWalkHold('back')}
+            onPointerUp={stopWalkHold}
+            onPointerLeave={stopWalkHold}
+            onPointerCancel={stopWalkHold}
+            title="Move back"
+          >
+            ↓
+          </button>
+          <button
+            type="button"
+            className="walk-right"
+            onClick={(e) => { if (e.detail === 0) moveWalk('right'); }}
+            onPointerDown={() => startWalkHold('right')}
+            onPointerUp={stopWalkHold}
+            onPointerLeave={stopWalkHold}
+            onPointerCancel={stopWalkHold}
+            title="Move right"
+          >
+            →
+          </button>
+        </div>
+        </div>
+      )}
     </>
   );
 }

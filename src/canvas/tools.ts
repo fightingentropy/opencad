@@ -213,7 +213,8 @@ export const onToolClick = (tool: ToolId, ctx: ToolContext): ToolResult => {
     case 'trunking':
     case 'basket':
     case 'tray':
-    case 'conduit': {
+    case 'conduit':
+    case 'ladder': {
       const label = tool[0].toUpperCase() + tool.slice(1);
       if (ctx.draft.length === 0)
         return { committed: [], newDraft: [cursor], status: `${label}: pick next vertex` };

@@ -1,13 +1,140 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../state/store';
 import { CATEGORY_LABELS, searchSymbols, renderSymbolPreview, symbolsByCategory } from '../symbols';
-import type { SymbolCategory, Layer } from '../types';
+import { CONTAINMENT_DEFAULTS } from '../canvas/tools';
+import type { ContainmentType, SymbolCategory, ToolId, Layer } from '../types';
 
 export function LeftPanel({ open = false }: { open?: boolean } = {}) {
   return (
     <div className={`left-panel${open ? ' open' : ''}`}>
+      <ContainmentLibrary />
       <SymbolLibrary />
       <Layers />
+    </div>
+  );
+}
+
+type ContainmentTool = Extract<ToolId, ContainmentType>;
+
+const CONTAINMENT_PALETTE: {
+  tool: ContainmentTool;
+  label: string;
+  description: string;
+  icon: JSX.Element;
+}[] = [
+  {
+    tool: 'basket',
+    label: 'Basket',
+    description: 'Wire basket containment',
+    icon: (
+      <svg viewBox="0 0 56 56" aria-hidden="true">
+        <path d="M7 22h42v14H7z" />
+        <path d="M13 22l9 14M22 22l-9 14M29 22l9 14M38 22l-9 14M47 22l-9 14" />
+        <path d="M7 29h42" />
+      </svg>
+    ),
+  },
+  {
+    tool: 'tray',
+    label: 'Tray',
+    description: 'Cable tray containment',
+    icon: (
+      <svg viewBox="0 0 56 56" aria-hidden="true">
+        <path d="M8 19v17h40V19" />
+        <path d="M13 32h30M16 28v-5M24 28v-5M32 28v-5M40 28v-5" />
+      </svg>
+    ),
+  },
+  {
+    tool: 'trunking',
+    label: 'Trunking',
+    description: 'Rectangular trunking containment',
+    icon: (
+      <svg viewBox="0 0 56 56" aria-hidden="true">
+        <rect x="8" y="21" width="40" height="14" />
+        <path d="M10 26h36M10 31h36" />
+      </svg>
+    ),
+  },
+  {
+    tool: 'conduit',
+    label: 'Conduit',
+    description: 'Round conduit route',
+    icon: (
+      <svg viewBox="0 0 56 56" aria-hidden="true">
+        <path d="M8 28h40" />
+        <circle cx="16" cy="28" r="4" />
+        <circle cx="40" cy="28" r="4" />
+      </svg>
+    ),
+  },
+  {
+    tool: 'ladder',
+    label: 'Ladder',
+    description: 'Cable ladder containment',
+    icon: (
+      <svg viewBox="0 0 56 56" aria-hidden="true">
+        <path d="M8 20h40M8 36h40" />
+        <path d="M15 20v16M23 20v16M31 20v16M39 20v16" />
+      </svg>
+    ),
+  },
+];
+
+function findContainmentLayer(project: ReturnType<typeof useStore.getState>['project']): string | null {
+  for (const id of project.layerOrder) {
+    const layer = project.layers[id];
+    if (layer?.name.toLowerCase() === 'containment') return id;
+  }
+  return null;
+}
+
+function ContainmentLibrary() {
+  const project = useStore((s) => s.project);
+  const tool = useStore((s) => s.editor.tool);
+  const setTool = useStore((s) => s.setTool);
+  const setActiveLayer = useStore((s) => s.setActiveLayer);
+  const setStatus = useStore((s) => s.setStatus);
+
+  const selectTool = (id: ContainmentTool, label: string) => {
+    const containmentLayer = findContainmentLayer(project);
+    if (containmentLayer) setActiveLayer(containmentLayer);
+    setTool(id);
+    setStatus(`${label}: pick first point`);
+  };
+
+  return (
+    <div className="panel-section containment-library">
+      <div className="panel-header">
+        Containment
+        <div className="panel-actions">
+          <span className="kbd">{CONTAINMENT_PALETTE.length}</span>
+        </div>
+      </div>
+      <div className="containment-tool-grid">
+        {CONTAINMENT_PALETTE.map((item) => {
+          const defaults = CONTAINMENT_DEFAULTS[item.tool];
+          const size =
+            item.tool === 'conduit'
+              ? `Ø${defaults.width} mm`
+              : `${defaults.width} × ${defaults.height} mm`;
+          return (
+            <button
+              key={item.tool}
+              type="button"
+              className={`containment-tool-card${tool === item.tool ? ' active' : ''}`}
+              onClick={() => selectTool(item.tool, item.label)}
+              title={item.description}
+            >
+              <span className="containment-tool-icon">{item.icon}</span>
+              <span className="containment-tool-meta">
+                <span className="containment-tool-name">{item.label}</span>
+                <span className="containment-tool-size">{size}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -17,6 +144,7 @@ function SymbolLibrary() {
   const pending = useStore((s) => s.editor.pendingSymbol);
   const [query, setQuery] = useState('');
   const [activeCat, setActiveCat] = useState<SymbolCategory | 'all'>('all');
+  const [open, setOpen] = useState(false);
 
   const symbols = useMemo(() => {
     const all = searchSymbols(query);
@@ -30,57 +158,67 @@ function SymbolLibrary() {
   }, []);
 
   return (
-    <div className="panel-section flex">
-      <div className="panel-header">
-        Symbols
+    <div className={`panel-section extras-library${open ? ' open' : ''}`}>
+      <button
+        type="button"
+        className="panel-header extras-header"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+      >
+        Extras
         <div className="panel-actions">
           <span className="kbd">{symbols.length}</span>
+          <span className="extras-chevron" aria-hidden="true">{open ? '−' : '+'}</span>
         </div>
-      </div>
-      <div className="symbol-search">
-        <input
-          placeholder="Search…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </div>
-      <div className="symbol-categories">
-        <span
-          className={`cat-pill${activeCat === 'all' ? ' active' : ''}`}
-          onClick={() => setActiveCat('all')}
-        >
-          All
-        </span>
-        {categories.map((c) => (
-          <span
-            key={c}
-            className={`cat-pill${activeCat === c ? ' active' : ''}`}
-            onClick={() => setActiveCat(c)}
-            title={CATEGORY_LABELS[c]}
-          >
-            {CATEGORY_LABELS[c]}
-          </span>
-        ))}
-      </div>
-      <div className="panel-body">
-        <div className="symbol-grid">
-          {symbols.map((s) => (
-            <div
-              key={s.id}
-              className={`symbol-tile${pending === s.id ? ' active' : ''}`}
-              onClick={() => setPendingSymbol(pending === s.id ? null : s.id)}
-              title={s.description ?? s.name}
+      </button>
+      {open && (
+        <>
+          <div className="symbol-search">
+            <input
+              placeholder="Search extras…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <div className="symbol-categories">
+            <span
+              className={`cat-pill${activeCat === 'all' ? ' active' : ''}`}
+              onClick={() => setActiveCat('all')}
             >
-              <div
-                className="symbol-tile-preview"
-                style={{ color: '#e6e6e6' }}
-                dangerouslySetInnerHTML={{ __html: renderSymbolPreview(s, 56) }}
-              />
-              <div className="symbol-tile-name">{s.name}</div>
+              All
+            </span>
+            {categories.map((c) => (
+              <span
+                key={c}
+                className={`cat-pill${activeCat === c ? ' active' : ''}`}
+                onClick={() => setActiveCat(c)}
+                title={CATEGORY_LABELS[c]}
+              >
+                {CATEGORY_LABELS[c]}
+              </span>
+            ))}
+          </div>
+          <div className="panel-body">
+            <div className="symbol-grid">
+              {symbols.map((s) => (
+                <div
+                  key={s.id}
+                  className={`symbol-tile${pending === s.id ? ' active' : ''}`}
+                  onClick={() => setPendingSymbol(pending === s.id ? null : s.id)}
+                  title={s.description ?? s.name}
+                >
+                  <div
+                    className="symbol-tile-preview"
+                    style={{ color: '#e6e6e6' }}
+                    dangerouslySetInnerHTML={{ __html: renderSymbolPreview(s, 56) }}
+                  />
+                  <div className="symbol-tile-name">{s.name}</div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

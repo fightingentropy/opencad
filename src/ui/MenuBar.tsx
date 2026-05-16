@@ -55,6 +55,7 @@ export function MenuBar({
   const resetProject = useStore((s) => s.resetProject);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
+  const selectionSize = useStore((s) => s.editor.selection.size);
   const setStatus = useStore((s) => s.setStatus);
   const addEntity = useStore((s) => s.addEntity);
   const addEntities = useStore((s) => s.addEntities);
@@ -433,6 +434,18 @@ export function MenuBar({
         <MenuOpt label="Deselect" onClick={action(() => useStore.getState().clearSelection())} hint="Esc" />
         <Divider />
         <MenuOpt label="Delete Selection" onClick={action(() => { const ids = Array.from(useStore.getState().editor.selection); useStore.getState().removeEntities(ids); })} hint="Del" />
+        <Divider />
+        <MenuOpt label="Align Left" onClick={action(() => useStore.getState().alignEntities('left'))} hint="" disabled={selectionSize < 2} />
+        <MenuOpt label="Align Center Horizontal" onClick={action(() => useStore.getState().alignEntities('center-h'))} hint="" disabled={selectionSize < 2} />
+        <MenuOpt label="Align Right" onClick={action(() => useStore.getState().alignEntities('right'))} hint="" disabled={selectionSize < 2} />
+        <MenuOpt label="Align Top" onClick={action(() => useStore.getState().alignEntities('top'))} hint="" disabled={selectionSize < 2} />
+        <MenuOpt label="Align Center Vertical" onClick={action(() => useStore.getState().alignEntities('center-v'))} hint="" disabled={selectionSize < 2} />
+        <MenuOpt label="Align Bottom" onClick={action(() => useStore.getState().alignEntities('bottom'))} hint="" disabled={selectionSize < 2} />
+        <Divider />
+        <MenuOpt label="Distribute Horizontal" onClick={action(() => useStore.getState().distributeEntities('horizontal'))} hint="" disabled={selectionSize < 3} />
+        <MenuOpt label="Distribute Vertical" onClick={action(() => useStore.getState().distributeEntities('vertical'))} hint="" disabled={selectionSize < 3} />
+        <MenuOpt label="Flip Horizontal" onClick={action(() => useStore.getState().flipEntities('horizontal'))} hint="⌘⇧H" disabled={selectionSize < 1} />
+        <MenuOpt label="Flip Vertical" onClick={action(() => useStore.getState().flipEntities('vertical'))} hint="⌘⇧V" disabled={selectionSize < 1} />
       </MenuButton>
       <MenuButton label="View" open={openMenu === 'view'} onClick={click('view')}>
         <MenuOpt label="Zoom Extents" onClick={action(() => zoomExtents())} hint="" />
