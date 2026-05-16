@@ -8,6 +8,14 @@ const containmentsOn = (sheet: Sheet): ContainmentEntity[] => (
     .filter((entity): entity is ContainmentEntity => entity?.kind === 'containment')
 );
 
+const containmentsById = (project: Project): Map<string, ContainmentEntity> => {
+  const out = new Map<string, ContainmentEntity>();
+  for (const sheet of Object.values(project.sheets)) {
+    for (const containment of containmentsOn(sheet)) out.set(containment.id, containment);
+  }
+  return out;
+};
+
 const officeSheets = (project: Project): Sheet[] => (
   Object.values(project.sheets).filter((sheet) => sheet.name.startsWith('Office'))
 );
@@ -30,5 +38,26 @@ describe('whole-site sample containment layout', () => {
       expect(lightingBasket?.color).toBe('#bcc1c8');
       expect(oldLightingTrunking).toBeUndefined();
     }
+  });
+
+  it('models inter-building duct banks instead of leaving plant feeds as manual routes', () => {
+    const project = createWholeSiteSampleProject();
+    const containments = containmentsById(project);
+    const labels = new Set([...containments.values()].map((c) => c.label));
+
+    expect(labels.has('Site LV duct bank — Office to Plant')).toBe(true);
+    expect(labels.has('Plant LV duct entry sleeve')).toBe(true);
+    expect(labels.has('Site data duct bank — Office to Plant')).toBe(true);
+    expect(labels.has('Plant data duct entry sleeve')).toBe(true);
+
+    const plantFeed = Object.values(project.cableSchedule?.cables ?? {})
+      .find((cable) => cable.reference === 'PW-MCC-DB2A-003');
+    expect(plantFeed?.notes ?? '').not.toContain('crosses building');
+
+    const routeLabels = (plantFeed?.route ?? [])
+      .map((id) => containments.get(id)?.label)
+      .filter(Boolean);
+    expect(routeLabels).toContain('Site LV duct bank — Office to Plant');
+    expect(routeLabels).toContain('Plant LV duct entry sleeve');
   });
 });
