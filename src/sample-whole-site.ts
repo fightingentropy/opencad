@@ -996,8 +996,8 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
   const ahuX = 9500;
   const pumpX = 18750;
   const plantLadderY = 9000;
-  const plantPowerBranchY = 8450;
-  const plantDataBasketY = 9700;
+  const plantPowerBranchY = 8000;
+  const plantDataBasketY = 10000;
   const plantHighLevelElevation = isMezzanine ? 2400 : 5300;
   const atPlantHighLevel = (entity: ContainmentEntity): ContainmentEntity => ({
     ...entity,
@@ -1634,9 +1634,9 @@ export const createWholeSiteSampleProject = (): Project => {
       'Plant data duct entry sleeve',
       [
         { x: 0, y: 9300 },
-        { x: 400, y: 9850 },
-        { x: 4200, y: 9850 },
-        { x: 4500, y: 9700 },
+        { x: 400, y: 10150 },
+        { x: 4200, y: 10150 },
+        { x: 4500, y: 10000 },
       ],
       systemData.id,
       'data',
