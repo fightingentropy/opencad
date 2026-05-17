@@ -92,15 +92,19 @@ function findContainmentLayer(project: ReturnType<typeof useStore.getState>['pro
 function ContainmentLibrary() {
   const project = useStore((s) => s.project);
   const tool = useStore((s) => s.editor.tool);
+  const viewMode = useStore((s) => s.editor.viewMode);
   const setTool = useStore((s) => s.setTool);
   const setActiveLayer = useStore((s) => s.setActiveLayer);
+  const setViewMode = useStore((s) => s.setViewMode);
   const setStatus = useStore((s) => s.setStatus);
+  const activeContainment = CONTAINMENT_PALETTE.find((item) => item.tool === tool);
 
   const selectTool = (id: ContainmentTool, label: string) => {
     const containmentLayer = findContainmentLayer(project);
     if (containmentLayer) setActiveLayer(containmentLayer);
+    if (viewMode === '3d') setViewMode('split');
     setTool(id);
-    setStatus(`${label}: pick first point`);
+    setStatus(`${label}: pick first point on the plan`);
   };
 
   return (
@@ -135,6 +139,12 @@ function ContainmentLibrary() {
           );
         })}
       </div>
+      {activeContainment && (
+        <div className="containment-command-hint">
+          <strong>{activeContainment.label}</strong>
+          <span>Click points on the plan. Enter or right-click commits the run.</span>
+        </div>
+      )}
     </div>
   );
 }

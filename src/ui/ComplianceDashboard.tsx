@@ -34,6 +34,7 @@ export function ComplianceDashboard({ onClose }: { onClose: () => void }) {
   const fillIssues = report.byKind.fill ?? 0;
   const segregationIssues = report.byKind.segregation ?? 0;
   const supportIssues = report.byKind['support-spacing'] ?? 0;
+  const clearanceIssues = report.byKind.clearance ?? 0;
   const vdropIssues = report.byKind['voltage-drop'] ?? 0;
   const fireIssues = report.byKind['fire-stop'] ?? 0;
 
@@ -43,6 +44,8 @@ export function ComplianceDashboard({ onClose }: { onClose: () => void }) {
     segregationIssues === 0 ? 'good' : 'red';
   const supportStatus: 'good' | 'amber' =
     supportIssues === 0 ? 'good' : 'amber';
+  const clearanceStatus: 'good' | 'amber' | 'red' =
+    clearanceIssues === 0 ? 'good' : report.issues.some((issue) => issue.kind === 'clearance' && issue.severity === 'error') ? 'red' : 'amber';
   const vdropStatus: 'good' | 'red' =
     vdropIssues === 0 ? 'good' : 'red';
   const fireStatus: 'good' | 'amber' =
@@ -81,6 +84,12 @@ export function ComplianceDashboard({ onClose }: { onClose: () => void }) {
               `${supportIssues}`,
               supportStatus,
               supportIssues === 0 ? 'All runs within span' : 'Long runs flagged',
+            )}
+            {card(
+              'Clearance',
+              `${clearanceIssues}`,
+              clearanceStatus,
+              clearanceIssues === 0 ? 'No overlaps detected' : 'Review side clearances',
             )}
             {card(
               'Segregation',

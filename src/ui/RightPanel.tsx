@@ -1,7 +1,13 @@
 import React, { useState } from 'react';
 import { useStore } from '../state/store';
+import { regenerateAutoFeaturesForContainments } from '../lib/auto-feature-actions';
 import { getSymbol } from '../symbols';
-import type { Entity } from '../types';
+import type {
+  ContainmentEntity,
+  ContainmentMaterial,
+  ContainmentType,
+  Entity,
+} from '../types';
 import { CalculationsPanel } from './CalculationsPanel';
 import { FillVisualizationOverlay } from './FillVisualizationOverlay';
 import { PhaseFilter } from './PhaseFilter';
@@ -9,6 +15,46 @@ import { SystemFilter } from './SystemFilter';
 import { MarkupPanel } from './MarkupPanel';
 import { RevisionHistoryPanel } from './RevisionHistoryPanel';
 import { ITPChecklistPanel } from './ITPChecklistPanel';
+
+const CONTAINMENT_TYPES: ContainmentType[] = ['basket', 'tray', 'trunking', 'conduit', 'ladder', 'duct', 'busbar'];
+const CONTAINMENT_MATERIALS: ContainmentMaterial[] = [
+  'pre-galvanised-steel',
+  'galvanised-steel',
+  'hot-dip-galvanised',
+  'stainless-304',
+  'stainless-316',
+  'stainless-316L',
+  'aluminium',
+  'pvc',
+  'lsoh',
+  'grp',
+  'frp',
+  'copper',
+  'other',
+];
+const CABLE_CATEGORIES: NonNullable<ContainmentEntity['cableCategory']>[] = [
+  'power',
+  'data',
+  'fire-alarm',
+  'emergency',
+  'comms',
+  'instrumentation',
+  'mixed',
+];
+
+const labelize = (value: string): string =>
+  value
+    .split('-')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+
+const routeLength = (points: ContainmentEntity['points']): number => {
+  let length = 0;
+  for (let i = 1; i < points.length; i++) {
+    length += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
+  }
+  return length;
+};
 
 export function RightPanel({ open = false }: { open?: boolean } = {}) {
   return (
@@ -121,6 +167,24 @@ function SinglePropertiesEditor({ entity, onUpdate }: { entity: Entity; onUpdate
   const project = useStore((s) => s.project);
   const layers = project.layerOrder.map((id) => project.layers[id]);
   const symbolDef = entity.kind === 'symbol' ? getSymbol(entity.symbolId) : null;
+  const systems = Object.values(project.systems ?? {});
+  const updateContainment = (patch: Partial<ContainmentEntity>, regenerate = false) => {
+    onUpdate(patch as Partial<Entity>);
+    if (regenerate) regenerateAutoFeaturesForContainments([entity.id]);
+  };
+  const updateContainmentNumber = (
+    key: 'width' | 'height' | 'elevation' | 'innerCsaMm2' | 'compartments',
+    value: string,
+    regenerate = false,
+  ) => {
+    if (value.trim() === '') {
+      updateContainment({ [key]: undefined } as Partial<ContainmentEntity>, regenerate);
+      return;
+    }
+    const next = Number(value);
+    if (!Number.isFinite(next)) return;
+    updateContainment({ [key]: next } as Partial<ContainmentEntity>, regenerate);
+  };
 
   return (
     <div style={{ padding: '8px 0' }}>
@@ -198,6 +262,134 @@ function SinglePropertiesEditor({ entity, onUpdate }: { entity: Entity; onUpdate
             <Row label="Mirror">
               <input type="checkbox" checked={!!entity.mirror}
                 onChange={(e) => onUpdate({ mirror: e.target.checked } as any)} />
+            </Row>
+          </Section>
+        </>
+      )}
+
+      {entity.kind === 'containment' && (
+        <>
+          <Section title="Containment">
+            <Row label="Label">
+              <input
+                value={entity.label ?? ''}
+                placeholder={entity.containmentType.toUpperCase()}
+                onChange={(e) => updateContainment({ label: e.target.value })}
+              />
+            </Row>
+            <Row label="Type">
+              <select
+                value={entity.containmentType}
+                onChange={(e) => updateContainment({ containmentType: e.target.value as ContainmentType }, true)}
+              >
+                {CONTAINMENT_TYPES.map((type) => (
+                  <option key={type} value={type}>{labelize(type)}</option>
+                ))}
+              </select>
+            </Row>
+            <Row label={entity.containmentType === 'conduit' ? 'Diameter' : 'Width'}>
+              <input
+                type="number"
+                step="10"
+                min="1"
+                value={entity.width ?? ''}
+                onChange={(e) => updateContainmentNumber('width', e.target.value, true)}
+              />
+            </Row>
+            {entity.containmentType !== 'conduit' && (
+              <Row label="Height">
+                <input
+                  type="number"
+                  step="10"
+                  min="1"
+                  value={entity.height ?? ''}
+                  onChange={(e) => updateContainmentNumber('height', e.target.value, true)}
+                />
+              </Row>
+            )}
+            <Row label="Elevation FFL">
+              <input
+                type="number"
+                step="25"
+                min="0"
+                value={entity.elevation ?? ''}
+                placeholder="default"
+                onChange={(e) => updateContainmentNumber('elevation', e.target.value, true)}
+              />
+            </Row>
+            <Row label="System">
+              <select
+                value={entity.systemId ?? ''}
+                onChange={(e) => updateContainment({ systemId: e.target.value || undefined } as Partial<ContainmentEntity>)}
+              >
+                <option value="">—</option>
+                {systems.map((system) => (
+                  <option key={system.id} value={system.id}>{system.name}</option>
+                ))}
+              </select>
+            </Row>
+            <Row label="Cable Band">
+              <select
+                value={entity.cableCategory ?? ''}
+                onChange={(e) => updateContainment({ cableCategory: (e.target.value || undefined) as ContainmentEntity['cableCategory'] })}
+              >
+                <option value="">—</option>
+                {CABLE_CATEGORIES.map((category) => (
+                  <option key={category} value={category}>{labelize(category)}</option>
+                ))}
+              </select>
+            </Row>
+            <Row label="Material">
+              <select
+                value={entity.material ?? ''}
+                onChange={(e) => updateContainment({ material: (e.target.value || undefined) as ContainmentMaterial | undefined }, true)}
+              >
+                <option value="">—</option>
+                {CONTAINMENT_MATERIALS.map((material) => (
+                  <option key={material} value={material}>{labelize(material)}</option>
+                ))}
+              </select>
+            </Row>
+            <Row label="Compartments">
+              <input
+                type="number"
+                step="1"
+                min="1"
+                value={entity.compartments ?? ''}
+                onChange={(e) => updateContainmentNumber('compartments', e.target.value)}
+              />
+            </Row>
+            <Row label="Inner CSA">
+              <input
+                type="number"
+                step="100"
+                min="1"
+                value={entity.innerCsaMm2 ?? ''}
+                placeholder="auto"
+                onChange={(e) => updateContainmentNumber('innerCsaMm2', e.target.value)}
+              />
+            </Row>
+          </Section>
+          <Section title="Route">
+            <Row label="Length">
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>
+                {routeLength(entity.points).toFixed(0)} mm
+              </span>
+            </Row>
+            <Row label="Points">
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11 }}>{entity.points.length}</span>
+            </Row>
+            <Row label="Auto Features">
+              <button
+                type="button"
+                className="btn-ghost btn-tiny"
+                onClick={() => {
+                  regenerateAutoFeaturesForContainments([entity.id]);
+                  useStore.getState().setStatus(`Auto-features regenerated for ${entity.label ?? entity.containmentType}`);
+                }}
+              >
+                Regenerate
+              </button>
             </Row>
           </Section>
         </>

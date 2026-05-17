@@ -3,6 +3,7 @@
 import type {
   ContainmentEntity,
   ContainmentType,
+  Entity,
   EntityId,
   Project,
   Sheet,
@@ -34,6 +35,7 @@ export interface MakeContainmentOpts {
   cableCategory?: ContainmentEntity['cableCategory'];
   subType?: ContainmentEntity['subType'];
   material?: ContainmentEntity['material'];
+  elevation?: number;
   manufacturer?: string;
   catalogPartNumber?: string;
   label?: string;
@@ -59,6 +61,7 @@ export const makeContainment = (
   cableCategory: opts.cableCategory,
   subType: opts.subType,
   material: opts.material,
+  elevation: opts.elevation,
   manufacturer: opts.manufacturer,
   catalogPartNumber: opts.catalogPartNumber,
   label: opts.label,
@@ -114,6 +117,7 @@ export const makeSupport = (
 
 export interface MakeProjectOpts {
   containments?: ContainmentEntity[];
+  supports?: SupportEntity[];
   cables?: Cable[];
   standardsProfile?: StandardsProfile;
 }
@@ -121,9 +125,11 @@ export interface MakeProjectOpts {
 export const makeProject = (opts: MakeProjectOpts = {}): Project => {
   const sheetId: SheetId = id('sheet');
   const containments = opts.containments ?? [];
+  const supports = opts.supports ?? [];
   const cables = opts.cables ?? [];
-  const entities: Record<EntityId, ContainmentEntity> = {};
+  const entities: Record<EntityId, Entity> = {};
   for (const c of containments) entities[c.id] = c;
+  for (const s of supports) entities[s.id] = s;
   const sheet: Sheet = {
     id: sheetId,
     name: 'Test Sheet',
@@ -132,7 +138,7 @@ export const makeProject = (opts: MakeProjectOpts = {}): Project => {
     width: 420,
     height: 297,
     entities,
-    entityOrder: containments.map((c) => c.id),
+    entityOrder: [...containments.map((c) => c.id), ...supports.map((s) => s.id)],
   };
   const project: Project = {
     id: id('proj'),
