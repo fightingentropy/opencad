@@ -499,6 +499,43 @@ describe('buildBuildingScene', () => {
     expect(drop!.visible).toBe(true);
   });
 
+  it('does not turn low-level duct entries into equipment drops', () => {
+    const duct: ContainmentEntity = {
+      id: 'duct-1',
+      kind: 'containment',
+      layerId: 'containment-layer',
+      visible: true,
+      locked: false,
+      containmentType: 'duct',
+      subType: 'underground-duct',
+      points: [
+        { x: 100, y: 500 },
+        { x: 500, y: 500 },
+      ],
+      width: 300,
+      height: 100,
+      elevation: 2600,
+      systemId: 'sys-power',
+    };
+    const panel: EquipmentEntity = {
+      id: 'panel-1',
+      kind: 'equipment',
+      layerId: 'equipment-layer',
+      visible: true,
+      locked: false,
+      equipmentKind: 'distribution-board',
+      a: { x: 425, y: 425 },
+      b: { x: 575, y: 575 },
+      tag: 'DB-1',
+      height: 1800,
+      systemId: 'sys-power',
+    };
+    const { project } = makeProject([duct, panel]);
+    const { group } = buildBuildingScene(project);
+
+    expect(group.getObjectByName(`equipment-drop:${duct.id}:${panel.id}`)).toBeUndefined();
+  });
+
   it('sizes the floor slab to the building shell instead of a huge generic plane', () => {
     const room: RoomEntity = {
       id: 'room-1',
