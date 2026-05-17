@@ -8,16 +8,16 @@ import { containmentTouchesPoint } from '../lib/fittings';
 // Bump this whenever the bundled sample project changes meaningfully —
 // users with an autosave from a previous demo will skip it and load the
 // new sample on next reload.
-const STORAGE_KEY = 'opencad.project.v7';
+const STORAGE_KEY = 'opencad.project.v8';
 // Older keys are read once for migration and then evicted, so users with
 // a v5 (or earlier) save aren't dropped back to a fresh demo.
-const LEGACY_KEYS = ['opencad.project.v6', 'opencad.project.v5', 'opencad.project.v4'];
+const LEGACY_KEYS = ['opencad.project.v7', 'opencad.project.v6', 'opencad.project.v5', 'opencad.project.v4'];
 
 const GALV_CONTAINMENT_COLOR = '#bcc1c8';
-const PLANT_LADDER_Y = 9000;
 const PLANT_POWER_BRANCH_Y = 7200;
 const PLANT_DATA_BASKET_Y = 11200;
 const PLANT_DATA_ENTRY_DOGLEG_Y = 11350;
+const PLANT_ROUTE_XS = [4500, 9500, 18750, 27000] as const;
 
 // Apply migrations to projects saved by older app versions. Whole-site
 // fields are optional in the type, so the migration is mostly about
@@ -94,11 +94,20 @@ function rewritePlantBranch(
   containment: ContainmentEntity,
   branchY: number,
 ): boolean {
-  if (containment.points.length < 4) return false;
+  if (containment.points.length !== PLANT_ROUTE_XS.length) {
+    containment.points = PLANT_ROUTE_XS.map((x) => ({ x, y: branchY }));
+    return true;
+  }
   let changed = false;
-  changed ||= setPointY(containment, 0, PLANT_LADDER_Y);
-  changed ||= setPointY(containment, 1, branchY);
-  changed ||= setPointY(containment, 2, branchY);
+  for (let i = 0; i < PLANT_ROUTE_XS.length; i++) {
+    const point = containment.points[i];
+    if (!point) continue;
+    if (point.x !== PLANT_ROUTE_XS[i]) {
+      point.x = PLANT_ROUTE_XS[i];
+      changed = true;
+    }
+    changed ||= setPointY(containment, i, branchY);
+  }
   return changed;
 }
 
@@ -155,6 +164,12 @@ function migrateWholeSiteDemoPlantLanes(project: Project): void {
         containment.label === 'Branch to DB-PL-D'
       ) {
         changed ||= rewritePlantBranch(containment, PLANT_POWER_BRANCH_Y);
+      } else if (containment.label === 'Site LV duct bank — Office to Plant') {
+        changed ||= setPointY(containment, containment.points.length - 1, PLANT_POWER_BRANCH_Y);
+      } else if (containment.label === 'Plant LV duct entry sleeve') {
+        for (let i = 0; i < containment.points.length; i++) {
+          changed ||= setPointY(containment, i, PLANT_POWER_BRANCH_Y);
+        }
       } else if (containment.label === 'Plant data duct entry sleeve') {
         changed ||= setPointY(containment, 0, 9300);
         changed ||= setPointY(containment, 1, PLANT_DATA_ENTRY_DOGLEG_Y);

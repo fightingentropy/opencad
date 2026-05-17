@@ -1055,17 +1055,16 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
   containmentList.push(conduit);
 
   if (!isMezzanine) {
-    // MCC-room riser feeder — runs from ladder across the partition wall
-    // (penetration!) into the electrical-riser room and drops to DB-PL-G
-    // (~y=9175) and the comms cabinet CAB-PL-G (~y=6900).
+    // Plant power trunking — straight and parallel to the ladder, with a
+    // clear horizontal lane between the two containments.
     const mccFeeder = atPlantHighLevel(containment(
       layers.containment,
       'trunking',
       [
-        { x: 4500, y: plantLadderY },
         { x: 4500, y: plantPowerBranchY },
-        { x: 1100, y: plantPowerBranchY },
-        { x: 1100, y: 9175 },
+        { x: ahuX, y: plantPowerBranchY },
+        { x: pumpX, y: plantPowerBranchY },
+        { x: 27000, y: plantPowerBranchY },
       ],
       200,
       150,
@@ -1075,6 +1074,23 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
     ));
     addEntity(sheet, mccFeeder);
     containmentList.push(mccFeeder);
+
+    const dbBranch = atPlantHighLevel(containment(
+      layers.containment,
+      'trunking',
+      [
+        { x: 4500, y: plantPowerBranchY },
+        { x: 1100, y: plantPowerBranchY },
+        { x: 1100, y: 9175 },
+      ],
+      200,
+      150,
+      systems.powerDistribution,
+      'DB-PL-G power trunking branch',
+      'power',
+    ));
+    addEntity(sheet, dbBranch);
+    containmentList.push(dbBranch);
 
     // Data branch into the MCC room reaching CAB-PL-G
     const cabBranch = atPlantHighLevel(containment(
@@ -1127,10 +1143,10 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
       layers.containment,
       'trunking',
       [
-        { x: 4500, y: plantLadderY },
         { x: 4500, y: plantPowerBranchY },
-        { x: 1100, y: plantPowerBranchY },
-        { x: 1100, y: 9175 },
+        { x: ahuX, y: plantPowerBranchY },
+        { x: pumpX, y: plantPowerBranchY },
+        { x: 27000, y: plantPowerBranchY },
       ],
       150,
       150,
@@ -1601,7 +1617,7 @@ export const createWholeSiteSampleProject = (): Project => {
       [
         { x: 22800, y: 8400 },
         { x: 24000, y: 8400 },
-        { x: 30000, y: 9000 },
+        { x: 30000, y: 7200 },
       ],
       systemPower.id,
       'power',
@@ -1610,10 +1626,10 @@ export const createWholeSiteSampleProject = (): Project => {
     const plantLvEntry = undergroundDuct(
       'Plant LV duct entry sleeve',
       [
-        { x: 0, y: 9000 },
-        { x: 400, y: 8600 },
-        { x: 4200, y: 8600 },
-        { x: 4500, y: 9000 },
+        { x: 0, y: 7200 },
+        { x: 400, y: 7200 },
+        { x: 4200, y: 7200 },
+        { x: 4500, y: 7200 },
       ],
       systemPower.id,
       'power',
