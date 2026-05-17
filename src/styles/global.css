@@ -542,6 +542,23 @@ input[type=color] {
   white-space: nowrap;
 }
 
+.containment-command-hint {
+  margin: 0 8px 8px;
+  padding: 8px;
+  display: grid;
+  gap: 3px;
+  border: 1px solid rgba(59, 163, 255, 0.35);
+  border-radius: 4px;
+  background: rgba(59, 163, 255, 0.1);
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.containment-command-hint strong {
+  color: var(--accent);
+}
+
 .extras-library.open {
   flex: 1;
   min-height: 150px;
