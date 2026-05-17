@@ -995,18 +995,21 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
   // Branch x-coordinates — must match polyline vertices on the spine.
   const ahuX = 9500;
   const pumpX = 18750;
+  const plantLadderY = 9000;
+  const plantPowerBranchY = 8450;
+  const plantDataBasketY = 9700;
 
   // Containment — heavy ladder on long wall plus a basket spur. The
   // ladder polyline has explicit vertices at every drop so the graph
   // creates shared nodes connecting branches.
   const ladderPoints: Vec2[] = !isMezzanine
     ? [
-        { x: 4500, y: 9000 },
-        { x: ahuX, y: 9000 },
-        { x: pumpX, y: 9000 },
-        { x: 27000, y: 9000 },
+        { x: 4500, y: plantLadderY },
+        { x: ahuX, y: plantLadderY },
+        { x: pumpX, y: plantLadderY },
+        { x: 27000, y: plantLadderY },
       ]
-    : [{ x: 4500, y: 9000 }, { x: 27000, y: 9000 }];
+    : [{ x: 4500, y: plantLadderY }, { x: 27000, y: plantLadderY }];
   const ladder = containment(
     layers.containment,
     'ladder',
@@ -1023,7 +1026,7 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
   const basket = containment(
     layers.containment,
     'basket',
-    [{ x: 4500, y: 9300 }, { x: 27000, y: 9300 }],
+    [{ x: 4500, y: plantDataBasketY }, { x: 27000, y: plantDataBasketY }],
     300,
     100,
     systems.data,
@@ -1054,8 +1057,9 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
       layers.containment,
       'trunking',
       [
-        { x: 4500, y: 9000 },
-        { x: 1100, y: 9000 },
+        { x: 4500, y: plantLadderY },
+        { x: 4500, y: plantPowerBranchY },
+        { x: 1100, y: plantPowerBranchY },
         { x: 1100, y: 9175 },
       ],
       200,
@@ -1072,8 +1076,8 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
       layers.containment,
       'basket',
       [
-        { x: 4500, y: 9300 },
-        { x: 1000, y: 9300 },
+        { x: 4500, y: plantDataBasketY },
+        { x: 1000, y: plantDataBasketY },
         { x: 1000, y: 6900 },
       ],
       200,
@@ -1089,7 +1093,7 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
     const ahuBranch = containment(
       layers.containment,
       'conduit',
-      [{ x: ahuX, y: 9000 }, { x: ahuX, y: 9500 }],
+      [{ x: ahuX, y: plantLadderY }, { x: ahuX, y: 9500 }],
       40,
       undefined,
       systems.powerDistribution,
@@ -1103,7 +1107,7 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
     const pumpBranch = containment(
       layers.containment,
       'conduit',
-      [{ x: pumpX, y: 9000 }, { x: pumpX, y: 14250 }],
+      [{ x: pumpX, y: plantLadderY }, { x: pumpX, y: 14250 }],
       40,
       undefined,
       systems.powerDistribution,
@@ -1118,8 +1122,9 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
       layers.containment,
       'trunking',
       [
-        { x: 4500, y: 9000 },
-        { x: 1100, y: 9000 },
+        { x: 4500, y: plantLadderY },
+        { x: 4500, y: plantPowerBranchY },
+        { x: 1100, y: plantPowerBranchY },
         { x: 1100, y: 9175 },
       ],
       150,
@@ -1624,9 +1629,9 @@ export const createWholeSiteSampleProject = (): Project => {
       'Plant data duct entry sleeve',
       [
         { x: 0, y: 9300 },
-        { x: 400, y: 9650 },
-        { x: 4200, y: 9650 },
-        { x: 4500, y: 9300 },
+        { x: 400, y: 9850 },
+        { x: 4200, y: 9850 },
+        { x: 4500, y: 9700 },
       ],
       systemData.id,
       'data',
