@@ -376,6 +376,21 @@ function equipmentTopZ(equipment: EquipmentEntity): number {
   return (equipment.elevation ?? 0) + (equipment.height ?? 1800);
 }
 
+const LOW_LEVEL_DROP_SUBTYPES = new Set<string>([
+  'floor',
+  'skirting',
+  'dado',
+  'underground-duct',
+  'cable-trench',
+]);
+
+function isLowLevelDropContainment(containment: ContainmentEntity): boolean {
+  return (
+    containment.containmentType === 'duct' ||
+    LOW_LEVEL_DROP_SUBTYPES.has(containment.subType ?? '')
+  );
+}
+
 function buildEquipmentDrop(
   containment: ContainmentEntity,
   endpoint: ContainmentEndpoint,
@@ -455,6 +470,7 @@ function buildEquipmentDropGroup(
 
   for (const containment of containments) {
     if (containment.containmentType === 'conduit') continue;
+    if (isLowLevelDropContainment(containment)) continue;
     const systemId = resolveSystemId(containment, options);
     for (const endpoint of containmentEndpoints(containment, options.flipY)) {
       const target = equipment.find((item) => equipmentFootprintContains(

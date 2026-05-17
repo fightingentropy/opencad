@@ -30,6 +30,19 @@ const LOW_LEVEL_SUBTYPES = new Set<string>([
   'cable-trench',
 ]);
 
+// Distance from the underside of structure to the top of each high-level
+// service zone. This keeps different containment families in distinct bands
+// instead of collapsing them all onto the finished-ceiling plane.
+const HIGH_LEVEL_TOP_CLEARANCE: Partial<Record<ContainmentType, number>> = {
+  busbar: 80,
+  ladder: 140,
+  trunking: 250,
+  basket: 370,
+  tray: 520,
+};
+
+const MIN_SERVICE_VOID_CLEARANCE = 20;
+
 /**
  * Pick a sensible Z elevation (mm above floor FFL) for a containment run.
  *
@@ -72,7 +85,7 @@ export function defaultElevation(
     const slabUnderside = floorHeight - (floor.slabThickness ?? 0);
     const ceilingPlane = ceilingVoid > 0 ? slabUnderside - ceilingVoid : slabUnderside;
 
-    // High-level routing — pin to just under the structure.
+    // High-level routing — stack inside the ceiling/service void.
     const isHighLevelType =
       type === 'ladder' ||
       type === 'trunking' ||
@@ -80,12 +93,13 @@ export function defaultElevation(
       type === 'tray' ||
       type === 'busbar';
     if (isHighLevelType) {
-      // Treat 'tray' separately so TS narrowing keeps it in the union.
-      const t: string = type;
-      const offsetBelowSlab = t === 'tray' ? 600 : t === 'basket' ? 400 : 200;
-      const candidate = slabUnderside - offsetBelowSlab;
-      // Don't go higher than the ceiling plane if there's a finished ceiling.
-      z = ceilingVoid > 0 ? Math.min(candidate, ceilingPlane - 50) : candidate;
+      const sectionHeight = containment.height ?? 50;
+      const topClearance = HIGH_LEVEL_TOP_CLEARANCE[type] ?? 300;
+      const candidate = slabUnderside - topClearance - sectionHeight;
+      const lowestVisibleVoidBand = ceilingPlane + MIN_SERVICE_VOID_CLEARANCE;
+      const highestBottomUnderSlab = slabUnderside - MIN_SERVICE_VOID_CLEARANCE - sectionHeight;
+      const stacked = ceilingVoid > 0 ? Math.max(candidate, lowestVisibleVoidBand) : candidate;
+      z = Math.min(stacked, highestBottomUnderSlab);
     }
   }
 
