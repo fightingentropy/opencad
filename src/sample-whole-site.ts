@@ -998,6 +998,11 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
   const plantLadderY = 9000;
   const plantPowerBranchY = 8450;
   const plantDataBasketY = 9700;
+  const plantHighLevelElevation = isMezzanine ? 2400 : 5300;
+  const atPlantHighLevel = (entity: ContainmentEntity): ContainmentEntity => ({
+    ...entity,
+    elevation: plantHighLevelElevation,
+  });
 
   // Containment — heavy ladder on long wall plus a basket spur. The
   // ladder polyline has explicit vertices at every drop so the graph
@@ -1010,7 +1015,7 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
         { x: 27000, y: plantLadderY },
       ]
     : [{ x: 4500, y: plantLadderY }, { x: 27000, y: plantLadderY }];
-  const ladder = containment(
+  const ladder = atPlantHighLevel(containment(
     layers.containment,
     'ladder',
     ladderPoints,
@@ -1019,11 +1024,11 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
     systems.powerDistribution,
     'Plant ladder — 600 mm',
     'power',
-  );
+  ));
   addEntity(sheet, ladder);
   containmentList.push(ladder);
 
-  const basket = containment(
+  const basket = atPlantHighLevel(containment(
     layers.containment,
     'basket',
     [{ x: 4500, y: plantDataBasketY }, { x: 27000, y: plantDataBasketY }],
@@ -1032,7 +1037,7 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
     systems.data,
     'Data basket — 300 mm',
     'data',
-  );
+  ));
   addEntity(sheet, basket);
   containmentList.push(basket);
 
@@ -1053,7 +1058,7 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
     // MCC-room riser feeder — runs from ladder across the partition wall
     // (penetration!) into the electrical-riser room and drops to DB-PL-G
     // (~y=9175) and the comms cabinet CAB-PL-G (~y=6900).
-    const mccFeeder = containment(
+    const mccFeeder = atPlantHighLevel(containment(
       layers.containment,
       'trunking',
       [
@@ -1067,12 +1072,12 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
       systems.powerDistribution,
       'MCC-room sub-main feeder',
       'power',
-    );
+    ));
     addEntity(sheet, mccFeeder);
     containmentList.push(mccFeeder);
 
     // Data branch into the MCC room reaching CAB-PL-G
-    const cabBranch = containment(
+    const cabBranch = atPlantHighLevel(containment(
       layers.containment,
       'basket',
       [
@@ -1085,7 +1090,7 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
       systems.data,
       'Branch to CAB-PL-G',
       'data',
-    );
+    ));
     addEntity(sheet, cabBranch);
     containmentList.push(cabBranch);
 
@@ -1118,7 +1123,7 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
     containmentList.push(pumpBranch);
   } else {
     // Plant deck DB sub-main — short branch from ladder up to DB-PL-D
-    const dbDeckBranch = containment(
+    const dbDeckBranch = atPlantHighLevel(containment(
       layers.containment,
       'trunking',
       [
@@ -1132,7 +1137,7 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
       systems.powerDistribution,
       'Branch to DB-PL-D',
       'power',
-    );
+    ));
     addEntity(sheet, dbDeckBranch);
     containmentList.push(dbDeckBranch);
   }
