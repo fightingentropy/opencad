@@ -25,6 +25,19 @@ const faceGap = (a: ContainmentEntity, b: ContainmentEntity): number => (
   ((a.width ?? 0) / 2 + (b.width ?? 0) / 2)
 );
 
+const compactSupportSpan = (containment: ContainmentEntity): number => (
+  (containment.width ?? 0) + 120
+);
+
+const supportFaceGap = (
+  a: ContainmentEntity,
+  b: ContainmentEntity,
+  bY = b.points[0]?.y ?? 0,
+): number => (
+  Math.abs((a.points[0]?.y ?? 0) - bY) -
+  (compactSupportSpan(a) / 2 + compactSupportSpan(b) / 2)
+);
+
 describe('whole-site sample containment layout', () => {
   it('uses one grey main trunking spine with the lighting-side route as basket', () => {
     const project = createWholeSiteSampleProject();
@@ -74,7 +87,7 @@ describe('whole-site sample containment layout', () => {
     const plantFaEntry = containments.find((c) => c.label === 'Plant fire alarm duct entry sleeve');
 
     expect(plantLvEntry?.points.map((p) => p.y)).toEqual([9000, 8600, 8600, 9000]);
-    expect(plantDataEntry?.points.map((p) => p.y)).toEqual([9300, 9850, 9850, 9700]);
+    expect(plantDataEntry?.points.map((p) => p.y)).toEqual([9300, 10150, 10150, 10000]);
     expect(plantFaEntry?.points.map((p) => p.y)).toEqual([8800, 8500, 8500, 8800]);
   });
 
@@ -91,11 +104,13 @@ describe('whole-site sample containment layout', () => {
     expect(ladder!.elevation).toBe(5300);
     expect(basket!.elevation).toBe(ladder!.elevation);
     expect(trunking!.elevation).toBe(ladder!.elevation);
-    expect(faceGap(ladder!, basket!)).toBeGreaterThanOrEqual(150);
+    expect(faceGap(ladder!, basket!)).toBeGreaterThanOrEqual(300);
     expect(
       Math.abs((ladder!.points[0]?.y ?? 0) - (trunking!.points[1]?.y ?? 0)) -
       ((ladder!.width ?? 0) / 2 + (trunking!.width ?? 0) / 2),
-    ).toBeGreaterThanOrEqual(150);
-    expect(trunking!.points.map((p) => p.y)).toEqual([9000, 8450, 8450, 9175]);
+    ).toBeGreaterThanOrEqual(300);
+    expect(supportFaceGap(ladder!, basket!)).toBeGreaterThanOrEqual(300);
+    expect(supportFaceGap(ladder!, trunking!, trunking!.points[1]?.y)).toBeGreaterThanOrEqual(300);
+    expect(trunking!.points.map((p) => p.y)).toEqual([9000, 8000, 8000, 9175]);
   });
 });

@@ -317,7 +317,8 @@ describe('buildBuildingScene', () => {
 
     expect(Math.abs(supportCenter.x - containmentCenter.x)).toBeLessThan(25);
     expect(Math.abs(supportCenter.y - containmentCenter.y)).toBeLessThan(25);
-    expect(supportSize.y).toBeGreaterThan(containmentSize.y + 300);
+    expect(supportSize.y).toBeGreaterThanOrEqual(containmentSize.y + 110);
+    expect(supportSize.y).toBeLessThanOrEqual(containmentSize.y + 130);
   });
 
   it('keeps fittings aligned with their flipped containment instead of double-translating them', () => {
