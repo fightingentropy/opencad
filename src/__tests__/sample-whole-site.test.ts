@@ -20,6 +20,11 @@ const officeSheets = (project: Project): Sheet[] => (
   Object.values(project.sheets).filter((sheet) => sheet.name.startsWith('Office'))
 );
 
+const faceGap = (a: ContainmentEntity, b: ContainmentEntity): number => (
+  Math.abs((a.points[0]?.y ?? 0) - (b.points[0]?.y ?? 0)) -
+  ((a.width ?? 0) / 2 + (b.width ?? 0) / 2)
+);
+
 describe('whole-site sample containment layout', () => {
   it('uses one grey main trunking spine with the lighting-side route as basket', () => {
     const project = createWholeSiteSampleProject();
@@ -69,7 +74,21 @@ describe('whole-site sample containment layout', () => {
     const plantFaEntry = containments.find((c) => c.label === 'Plant fire alarm duct entry sleeve');
 
     expect(plantLvEntry?.points.map((p) => p.y)).toEqual([9000, 8600, 8600, 9000]);
-    expect(plantDataEntry?.points.map((p) => p.y)).toEqual([9300, 9650, 9650, 9300]);
+    expect(plantDataEntry?.points.map((p) => p.y)).toEqual([9300, 9850, 9850, 9700]);
     expect(plantFaEntry?.points.map((p) => p.y)).toEqual([8800, 8500, 8500, 8800]);
+  });
+
+  it('keeps plant ladder, data basket, and power trunking branches physically separated', () => {
+    const project = createWholeSiteSampleProject();
+    const containments = [...containmentsById(project).values()];
+    const ladder = containments.find((c) => c.label === 'Plant ladder — 600 mm');
+    const basket = containments.find((c) => c.label === 'Data basket — 300 mm');
+    const trunking = containments.find((c) => c.label === 'MCC-room sub-main feeder');
+
+    expect(ladder).toBeDefined();
+    expect(basket).toBeDefined();
+    expect(trunking).toBeDefined();
+    expect(faceGap(ladder!, basket!)).toBeGreaterThanOrEqual(150);
+    expect(trunking!.points.map((p) => p.y)).toEqual([9000, 8450, 8450, 9175]);
   });
 });
