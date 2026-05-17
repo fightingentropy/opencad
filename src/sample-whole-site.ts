@@ -1599,7 +1599,12 @@ export const createWholeSiteSampleProject = (): Project => {
     );
     const plantLvEntry = undergroundDuct(
       'Plant LV duct entry sleeve',
-      [{ x: 0, y: 9000 }, { x: 4500, y: 9000 }],
+      [
+        { x: 0, y: 9000 },
+        { x: 400, y: 8600 },
+        { x: 4200, y: 8600 },
+        { x: 4500, y: 9000 },
+      ],
       systemPower.id,
       'power',
       300,
@@ -1617,7 +1622,12 @@ export const createWholeSiteSampleProject = (): Project => {
     );
     const plantDataEntry = undergroundDuct(
       'Plant data duct entry sleeve',
-      [{ x: 0, y: 9300 }, { x: 4500, y: 9300 }],
+      [
+        { x: 0, y: 9300 },
+        { x: 400, y: 9650 },
+        { x: 4200, y: 9650 },
+        { x: 4500, y: 9300 },
+      ],
       systemData.id,
       'data',
       220,
@@ -1635,7 +1645,12 @@ export const createWholeSiteSampleProject = (): Project => {
     );
     const plantFaEntry = undergroundDuct(
       'Plant fire alarm duct entry sleeve',
-      [{ x: 0, y: 8800 }, { x: 4500, y: 8800 }],
+      [
+        { x: 0, y: 8800 },
+        { x: 400, y: 8500 },
+        { x: 4200, y: 8500 },
+        { x: 4500, y: 8800 },
+      ],
       systemFA.id,
       'fire-alarm',
       120,

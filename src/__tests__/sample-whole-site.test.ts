@@ -60,4 +60,16 @@ describe('whole-site sample containment layout', () => {
     expect(routeLabels).toContain('Site LV duct bank — Office to Plant');
     expect(routeLabels).toContain('Plant LV duct entry sleeve');
   });
+
+  it('keeps plant duct entry sleeves off the same centreline as internal trunking', () => {
+    const project = createWholeSiteSampleProject();
+    const containments = [...containmentsById(project).values()];
+    const plantLvEntry = containments.find((c) => c.label === 'Plant LV duct entry sleeve');
+    const plantDataEntry = containments.find((c) => c.label === 'Plant data duct entry sleeve');
+    const plantFaEntry = containments.find((c) => c.label === 'Plant fire alarm duct entry sleeve');
+
+    expect(plantLvEntry?.points.map((p) => p.y)).toEqual([9000, 8600, 8600, 9000]);
+    expect(plantDataEntry?.points.map((p) => p.y)).toEqual([9300, 9650, 9650, 9300]);
+    expect(plantFaEntry?.points.map((p) => p.y)).toEqual([8800, 8500, 8500, 8800]);
+  });
 });
