@@ -24,6 +24,7 @@ export interface SupportRenderOpts {
 const HARDWARE_COLOR = 0x60656b;
 const HARDWARE_DARK = 0x3a3d42;
 const MIN_SIDE_CLEARANCE_MM = 180;
+const COMPACT_ROUTE_SIDE_CLEARANCE_MM = 60;
 
 function tagPicking(obj: THREE.Object3D, entityId: string): void {
   obj.userData.entityId = entityId;
@@ -56,6 +57,18 @@ function hangerSpan(s: SupportEntity, containmentWidth?: number, fallback = 600)
   return configured > 0 ? configured : fallback;
 }
 
+function compactRouteHangerSpan(
+  s: SupportEntity,
+  containmentWidth?: number,
+  fallback = 600,
+): number {
+  if (containmentWidth && containmentWidth > 0) {
+    return containmentWidth + COMPACT_ROUTE_SIDE_CLEARANCE_MM * 2;
+  }
+  const configured = s.channelLength ?? 0;
+  return configured > 0 ? configured : fallback;
+}
+
 function bracketArmLength(s: SupportEntity, containmentWidth?: number, fallback = 400): number {
   const configured = s.channelLength ?? 0;
   if (containmentWidth && containmentWidth > 0) {
@@ -77,7 +90,9 @@ function buildTrapezeHanger(
   hideRods = false,
 ): THREE.Group {
   const grp = new THREE.Group();
-  const span = hangerSpan(s, containmentWidth);
+  const span = hideRods
+    ? compactRouteHangerSpan(s, containmentWidth)
+    : hangerSpan(s, containmentWidth);
   const rodLen = s.rodLength ?? Math.max(50, topZ - (s.elevation ?? topZ));
   const rodRadius = 5;
   const channelThk = 40;
@@ -257,7 +272,9 @@ function buildUnistrutFrame(
   hideVerticals = false,
 ): THREE.Group {
   const grp = new THREE.Group();
-  const span = hangerSpan(s, containmentWidth, 800);
+  const span = hideVerticals
+    ? compactRouteHangerSpan(s, containmentWidth, 800)
+    : hangerSpan(s, containmentWidth, 800);
   const verticalLen = s.rodLength ?? 1500;
   if (!hideVerticals) {
     // Two verticals
