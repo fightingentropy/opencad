@@ -87,7 +87,7 @@ describe('whole-site sample containment layout', () => {
     const plantFaEntry = containments.find((c) => c.label === 'Plant fire alarm duct entry sleeve');
 
     expect(plantLvEntry?.points.map((p) => p.y)).toEqual([9000, 8600, 8600, 9000]);
-    expect(plantDataEntry?.points.map((p) => p.y)).toEqual([9300, 10150, 10150, 10000]);
+    expect(plantDataEntry?.points.map((p) => p.y)).toEqual([9300, 11350, 11350, 11200]);
     expect(plantFaEntry?.points.map((p) => p.y)).toEqual([8800, 8500, 8500, 8800]);
   });
 
@@ -104,13 +104,13 @@ describe('whole-site sample containment layout', () => {
     expect(ladder!.elevation).toBe(5300);
     expect(basket!.elevation).toBe(ladder!.elevation);
     expect(trunking!.elevation).toBe(ladder!.elevation);
-    expect(faceGap(ladder!, basket!)).toBeGreaterThanOrEqual(300);
+    expect(faceGap(ladder!, basket!)).toBeGreaterThanOrEqual(1000);
     expect(
       Math.abs((ladder!.points[0]?.y ?? 0) - (trunking!.points[1]?.y ?? 0)) -
       ((ladder!.width ?? 0) / 2 + (trunking!.width ?? 0) / 2),
-    ).toBeGreaterThanOrEqual(300);
-    expect(supportFaceGap(ladder!, basket!)).toBeGreaterThanOrEqual(300);
-    expect(supportFaceGap(ladder!, trunking!, trunking!.points[1]?.y)).toBeGreaterThanOrEqual(300);
-    expect(trunking!.points.map((p) => p.y)).toEqual([9000, 8000, 8000, 9175]);
+    ).toBeGreaterThanOrEqual(1000);
+    expect(supportFaceGap(ladder!, basket!)).toBeGreaterThanOrEqual(1000);
+    expect(supportFaceGap(ladder!, trunking!, trunking!.points[1]?.y)).toBeGreaterThanOrEqual(1000);
+    expect(trunking!.points.map((p) => p.y)).toEqual([9000, 7200, 7200, 9175]);
   });
 });
