@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { runComplianceChecks } from '../compliance';
-import { resetIds, makeContainment, makeCable, makeProject } from './helpers';
+import { resetIds, makeContainment, makeCable, makeProject, makeSupport } from './helpers';
 
 describe('runComplianceChecks', () => {
   beforeEach(resetIds);
@@ -101,5 +101,49 @@ describe('runComplianceChecks', () => {
     });
     const r = runComplianceChecks(project);
     expect(r.averageFillPct).toBeGreaterThan(0);
+  });
+
+  it('flags overlapping containments at the same elevation', () => {
+    const a = makeContainment({
+      label: 'Tray A',
+      containmentType: 'tray',
+      width: 300,
+      points: [{ x: 0, y: 0 }, { x: 2000, y: 0 }],
+      elevation: 2400,
+    });
+    const b = makeContainment({
+      label: 'Tray B',
+      containmentType: 'basket',
+      width: 300,
+      points: [{ x: 0, y: 60 }, { x: 2000, y: 60 }],
+      elevation: 2400,
+    });
+    const project = makeProject({ containments: [a, b] });
+    const r = runComplianceChecks(project);
+    const clearance = r.issues.filter((i) => i.kind === 'clearance');
+    expect(clearance.length).toBe(1);
+    expect(clearance[0].severity).toBe('error');
+    expect(r.byKind.clearance).toBe(1);
+  });
+
+  it('flags missing supports on long containment runs', () => {
+    const unsupported = makeContainment({
+      label: 'Unsupported tray',
+      containmentType: 'tray',
+      points: [{ x: 0, y: 0 }, { x: 8000, y: 0 }],
+    });
+    const supported = makeContainment({
+      label: 'Supported tray',
+      containmentType: 'tray',
+      points: [{ x: 0, y: 1000 }, { x: 8000, y: 1000 }],
+    });
+    const project = makeProject({
+      containments: [unsupported, supported],
+      supports: [makeSupport(supported.id)],
+    });
+    const r = runComplianceChecks(project);
+    const supportIssues = r.issues.filter((i) => i.kind === 'support-spacing');
+    expect(supportIssues.some((i) => i.entityId === unsupported.id && i.severity === 'warning')).toBe(true);
+    expect(supportIssues.some((i) => i.entityId === supported.id && i.severity === 'warning')).toBe(false);
   });
 });
