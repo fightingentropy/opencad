@@ -88,7 +88,14 @@ describe('whole-site sample containment layout', () => {
     expect(ladder).toBeDefined();
     expect(basket).toBeDefined();
     expect(trunking).toBeDefined();
+    expect(ladder!.elevation).toBe(5300);
+    expect(basket!.elevation).toBe(ladder!.elevation);
+    expect(trunking!.elevation).toBe(ladder!.elevation);
     expect(faceGap(ladder!, basket!)).toBeGreaterThanOrEqual(150);
+    expect(
+      Math.abs((ladder!.points[0]?.y ?? 0) - (trunking!.points[1]?.y ?? 0)) -
+      ((ladder!.width ?? 0) / 2 + (trunking!.width ?? 0) / 2),
+    ).toBeGreaterThanOrEqual(150);
     expect(trunking!.points.map((p) => p.y)).toEqual([9000, 8450, 8450, 9175]);
   });
 });
