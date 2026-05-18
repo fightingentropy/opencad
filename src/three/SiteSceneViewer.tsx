@@ -34,6 +34,7 @@ import {
   verticalClearanceMm,
   type MeasurementRow,
 } from './measurements';
+import { useStore } from '../state/store';
 
 interface Props {
   project: Project;
@@ -84,6 +85,9 @@ const CLEARANCE_MIN_GAP_MM = 25;
 const CLEARANCE_MAX_GAP_MM = 2500;
 const CLEARANCE_MAX_BOX_DISTANCE_PX = 52;
 const CLEARANCE_MAX_SEGMENT_DISTANCE_PX = 56;
+const CLICK_PICK_MAX_BOX_DISTANCE_PX = 28;
+const CLICK_PICK_MIN_MINOR_PX = 8;
+const CLICK_PICK_MIN_AREA_PX = 500;
 
 const WALK_KEYS: Record<string, WalkDirection> = {
   ArrowUp: 'forward',
@@ -380,7 +384,24 @@ const maxMeasurementDistance = (scope: ViewScope): number => (
   scope === 'floor' ? MAX_FLOOR_MEASUREMENT_DISTANCE_MM : MAX_SITE_MEASUREMENT_DISTANCE_MM
 );
 
+const sheetIdForEntity = (project: Project, entityId: string): string | null => {
+  for (const sheetId of project.sheetOrder) {
+    if (project.sheets[sheetId]?.entities[entityId]) return sheetId;
+  }
+  return null;
+};
+
+const disposeSelectionHelper = (helper: THREE.BoxHelper): void => {
+  helper.geometry.dispose();
+  if (Array.isArray(helper.material)) {
+    for (const material of helper.material) material.dispose();
+  } else {
+    helper.material.dispose();
+  }
+};
+
 export function SiteSceneViewer({ project, width, height }: Props) {
+  const selection = useStore((s) => s.editor.selection);
   const mountRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -388,6 +409,8 @@ export function SiteSceneViewer({ project, width, height }: Props) {
   const orbitRef = useRef<OrbitControls | null>(null);
   const sceneGroupRef = useRef<THREE.Group | null>(null);
   const sceneControlsRef = useRef<SceneControls | null>(null);
+  const selectionHelpersRef = useRef<Map<string, THREE.BoxHelper>>(new Map());
+  const selectedIdsRef = useRef<Set<string>>(new Set(selection));
   const animationRef = useRef<number | null>(null);
   const walkHoldRef = useRef<number | null>(null);
   const walkBoundsRef = useRef<THREE.Box3 | null>(null);
@@ -454,6 +477,54 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     const obj = activeSceneObject();
     walkBoundsRef.current = obj ? visibleBoundingBox(obj) : null;
   };
+
+  const clearSelectionHelpers = (): void => {
+    const scene = sceneRef.current;
+    for (const helper of selectionHelpersRef.current.values()) {
+      if (scene) scene.remove(helper);
+      disposeSelectionHelper(helper);
+    }
+    selectionHelpersRef.current.clear();
+  };
+
+  const syncSelectionHelpers = (): void => {
+    const scene = sceneRef.current;
+    const group = sceneGroupRef.current;
+    if (!scene || !group) {
+      clearSelectionHelpers();
+      return;
+    }
+
+    const keep = new Set<string>();
+    for (const entityId of selectedIdsRef.current) {
+      const target = group.getObjectByName(`containment:${entityId}`);
+      if (!target || !isVisibleWithin(target, group)) continue;
+      keep.add(entityId);
+
+      let helper = selectionHelpersRef.current.get(entityId);
+      if (!helper) {
+        helper = new THREE.BoxHelper(target, 0x2fa8ff);
+        helper.name = `selection:${entityId}`;
+        helper.userData.selectionHelper = true;
+        selectionHelpersRef.current.set(entityId, helper);
+        scene.add(helper);
+      } else {
+        helper.setFromObject(target);
+      }
+    }
+
+    for (const [entityId, helper] of selectionHelpersRef.current) {
+      if (keep.has(entityId)) continue;
+      scene.remove(helper);
+      disposeSelectionHelper(helper);
+      selectionHelpersRef.current.delete(entityId);
+    }
+  };
+
+  useEffect(() => {
+    selectedIdsRef.current = new Set(selection);
+    syncSelectionHelpers();
+  });
 
   // ---------- One-time renderer / camera / lights setup -------------------
   useEffect(() => {
@@ -552,6 +623,50 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       x: Math.min(event.clientX, Math.max(12, window.innerWidth - 380)),
       y: Math.min(event.clientY, Math.max(12, window.innerHeight - 240)),
     });
+
+    const pickContainment = (
+      event: PointerEvent,
+    ): { entityId: string; containmentRoot: THREE.Object3D } | null => {
+      const root = activePickRoot();
+      if (!root) return null;
+
+      const rect = renderer.domElement.getBoundingClientRect();
+      const x = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
+      const y = -(((event.clientY - rect.top) / Math.max(1, rect.height)) * 2 - 1);
+      raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
+      const hits = raycaster.intersectObjects(root.children, true);
+
+      for (const hit of hits) {
+        if (!isVisibleWithin(hit.object, root)) continue;
+        const entityId = entityIdFromObject(hit.object);
+        if (!entityId || !findContainment(projectRef.current, entityId)) continue;
+        const containmentRoot = containmentRootFromObject(hit.object, root, entityId);
+        if (containmentRoot) return { entityId, containmentRoot };
+      }
+
+      const pointer = { x: event.clientX, y: event.clientY };
+      const nearest = visibleContainmentBoxes(root, rect)
+        .filter((box) => hasReadableScreenScale(
+          box.bounds,
+          CLICK_PICK_MIN_MINOR_PX,
+          CLICK_PICK_MIN_AREA_PX,
+        ))
+        .map((box) => ({
+          box,
+          screenDistance: distanceToScreenBounds(pointer, box.bounds),
+        }))
+        .filter((item) => item.screenDistance <= CLICK_PICK_MAX_BOX_DISTANCE_PX)
+        .sort((a, b) => (
+          a.screenDistance - b.screenDistance ||
+          a.box.distanceToCamera - b.box.distanceToCamera
+        ))[0];
+
+      if (nearest) {
+        const containmentRoot = root.getObjectByName(`containment:${nearest.box.id}`);
+        if (containmentRoot) return { entityId: nearest.box.id, containmentRoot };
+      }
+      return null;
+    };
 
     const clearanceHover = (
       event: PointerEvent,
@@ -663,13 +778,70 @@ export function SiteSceneViewer({ project, width, height }: Props) {
           title: measurement.title,
           rows: measurement.rows,
         });
+        renderer.domElement.style.cursor = 'pointer';
         return;
       }
 
       setHoverInfo(clearanceHover(event, root, rect));
+      renderer.domElement.style.cursor = '';
     };
 
-    const handlePointerLeave = (): void => setHoverInfo(null);
+    let pointerDown:
+      | {
+          x: number;
+          y: number;
+        }
+      | null = null;
+
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (event.button !== 0) return;
+      pointerDown = { x: event.clientX, y: event.clientY };
+    };
+
+    const handlePointerUp = (event: PointerEvent): void => {
+      if (event.button !== 0 || !pointerDown) return;
+      const dx = event.clientX - pointerDown.x;
+      const dy = event.clientY - pointerDown.y;
+      pointerDown = null;
+      if (dx * dx + dy * dy > 25) return;
+
+      const picked = pickContainment(event);
+      const state = useStore.getState();
+      if (!picked) {
+        if (!event.shiftKey && !event.metaKey && !event.ctrlKey) {
+          state.clearSelection();
+          selectedIdsRef.current = new Set();
+          syncSelectionHelpers();
+        }
+        return;
+      }
+
+      const currentProject = projectRef.current;
+      const sheetId = sheetIdForEntity(currentProject, picked.entityId);
+      if (sheetId && currentProject.activeSheetId !== sheetId) {
+        state.setActiveSheet(sheetId);
+      }
+
+      if (event.shiftKey || event.metaKey || event.ctrlKey) {
+        state.toggleInSelection(picked.entityId);
+      } else {
+        state.setSelection([picked.entityId]);
+      }
+      const containment = findContainment(currentProject, picked.entityId);
+      state.setStatus(`Selected ${containment?.label || picked.entityId} in 3D`);
+      selectedIdsRef.current = new Set(useStore.getState().editor.selection);
+      syncSelectionHelpers();
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    const handlePointerLeave = (): void => {
+      setHoverInfo(null);
+      renderer.domElement.style.cursor = '';
+      pointerDown = null;
+    };
+    renderer.domElement.addEventListener('pointerdown', handlePointerDown);
+    renderer.domElement.addEventListener('pointerup', handlePointerUp);
     renderer.domElement.addEventListener('pointermove', handlePointerMove);
     renderer.domElement.addEventListener('pointerleave', handlePointerLeave);
 
@@ -732,6 +904,9 @@ export function SiteSceneViewer({ project, width, height }: Props) {
         walkHoldRef.current = null;
       }
       ro.disconnect();
+      clearSelectionHelpers();
+      renderer.domElement.removeEventListener('pointerdown', handlePointerDown);
+      renderer.domElement.removeEventListener('pointerup', handlePointerUp);
       renderer.domElement.removeEventListener('pointermove', handlePointerMove);
       renderer.domElement.removeEventListener('pointerleave', handlePointerLeave);
       controls.dispose();
@@ -828,6 +1003,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       framedOnceRef.current = true;
     }
     refreshWalkBounds();
+    syncSelectionHelpers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectSig, resetTick]);
 
@@ -838,6 +1014,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     if (singleFloor && floorId) c.isolateFloor(floorId);
     else c.isolateFloor(null);
     refreshWalkBounds();
+    syncSelectionHelpers();
     const obj = activeSceneObject();
     const camera = cameraRef.current;
     const orbit = orbitRef.current;
@@ -852,6 +1029,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     if (!c) return;
     c.filterSystem(systemId || null);
     refreshWalkBounds();
+    syncSelectionHelpers();
   }, [systemId]);
 
   useEffect(() => {
@@ -908,7 +1086,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       {renderError && <div className="canvas-3d-fallback">{renderError}</div>}
       {!renderError && (
         <div className="canvas-3d-overlay">
-          3D View · hover for size/clearance · arrows/WASD to move · drag to look
+          3D View · click containment to select · hover for size/clearance · arrows/WASD to move
         </div>
       )}
       {!renderError && hoverInfo && (
