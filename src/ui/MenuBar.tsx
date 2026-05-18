@@ -8,6 +8,7 @@ import { autoNumberWires } from '../io/wire-numbering';
 import { fitViewportToSheet } from '../lib/fit';
 import { StandardsProfilePicker } from './StandardsProfilePicker';
 import { regenerateAutoFeaturesForContainments } from '../lib/auto-feature-actions';
+import { layoutContainmentsSideBySide } from '../lib/containment-layout';
 import { exportIFC } from '../io/ifc-export';
 import { importIFC } from '../io/ifc-import';
 import { exportCOBie, cobieToCSVZip } from '../io/cobie';
@@ -161,6 +162,33 @@ export function MenuBar({
     }
     regenerateAutoFeaturesForContainments(selectedContainmentIds);
     setStatus(`Auto-features regenerated for ${selectedContainmentIds.length} containment${selectedContainmentIds.length === 1 ? '' : 's'}`);
+  };
+
+  const onStraightenAndSpaceContainments = () => {
+    const state = useStore.getState();
+    const proj = state.project;
+    const sheetId = proj.activeSheetId;
+    const sheet = proj.sheets[sheetId];
+    if (!sheet) return;
+    const selectedContainmentIds = Array.from(state.editor.selection).filter((id) => {
+      const entity = sheet.entities[id];
+      return entity && entity.kind === 'containment';
+    });
+    if (selectedContainmentIds.length < 2) {
+      setStatus('Select at least two containments to straighten and space');
+      return;
+    }
+    const result = layoutContainmentsSideBySide(proj, sheetId, selectedContainmentIds, 150);
+    if (!result || result.changedIds.length < 2) {
+      setStatus('Selected containments need valid two-point routes');
+      return;
+    }
+    state.setProjectPatch({ sheets: result.project.sheets });
+    regenerateAutoFeaturesForContainments(result.changedIds);
+    useStore.getState().setSelection(result.changedIds);
+    setStatus(
+      `Straightened ${result.changedIds.length} containments at ${result.elevation.toFixed(0)}mm FFL with ${result.clearanceMm}mm side gap`,
+    );
   };
 
   // ---- Export submenu handlers --------------------------------------------
@@ -427,6 +455,7 @@ export function MenuBar({
       <MenuButton label="Tools" open={openMenu === 'tools'} onClick={click('tools')}>
         <MenuOpt label="Auto-Number Wires" onClick={action(onAutoNumber)} hint="" />
         <MenuOpt label="Re-run Auto-Features on Selection" onClick={action(onRerunAutoFeatures)} hint="" />
+        <MenuOpt label="Straighten/Space Selected Containments" onClick={action(onStraightenAndSpaceContainments)} hint="" />
         <MenuOpt label="Schedules &amp; BOM…" onClick={action(onShowBom)} hint="" />
         <Divider />
         {onShowCableSchedule && <MenuOpt label="Cable Schedule…" onClick={action(onShowCableSchedule)} hint="" />}
