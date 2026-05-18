@@ -391,6 +391,13 @@ function isLowLevelDropContainment(containment: ContainmentEntity): boolean {
   );
 }
 
+function shouldRenderContainment3D(containment: ContainmentEntity): boolean {
+  // Underground duct banks are routing infrastructure, not exposed overhead
+  // containment. Keep them in the project graph, but do not draw them as
+  // visible 3D trays across open space between buildings.
+  return containment.subType !== 'underground-duct';
+}
+
 function buildEquipmentDrop(
   containment: ContainmentEntity,
   endpoint: ContainmentEndpoint,
@@ -1007,11 +1014,12 @@ function renderFloor(
   const visibleEquipment = clipBounds
     ? equipment.filter((eq) => boundsOverlap(equipmentBounds(eq, options.flipY), clipBounds))
     : equipment;
+  const renderContainments = visibleContainments.filter(shouldRenderContainment3D);
 
   const containmentMap = new Map<string, ContainmentEntity>();
-  for (const c of visibleContainments) containmentMap.set(c.id, c);
+  for (const c of renderContainments) containmentMap.set(c.id, c);
   const floorBounds = shellBounds ?? floorContentBounds(
-    visibleContainments,
+    renderContainments,
     visibleFittings,
     visibleSupports,
     visibleEquipment,
@@ -1038,7 +1046,7 @@ function renderFloor(
   if (wantContainment) {
     const cgrp = new THREE.Group();
     cgrp.name = 'containment';
-    for (const c of visibleContainments) {
+    for (const c of renderContainments) {
       if (c.containmentType === 'conduit') continue;
       const systemId = resolveSystemId(c, options);
       systemMap.set(c.id, systemId);
@@ -1052,7 +1060,7 @@ function renderFloor(
       cgrp.add(obj);
     }
     const equipmentDrops = buildEquipmentDropGroup(
-      visibleContainments,
+      renderContainments,
       visibleEquipment,
       floor,
       options,
@@ -1066,7 +1074,7 @@ function renderFloor(
     fgrp.name = 'fittings';
     for (const f of visibleFittings) {
       const parent = containmentMap.get(f.containmentId);
-      if (shouldSkipFitting3D(f, parent, visibleContainments)) continue;
+      if (shouldSkipFitting3D(f, parent, renderContainments)) continue;
       const baseZ = parent
         ? defaultElevation(parent, floor) + (parent.height ?? 50) / 2
         : 2400;
