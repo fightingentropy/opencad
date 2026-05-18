@@ -903,6 +903,24 @@ describe('buildBuildingScene', () => {
     expect(group.getObjectByName(`support:${support.id}`)).toBeUndefined();
   });
 
+  it('does not render underground inter-building ducts as exposed 3D containment', () => {
+    const project = createWholeSiteSampleProject();
+    const undergroundDucts = Object.values(project.sheets)
+      .flatMap((sheet) => sheet.entityOrder.map((id) => sheet.entities[id]))
+      .filter((entity): entity is ContainmentEntity => (
+        entity?.kind === 'containment' &&
+        entity.subType === 'underground-duct'
+      ));
+
+    expect(undergroundDucts.length).toBeGreaterThan(0);
+
+    const { group } = buildBuildingScene(project);
+
+    for (const duct of undergroundDucts) {
+      expect(group.getObjectByName(`containment:${duct.id}`)).toBeUndefined();
+    }
+  });
+
   it('does not put hanger rods through generated whole-site containment', () => {
     const project = createWholeSiteSampleProject();
     const { group } = buildBuildingScene(project, { layers: { equipment: false } });
