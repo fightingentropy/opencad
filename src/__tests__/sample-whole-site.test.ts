@@ -16,8 +16,8 @@ const containmentsById = (project: Project): Map<string, ContainmentEntity> => {
   return out;
 };
 
-const officeSheets = (project: Project): Sheet[] => (
-  Object.values(project.sheets).filter((sheet) => sheet.name.startsWith('Office'))
+const corporateSheets = (project: Project): Sheet[] => (
+  Object.values(project.sheets).filter((sheet) => sheet.name.startsWith('Corporate HQ'))
 );
 
 const faceGap = (a: ContainmentEntity, b: ContainmentEntity): number => (
@@ -39,81 +39,92 @@ const supportFaceGap = (
 );
 
 describe('whole-site sample containment layout', () => {
-  it('uses one grey main trunking spine with the lighting-side route as basket', () => {
+  it('models a single five-level corporate office tower', () => {
     const project = createWholeSiteSampleProject();
-    const offices = officeSheets(project);
+    const buildings = Object.values(project.buildings ?? {});
+    const building = buildings[0];
+    const sheets = corporateSheets(project);
 
-    expect(offices.length).toBeGreaterThan(0);
-    for (const sheet of offices) {
+    expect(buildings).toHaveLength(1);
+    expect(building?.name).toBe('Apex Corporate Headquarters');
+    expect(building?.floorOrder).toHaveLength(5);
+    expect(project.sites?.[project.activeSiteId!]?.buildingOrder).toEqual([building?.id]);
+    expect(sheets.map((sheet) => sheet.name)).toEqual([
+      'Corporate HQ — Ground Floor',
+      'Corporate HQ — Level 1 Office',
+      'Corporate HQ — Level 2 Office',
+      'Corporate HQ — Level 3 Client Suite',
+      'Corporate HQ — Roof Plant',
+    ]);
+  });
+
+  it('uses coordinated service spines on every occupied floor', () => {
+    const project = createWholeSiteSampleProject();
+    const sheets = corporateSheets(project).filter((sheet) => !sheet.name.includes('Roof'));
+
+    for (const sheet of sheets) {
       const containments = containmentsOn(sheet);
-      const mainTrunking = containments.find((c) => c.label === 'Main power trunking — 100×100');
-      const lightingBasket = containments.find((c) => c.label === 'Lighting basket — 150×100');
-      const oldLightingTrunking = containments.find((c) => c.label === 'Lighting feeder trunking — 150×100');
+      const prefix = sheet.name.includes('Ground')
+        ? 'Ground'
+        : `Level ${sheet.name.match(/Level (\d)/)?.[1]}`;
+      const power = containments.find((c) => c.label === `${prefix} power ${prefix === 'Ground' ? 'busbar — 800 A' : 'trunking — 300×150'}`);
+      const lighting = containments.find((c) => c.label === `${prefix} lighting basket — 150×100`);
+      const data = containments.find((c) => c.label === `${prefix} data basket — 300×100`);
+      const fire = containments.find((c) => c.label === `${prefix} FP200 fire alarm conduit`);
+      const security = containments.find((c) => c.label === `${prefix} security containment conduit`);
+      const bms = containments.find((c) => c.label === `${prefix} BMS controls conduit`);
 
-      expect(mainTrunking?.containmentType).toBe('trunking');
-      expect(mainTrunking?.color).toBe('#bcc1c8');
-      expect(lightingBasket?.containmentType).toBe('basket');
-      expect(lightingBasket?.color).toBe('#bcc1c8');
-      expect(oldLightingTrunking).toBeUndefined();
+      expect(power?.containmentType).toBe(prefix === 'Ground' ? 'busbar' : 'trunking');
+      expect(lighting?.containmentType).toBe('basket');
+      expect(data?.containmentType).toBe('basket');
+      expect(fire?.containmentType).toBe('conduit');
+      expect(security?.containmentType).toBe('conduit');
+      expect(bms?.containmentType).toBe('conduit');
+      expect(lighting?.color).toBe('#bcc1c8');
+      expect(data?.color).toBe('#bcc1c8');
     }
   });
 
-  it('models inter-building duct banks instead of leaving plant feeds as manual routes', () => {
+  it('routes the corporate cable schedule through modelled containment', () => {
     const project = createWholeSiteSampleProject();
     const containments = containmentsById(project);
-    const labels = new Set([...containments.values()].map((c) => c.label));
+    const cables = Object.values(project.cableSchedule?.cables ?? {});
+    const manual = cables
+      .filter((cable) => cable.route.length === 0 || (cable.notes ?? '').includes('Manual routing required'))
+      .map((cable) => cable.reference);
 
-    expect(labels.has('Site LV duct bank — Office to Plant')).toBe(true);
-    expect(labels.has('Plant LV duct entry sleeve')).toBe(true);
-    expect(labels.has('Site data duct bank — Office to Plant')).toBe(true);
-    expect(labels.has('Plant data duct entry sleeve')).toBe(true);
+    expect(manual).toEqual([]);
 
-    const plantFeed = Object.values(project.cableSchedule?.cables ?? {})
-      .find((cable) => cable.reference === 'PW-MCC-DB2A-003');
-    expect(plantFeed?.notes ?? '').not.toContain('crosses building');
-
-    const routeLabels = (plantFeed?.route ?? [])
+    const roofFeed = cables.find((cable) => cable.reference === 'PW-MSB-DBRF-005');
+    const roofRouteLabels = (roofFeed?.route ?? [])
       .map((id) => containments.get(id)?.label)
       .filter(Boolean);
-    expect(routeLabels).toContain('Site LV duct bank — Office to Plant');
-    expect(routeLabels).toContain('Plant LV duct entry sleeve');
+    expect(roofRouteLabels.some((label) => label?.includes('Roof'))).toBe(true);
   });
 
-  it('keeps plant duct entry sleeves off the same centreline as internal trunking', () => {
+  it('keeps parallel service lanes physically separated in the office corridor', () => {
     const project = createWholeSiteSampleProject();
-    const containments = [...containmentsById(project).values()];
-    const plantLvEntry = containments.find((c) => c.label === 'Plant LV duct entry sleeve');
-    const plantDataEntry = containments.find((c) => c.label === 'Plant data duct entry sleeve');
-    const plantFaEntry = containments.find((c) => c.label === 'Plant fire alarm duct entry sleeve');
+    const level2 = corporateSheets(project).find((sheet) => sheet.name === 'Corporate HQ — Level 2 Office');
+    expect(level2).toBeDefined();
+    const containments = containmentsOn(level2!);
+    const power = containments.find((c) => c.label === 'Level 2 power trunking — 300×150');
+    const data = containments.find((c) => c.label === 'Level 2 data basket — 300×100');
+    const lighting = containments.find((c) => c.label === 'Level 2 lighting basket — 150×100');
+    const fire = containments.find((c) => c.label === 'Level 2 FP200 fire alarm conduit');
+    const security = containments.find((c) => c.label === 'Level 2 security containment conduit');
+    const bms = containments.find((c) => c.label === 'Level 2 BMS controls conduit');
 
-    expect(plantLvEntry?.points.map((p) => p.y)).toEqual([7200, 7200, 7200, 7200]);
-    expect(plantDataEntry?.points.map((p) => p.y)).toEqual([9300, 11350, 11350, 11200]);
-    expect(plantFaEntry?.points.map((p) => p.y)).toEqual([8800, 8500, 8500, 8800]);
-  });
-
-  it('keeps plant ladder, data basket, and power trunking branches physically separated', () => {
-    const project = createWholeSiteSampleProject();
-    const containments = [...containmentsById(project).values()];
-    const ladder = containments.find((c) => c.label === 'Plant ladder — 600 mm');
-    const basket = containments.find((c) => c.label === 'Data basket — 300 mm');
-    const trunking = containments.find((c) => c.label === 'MCC-room sub-main feeder');
-
-    expect(ladder).toBeDefined();
-    expect(basket).toBeDefined();
-    expect(trunking).toBeDefined();
-    expect(ladder!.elevation).toBe(5300);
-    expect(basket!.elevation).toBe(ladder!.elevation);
-    expect(trunking!.elevation).toBe(ladder!.elevation);
-    expect(faceGap(ladder!, basket!)).toBeGreaterThanOrEqual(1000);
-    expect(
-      Math.abs((ladder!.points[0]?.y ?? 0) - (trunking!.points[0]?.y ?? 0)) -
-      ((ladder!.width ?? 0) / 2 + (trunking!.width ?? 0) / 2),
-    ).toBeGreaterThanOrEqual(1000);
-    expect(supportFaceGap(ladder!, basket!)).toBeGreaterThanOrEqual(1000);
-    expect(supportFaceGap(ladder!, trunking!, trunking!.points[0]?.y)).toBeGreaterThanOrEqual(1000);
-    expect(new Set(ladder!.points.map((p) => p.y))).toEqual(new Set([9000]));
-    expect(new Set(basket!.points.map((p) => p.y))).toEqual(new Set([11200]));
-    expect(new Set(trunking!.points.map((p) => p.y))).toEqual(new Set([7200]));
-    expect(trunking!.points.map((p) => p.x)).toEqual(ladder!.points.map((p) => p.x));
+    expect(power).toBeDefined();
+    expect(data).toBeDefined();
+    expect(lighting).toBeDefined();
+    expect(fire).toBeDefined();
+    expect(security).toBeDefined();
+    expect(bms).toBeDefined();
+    expect(faceGap(data!, power!)).toBeGreaterThanOrEqual(250);
+    expect(faceGap(power!, lighting!)).toBeGreaterThanOrEqual(250);
+    expect(faceGap(security!, fire!)).toBeGreaterThanOrEqual(250);
+    expect(faceGap(lighting!, bms!)).toBeGreaterThanOrEqual(250);
+    expect(supportFaceGap(data!, power!)).toBeGreaterThanOrEqual(100);
+    expect(supportFaceGap(power!, lighting!)).toBeGreaterThanOrEqual(100);
   });
 });
