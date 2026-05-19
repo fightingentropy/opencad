@@ -82,7 +82,7 @@ export function SiteNavigator() {
   };
 
   const addZone = (floorId: string) => {
-    const name = window.prompt('Zone name?', 'Plant Room');
+    const name = window.prompt('Zone name?', 'Open Office');
     if (!name) return;
     const id = nanoid(10);
     const f = floors[floorId];
