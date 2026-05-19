@@ -8,12 +8,12 @@ import type {
   Vec2,
 } from './types';
 
-// Demo project: a small floor plan with walls, rooms, and electrical
-// containment routed between them. The same layout reads as a CAD plan
-// in 2D and as a building interior in 3D.
+// Fallback demo project: a compact corporate floor with walls, rooms and
+// electrical containment routed between them. The full first-run model is
+// created in sample-whole-site.ts; this keeps the error fallback aligned.
 export const createSampleProject = (): Project => {
   const project = createEmptyProject();
-  project.name = 'Building Containment Demo';
+  project.name = 'Corporate Containment Fallback';
   project.client = 'OpenCAD';
   project.engineer = 'Demo Engineer';
 
@@ -151,16 +151,16 @@ const populateFloorPlan = (
   contLayer: LayerId,
   annLayer: LayerId,
 ) => {
-  // Building footprint: 12 m × 8 m. Five rooms separated by a central
+  // Corporate floor plate: 12 m × 8 m. Five rooms separated by a central
   // east–west corridor. Doorway gaps are baked into the wall polylines.
   // Wall thicknesses: 200mm exterior, 150mm interior. Walls are 3m tall.
 
   // ---- Rooms (drawn first so walls overlay their borders) ----
-  add(p, sheetId, room(roomLayer, { x: 0,     y: 4600 }, { x: 5800,  y: 8000 }, 'MCC Room',   '#a8b8c4'));
-  add(p, sheetId, room(roomLayer, { x: 6200,  y: 4600 }, { x: 12000, y: 8000 }, 'Plant Room', '#b8c0a8'));
-  add(p, sheetId, room(roomLayer, { x: 0,     y: 2500 }, { x: 12000, y: 4500 }, 'Corridor',   '#c2c6ca'));
-  add(p, sheetId, room(roomLayer, { x: 0,     y: 0    }, { x: 5800,  y: 2400 }, 'Office',     '#c2bca8'));
-  add(p, sheetId, room(roomLayer, { x: 6200,  y: 0    }, { x: 12000, y: 2400 }, 'Equipment',  '#b8a8b8'));
+  add(p, sheetId, room(roomLayer, { x: 0,     y: 4600 }, { x: 5800,  y: 8000 }, 'Electrical Riser', '#a8b8c4'));
+  add(p, sheetId, room(roomLayer, { x: 6200,  y: 4600 }, { x: 12000, y: 8000 }, 'Comms Room',       '#a8c0bd'));
+  add(p, sheetId, room(roomLayer, { x: 0,     y: 2500 }, { x: 12000, y: 4500 }, 'Central Corridor', '#c2c6ca'));
+  add(p, sheetId, room(roomLayer, { x: 0,     y: 0    }, { x: 5800,  y: 2400 }, 'Open Office',      '#c2bca8'));
+  add(p, sheetId, room(roomLayer, { x: 6200,  y: 0    }, { x: 12000, y: 2400 }, 'Meeting Suite',    '#b8a8b8'));
 
   // ---- External perimeter wall (closed polyline, 200mm thick) ----
   add(p, sheetId, wall(wallLayer, [
@@ -181,9 +181,9 @@ const populateFloorPlan = (
   add(p, sheetId, wall(wallLayer, [{ x: 3000, y: 2500 }, { x: 8200,  y: 2500 }], 150));
   add(p, sheetId, wall(wallLayer, [{ x: 9200, y: 2500 }, { x: 12000, y: 2500 }], 150));
 
-  // ---- Top divider between MCC and Plant ----
+  // ---- Top divider between electrical riser and comms room ----
   add(p, sheetId, wall(wallLayer, [{ x: 6000, y: 4500 }, { x: 6000, y: 8000 }], 150));
-  // ---- Bottom divider between Office and Equipment ----
+  // ---- Bottom divider between open office and meeting suite ----
   add(p, sheetId, wall(wallLayer, [{ x: 6000, y: 0    }, { x: 6000, y: 2500 }], 150));
 
   // ---- Containment routes ----
@@ -191,12 +191,12 @@ const populateFloorPlan = (
   // configured in Panel3D BUILDING_ELEVATION (trunking 2700, basket 2400,
   // tray 2100, conduit 1800).
 
-  // Main trunking spine fed from the MCC, running east along the corridor.
+  // Main trunking spine fed from the electrical riser, running east along the corridor.
   add(p, sheetId, containment(
     contLayer,
     'trunking',
     [
-      { x: 3500,  y: 6000 },   // origin inside MCC Room
+      { x: 3500,  y: 6000 },   // origin inside electrical riser
       { x: 3500,  y: 3800 },   // drops through doorway into corridor
       { x: 11400, y: 3800 },   // runs east along corridor
     ],
@@ -230,7 +230,7 @@ const populateFloorPlan = (
 
   // Conduit drops to each room — some through doorways, some punching
   // through walls (the 3D view automatically cuts holes where needed).
-  // To Plant Room (through the north corridor wall — wall cutout)
+  // To comms room (through the north corridor wall — wall cutout)
   add(p, sheetId, containment(
     contLayer,
     'conduit',
@@ -240,7 +240,7 @@ const populateFloorPlan = (
     ],
     80, undefined, COLOR.conduit,
   ));
-  // To Office (through doorway gap)
+  // To open office (through doorway gap)
   add(p, sheetId, containment(
     contLayer,
     'conduit',
@@ -250,7 +250,7 @@ const populateFloorPlan = (
     ],
     80, undefined, COLOR.conduit,
   ));
-  // To Equipment Room (through doorway gap)
+  // To meeting suite (through doorway gap)
   add(p, sheetId, containment(
     contLayer,
     'conduit',
@@ -260,7 +260,7 @@ const populateFloorPlan = (
     ],
     100, undefined, COLOR.conduit,
   ));
-  // Cross-link between Office and Equipment (through divider wall — cutout)
+  // Cross-link between open office and meeting suite (through divider wall — cutout)
   add(p, sheetId, containment(
     contLayer,
     'conduit',
@@ -272,6 +272,6 @@ const populateFloorPlan = (
   ));
 
   // Title (top-left of sheet)
-  add(p, sheetId, text(annLayer, 200, 7700, 'BUILDING — CONTAINMENT PLAN', 80));
+  add(p, sheetId, text(annLayer, 200, 7700, 'CORPORATE FLOOR — CONTAINMENT PLAN', 80));
   add(p, sheetId, text(annLayer, 200, 7540, 'Walls · Rooms · Trunking · Basket · Tray · Conduit', 40));
 };

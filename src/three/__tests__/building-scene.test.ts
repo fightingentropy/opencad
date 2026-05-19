@@ -903,21 +903,26 @@ describe('buildBuildingScene', () => {
     expect(group.getObjectByName(`support:${support.id}`)).toBeUndefined();
   });
 
-  it('does not render underground inter-building ducts as exposed 3D containment', () => {
+  it('keeps small conduit control routes out of the exposed 3D tray layer', () => {
     const project = createWholeSiteSampleProject();
-    const undergroundDucts = Object.values(project.sheets)
+    const conduitRoutes = Object.values(project.sheets)
       .flatMap((sheet) => sheet.entityOrder.map((id) => sheet.entities[id]))
       .filter((entity): entity is ContainmentEntity => (
         entity?.kind === 'containment' &&
-        entity.subType === 'underground-duct'
+        entity.containmentType === 'conduit' &&
+        !!(
+          entity.label?.includes('FP200') ||
+          entity.label?.includes('security') ||
+          entity.label?.includes('BMS')
+        )
       ));
 
-    expect(undergroundDucts.length).toBeGreaterThan(0);
+    expect(conduitRoutes.length).toBeGreaterThan(0);
 
     const { group } = buildBuildingScene(project);
 
-    for (const duct of undergroundDucts) {
-      expect(group.getObjectByName(`containment:${duct.id}`)).toBeUndefined();
+    for (const conduit of conduitRoutes) {
+      expect(group.getObjectByName(`containment:${conduit.id}`)).toBeUndefined();
     }
   });
 
@@ -940,33 +945,33 @@ describe('buildBuildingScene', () => {
     expect(rods).toHaveLength(0);
   });
 
-  it('renders plant ladder, trunking, and basket as straight parallel lanes', () => {
+  it('renders corporate corridor trunking and baskets as straight parallel lanes', () => {
     const project = createWholeSiteSampleProject();
     const containments = Object.values(project.sheets)
       .flatMap((sheet) => sheet.entityOrder.map((id) => sheet.entities[id]))
       .filter((entity): entity is ContainmentEntity => entity?.kind === 'containment');
-    const ladder = containments.find((c) => c.label === 'Plant ladder — 600 mm');
-    const trunking = containments.find((c) => c.label === 'MCC-room sub-main feeder');
-    const basket = containments.find((c) => c.label === 'Data basket — 300 mm');
-    expect(ladder).toBeDefined();
+    const trunking = containments.find((c) => c.label === 'Level 2 power trunking — 300×150');
+    const dataBasket = containments.find((c) => c.label === 'Level 2 data basket — 300×100');
+    const lightingBasket = containments.find((c) => c.label === 'Level 2 lighting basket — 150×100');
     expect(trunking).toBeDefined();
-    expect(basket).toBeDefined();
+    expect(dataBasket).toBeDefined();
+    expect(lightingBasket).toBeDefined();
 
     const { group } = buildBuildingScene(project, { layers: { equipment: false, supports: false } });
     group.updateMatrixWorld(true);
 
-    const ladderBox = new THREE.Box3().setFromObject(group.getObjectByName(`containment:${ladder!.id}`)!);
     const trunkingBox = new THREE.Box3().setFromObject(group.getObjectByName(`containment:${trunking!.id}`)!);
-    const basketBox = new THREE.Box3().setFromObject(group.getObjectByName(`containment:${basket!.id}`)!);
+    const dataBox = new THREE.Box3().setFromObject(group.getObjectByName(`containment:${dataBasket!.id}`)!);
+    const lightingBox = new THREE.Box3().setFromObject(group.getObjectByName(`containment:${lightingBasket!.id}`)!);
 
-    expect(Math.abs(ladderBox.min.x - trunkingBox.min.x)).toBeLessThan(10);
-    expect(Math.abs(ladderBox.max.x - trunkingBox.max.x)).toBeLessThan(10);
-    expect(Math.abs(ladderBox.min.x - basketBox.min.x)).toBeLessThan(10);
-    expect(Math.abs(ladderBox.max.x - basketBox.max.x)).toBeLessThan(10);
-    expect(trunkingBox.max.y).toBeLessThan(ladderBox.min.y);
-    expect(basketBox.min.y).toBeGreaterThan(ladderBox.max.y);
-    expect(ladderBox.min.y - trunkingBox.max.y).toBeGreaterThanOrEqual(1000);
-    expect(basketBox.min.y - ladderBox.max.y).toBeGreaterThanOrEqual(1000);
+    expect(Math.abs(dataBox.min.x - trunkingBox.min.x)).toBeLessThan(10);
+    expect(Math.abs(dataBox.max.x - trunkingBox.max.x)).toBeLessThan(10);
+    expect(Math.abs(lightingBox.min.x - trunkingBox.min.x)).toBeLessThan(10);
+    expect(Math.abs(lightingBox.max.x - trunkingBox.max.x)).toBeLessThan(10);
+    expect(dataBox.max.y).toBeLessThan(trunkingBox.min.y);
+    expect(lightingBox.min.y).toBeGreaterThan(trunkingBox.max.y);
+    expect(trunkingBox.min.y - dataBox.max.y).toBeGreaterThanOrEqual(250);
+    expect(lightingBox.min.y - trunkingBox.max.y).toBeGreaterThanOrEqual(250);
   });
 
   it('puts risers inside the owning floor group so floor isolation hides the rest', () => {

@@ -58,13 +58,13 @@ const newId = (): string => nanoid(10);
 // ---------- Identifier conventions ---------------------------------------
 //
 // Equipment tags follow a simple project-wide scheme:
-//   MCC-01            Main switchboard
-//   DB-OF-G / DB-OF-1 Office Ground / Level 1 distribution boards
-//   DB-PL-G / DB-PL-D Plant Ground / Plant Deck distribution boards
+//   MSB-01            Main LV switchboard
+//   DB-LG / DB-L01    Floor distribution boards
+//   DB-RF             Roof plant distribution board
 //   FAP-01            Fire alarm panel
 //   CR-01             Communications rack
-//   IDF-OF-G          Floor IDF cabinets
-//   AHU-01 / P-01     Plant items (motor / pump)
+//   IDF-L01           Floor IDF cabinets
+//   AHU-RF-01         Roof plant items
 
 // ---------- Display palette -----------------------------------------------
 
@@ -74,6 +74,8 @@ const SYSTEM_COLORS = {
   fireAlarm: '#ff3a3a',
   data: '#5cdcff',
   emergencyLighting: '#9ad65a',
+  security: '#c48cff',
+  bms: '#49c98f',
 } as const;
 
 const CONTAINMENT_COLORS = {
@@ -82,6 +84,8 @@ const CONTAINMENT_COLORS = {
   tray: '#7fb24a',
   conduit: '#3a6db8',
   ladder: '#aa6b3d',
+  duct: '#6c7480',
+  busbar: '#c4a86b',
 } as const;
 
 // ---------- Builder utilities --------------------------------------------
@@ -96,8 +100,12 @@ const wallSegment = (
   layer: LayerId,
   points: Vec2[],
   thickness: number,
-  external = false,
-  fireRating?: WallEntity['fireRating'],
+  options: {
+    external?: boolean;
+    fireRating?: WallEntity['fireRating'];
+    height?: number;
+    construction?: WallEntity['construction'];
+  } = {},
 ): WallEntity => ({
   id: newEntityId(),
   kind: 'wall',
@@ -106,9 +114,10 @@ const wallSegment = (
   locked: false,
   points,
   thickness,
-  height: 3000,
-  external,
-  fireRating,
+  height: options.height ?? 3000,
+  external: options.external,
+  fireRating: options.fireRating,
+  construction: options.construction,
 });
 
 const room = (
@@ -214,6 +223,8 @@ const riser = (
   toFloorId: string,
   systemId?: SystemId,
   label?: string,
+  containmentType: ContainmentType = 'tray',
+  size: { width: number; height: number } = { width: 600, height: 200 },
 ): RiserEntity => ({
   id: newEntityId(),
   kind: 'riser',
@@ -221,9 +232,9 @@ const riser = (
   visible: true,
   locked: false,
   position,
-  width: 600,
-  height: 200,
-  containmentType: 'tray',
+  width: size.width,
+  height: size.height,
+  containmentType,
   fromFloorId,
   toFloorId,
   systemId,
@@ -240,623 +251,587 @@ interface FloorLayers {
   annotation: LayerId;
 }
 
+interface ServiceRiserPositions {
+  power: Vec2;
+  data: Vec2;
+  lifeSafety: Vec2;
+  controls: Vec2;
+}
+
 interface FloorBuildResult {
   sheet: Sheet;
   zones: Zone[];
   equipment: EquipmentEntity[];
   containment: ContainmentEntity[];
-  riserPositions: Vec2[];
+  risers: ServiceRiserPositions;
 }
 
-interface OfficeFloorOpts {
+type CorporateLevel = 'G' | '1' | '2' | '3' | 'R';
+
+interface CorporateLevelMeta {
+  sheetName: string;
+  sheetNumber: string;
+  floorName: string;
+  title: string;
+  titleSuffix: string;
+  levelCode: string;
+  levelNumber: number;
+  ffl: number;
+  floorHeight: number;
+  slabThickness: number;
+  ceilingVoid: number;
+  raisedFloor?: number;
+}
+
+interface CorporateFloorOpts {
   floorId: string;
   buildingId: string;
-  level: 'G' | '1';
+  level: CorporateLevel;
   systems: Record<string, SystemId>;
   layers: FloorLayers;
 }
 
-// Build an office floor. The two office floors share the same plan
-// (a corridor with offices either side, an MCC/riser room, comms),
-// just with different equipment tags and a riser cut-out on the upper
-// level.
-const buildOfficeFloor = (opts: OfficeFloorOpts): FloorBuildResult => {
-  const { floorId, level, systems, layers } = opts;
-  const sheet: Sheet = {
-    id: newId(),
-    name: `Office — Level ${level === 'G' ? 'Ground' : '1'}`,
-    number: level === 'G' ? '101' : '102',
-    kind: 'floor-plan',
-    width: 24000,
-    height: 16000,
-    entities: {},
-    entityOrder: [],
-    background: '#0a0e14',
-    sceneStyle: 'building',
-    floorId,
-    buildingId: opts.buildingId,
-  };
+const CORPORATE_LEVEL_ORDER: CorporateLevel[] = ['G', '1', '2', '3', 'R'];
 
-  // Zones — referenced by zoneRef on rooms
-  const zones: Zone[] = [
-    {
-      id: newId(),
-      floorId,
-      name: 'East Office Open Plan',
-      classification: 'office',
-      ipRating: 'IP20',
-      fireRating: 60,
-    },
-    {
-      id: newId(),
-      floorId,
-      name: 'West Office Open Plan',
-      classification: 'office',
-      ipRating: 'IP20',
-      fireRating: 60,
-    },
-    {
-      id: newId(),
-      floorId,
-      name: 'Central Corridor',
-      classification: 'corridor',
-      ipRating: 'IP20',
-      fireRating: 60,
-    },
-    {
-      id: newId(),
-      floorId,
-      name: level === 'G' ? 'MCC Room' : 'Electrical Riser',
-      classification: level === 'G' ? 'plant-room' : 'electrical-riser',
-      ipRating: 'IP31',
-      fireRating: 90,
-    },
-    {
-      id: newId(),
-      floorId,
-      name: 'Comms Room',
-      classification: 'data-room',
-      ipRating: 'IP20',
-      fireRating: 60,
-    },
-  ];
-  const [zEastOffice, zWestOffice, zCorridor, zPlant, zComms] = zones;
-
-  // Rooms (drawn first so wall lines overlay their boundaries)
-  addEntity(sheet, room(layers.room, { x: 0, y: 9500 }, { x: 9500, y: 16000 }, zEastOffice.name, 'office', zEastOffice.id, '#1a2030'));
-  addEntity(sheet, room(layers.room, { x: 14500, y: 9500 }, { x: 24000, y: 16000 }, zWestOffice.name, 'office', zWestOffice.id, '#1a2030'));
-  addEntity(sheet, room(layers.room, { x: 0, y: 7500 }, { x: 24000, y: 9300 }, zCorridor.name, 'corridor', zCorridor.id, '#262d3a'));
-  addEntity(sheet, room(layers.room, { x: 0, y: 0 }, { x: 6500, y: 7300 }, zPlant.name, 'plant-room', zPlant.id, '#3a2a1a'));
-  addEntity(sheet, room(layers.room, { x: 7000, y: 0 }, { x: 13500, y: 7300 }, 'Meeting / Storage', 'office', undefined, '#1a2230'));
-  addEntity(sheet, room(layers.room, { x: 14000, y: 0 }, { x: 24000, y: 7300 }, zComms.name, 'data-room', zComms.id, '#1a322c'));
-
-  // External perimeter
-  addEntity(sheet, wallSegment(layers.wall, [
-    { x: 0, y: 0 },
-    { x: 24000, y: 0 },
-    { x: 24000, y: 16000 },
-    { x: 0, y: 16000 },
-    { x: 0, y: 0 },
-  ], 250, true));
-
-  // North corridor wall (with three doorway gaps)
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 0, y: 9400 }, { x: 4000, y: 9400 }], 150));
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 5000, y: 9400 }, { x: 14000, y: 9400 }], 150));
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 15000, y: 9400 }, { x: 19000, y: 9400 }], 150));
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 20000, y: 9400 }, { x: 24000, y: 9400 }], 150));
-
-  // South corridor wall (gaps for plant, meeting and comms doors).
-  // The plant / electrical-riser room is a separate fire compartment, so
-  // its boundary walls are 90-min fire rated. Comms is rated at 60.
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 0, y: 7400 }, { x: 2000, y: 7400 }], 150, false, 90));
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 3000, y: 7400 }, { x: 8500, y: 7400 }], 150, false, 90));
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 9500, y: 7400 }, { x: 15500, y: 7400 }], 150));
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 16500, y: 7400 }, { x: 24000, y: 7400 }], 150, false, 60));
-
-  // South dividers (between plant / meeting / comms). The plant divider is
-  // a fire compartment boundary at 90 min; the comms divider at 60 min.
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 6750, y: 0 }, { x: 6750, y: 7400 }], 200, false, 90));
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 13750, y: 0 }, { x: 13750, y: 7400 }], 200, false, 60));
-  // North divider between east and west open-plan offices
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 12000, y: 9400 }, { x: 12000, y: 16000 }], 150));
-
-  // Equipment
-  const equipmentList: EquipmentEntity[] = [];
-  if (level === 'G') {
-    // Main MCC sits in the plant room on the ground floor only
-    const mcc = equipment(
-      layers.panel,
-      'MCC-01',
-      'Main Motor Control Centre — 630 A TP+N',
-      'mcc',
-      { x: 600, y: 4400 },
-      { w: 3200, h: 800 },
-      systems.powerDistribution,
-      { current: 630, voltage: 400, ip: 'IP30' },
-    );
-    addEntity(sheet, mcc);
-    equipmentList.push(mcc);
-
-    // Distribution boards for the office
-    const dbA = equipment(
-      layers.panel,
-      'DB-OF-G',
-      'Office Ground DB — 200 A',
-      'distribution-board',
-      { x: 4500, y: 4500 },
-      { w: 800, h: 250 },
-      systems.powerDistribution,
-      { current: 200, voltage: 400, ip: 'IP30' },
-    );
-    addEntity(sheet, dbA);
-    equipmentList.push(dbA);
-
-    // Fire alarm panel — in plant
-    const fap = equipment(
-      layers.panel,
-      'FAP-01',
-      'Addressable Fire Alarm Panel — 4 loop',
-      'fire-alarm-panel',
-      { x: 600, y: 6200 },
-      { w: 800, h: 250 },
-      systems.fireAlarm,
-      { ip: 'IP30' },
-    );
-    addEntity(sheet, fap);
-    equipmentList.push(fap);
-  } else {
-    // Office L1 has its own DB on the riser/landing
-    const dbB = equipment(
-      layers.panel,
-      'DB-OF-1',
-      'Office Level 1 DB — 200 A',
-      'distribution-board',
-      { x: 1200, y: 5400 },
-      { w: 800, h: 250 },
-      systems.powerDistribution,
-      { current: 200, voltage: 400, ip: 'IP30' },
-    );
-    addEntity(sheet, dbB);
-    equipmentList.push(dbB);
-
-    // IDF cabinet on the upper floor
-    const idf1 = equipment(
-      layers.panel,
-      'IDF-OF-1',
-      'Floor IDF cabinet (24U)',
-      'comms-rack',
-      { x: 19000, y: 5500 },
-      { w: 800, h: 800 },
-      systems.data,
-      { ip: 'IP20' },
-    );
-    addEntity(sheet, idf1);
-    equipmentList.push(idf1);
-  }
-
-  if (level === 'G') {
-    // Comms rack in the comms room (ground floor only — building-wide root)
-    const cr = equipment(
-      layers.panel,
-      'CR-01',
-      'Main Communications Rack (42U)',
-      'comms-rack',
-      { x: 14600, y: 4800 },
-      { w: 1000, h: 1000 },
-      systems.data,
-      { ip: 'IP20' },
-    );
-    addEntity(sheet, cr);
-    equipmentList.push(cr);
-
-    // Floor IDF in east office riser corner
-    const idfg = equipment(
-      layers.panel,
-      'IDF-OF-G',
-      'Floor IDF cabinet (24U)',
-      'comms-rack',
-      { x: 8500, y: 9700 },
-      { w: 800, h: 800 },
-      systems.data,
-      { ip: 'IP20' },
-    );
-    addEntity(sheet, idfg);
-    equipmentList.push(idfg);
-
-    // End-of-circuit equipment items — used as routing targets for the
-    // lighting, sockets, fire alarm and emergency-lighting cables in the
-    // sample schedule. They're placed inside rooms close to the spine so
-    // the cable router has a real endpoint to terminate at.
-    const lt1 = equipment(
-      layers.panel, 'LT-OF-G-01', 'East office lighting circuit endpoint',
-      'other', { x: 5400, y: 11000 }, { w: 200, h: 200 }, systems.lighting, { ip: 'IP20' },
-    );
-    addEntity(sheet, lt1); equipmentList.push(lt1);
-
-    const lt2 = equipment(
-      layers.panel, 'LT-OF-G-02', 'West office lighting circuit endpoint',
-      'other', { x: 19400, y: 11000 }, { w: 200, h: 200 }, systems.lighting, { ip: 'IP20' },
-    );
-    addEntity(sheet, lt2); equipmentList.push(lt2);
-
-    const skRing = equipment(
-      layers.panel, 'SK-OF-G-RING', 'Office G ring final socket outlet',
-      'other', { x: 5400, y: 12500 }, { w: 200, h: 200 }, systems.powerDistribution, { ip: 'IP20' },
-    );
-    addEntity(sheet, skRing); equipmentList.push(skRing);
-
-    const fa1 = equipment(
-      layers.panel, 'FA-LOOP-1', 'Fire alarm loop 1 first detector',
-      'other', { x: 8000, y: 9000 }, { w: 200, h: 200 }, systems.fireAlarm, { ip: 'IP30' },
-    );
-    addEntity(sheet, fa1); equipmentList.push(fa1);
-
-    const em1 = equipment(
-      layers.panel, 'EM-OF-G-01', 'Emergency lighting circuit endpoint',
-      'other', { x: 16000, y: 11200 }, { w: 200, h: 200 }, systems.emergencyLighting, { ip: 'IP20' },
-    );
-    addEntity(sheet, em1); equipmentList.push(em1);
-
-    // The 11 kV/400 V supply transformer — modelled at the corner of the
-    // plant room so the incomer cable has a real source point. The MCC
-    // branch is the closest containment.
-    const tx = equipment(
-      layers.panel, 'TX-01', '11 kV/400 V package substation transformer',
-      'transformer', { x: 600, y: 800 }, { w: 1500, h: 1500 }, systems.powerDistribution,
-      { current: 1000, voltage: 400, ip: 'IP30' },
-    );
-    addEntity(sheet, tx); equipmentList.push(tx);
-  } else {
-    // Office L1 — endpoint stand-ins for lighting and ring circuits.
-    const lt1 = equipment(
-      layers.panel, 'LT-OF-1-01', 'Level 1 lighting circuit endpoint',
-      'other', { x: 5400, y: 11000 }, { w: 200, h: 200 }, systems.lighting, { ip: 'IP20' },
-    );
-    addEntity(sheet, lt1); equipmentList.push(lt1);
-
-    const skRing = equipment(
-      layers.panel, 'SK-OF-1-RING', 'Level 1 ring final socket outlet',
-      'other', { x: 19400, y: 12500 }, { w: 200, h: 200 }, systems.powerDistribution, { ip: 'IP20' },
-    );
-    addEntity(sheet, skRing); equipmentList.push(skRing);
-  }
-
-  // Containment routes — main spine in corridor centre
-  const corridorY = 8400;
-  const containmentList: ContainmentEntity[] = [];
-
-  // Branch x-coordinates — explicit so the spines pick up matching graph
-  // nodes at every drop, allowing the cable router to traverse spine→branch.
-  const brXMCC = 2200;
-  const brXDBg = 4900;
-  const brXFAP = 1000;
-  const brXIDFg = 8900;
-  const brXCR = 15100;
-  const brXDB1 = 1600;
-  const brXIDF1 = 19400;
-  const brXDropEast = 5500;
-  const brXDropWest = 19500;
-  const brXEM = 16000;
-
-  // Spine vertex sequence — must contain every branch attachment so the
-  // containment graph creates shared nodes.
-  const powerSpinePoints: Vec2[] = level === 'G'
-    ? [
-        { x: 1200, y: corridorY },
-        { x: brXMCC, y: corridorY },
-        { x: brXDBg, y: corridorY },
-        { x: brXDropEast, y: corridorY },
-        { x: brXEM, y: corridorY },
-        { x: brXDropWest, y: corridorY },
-        { x: 22800, y: corridorY },
-      ]
-    : [
-        { x: 1200, y: corridorY },
-        { x: brXDB1, y: corridorY },
-        { x: brXDropEast, y: corridorY },
-        { x: brXDropWest, y: corridorY },
-        { x: 22800, y: corridorY },
-      ];
-
-  // Power trunking spine
-  const trunkSpine = containment(
-    layers.containment,
-    'trunking',
-    powerSpinePoints,
-    100,
-    100,
-    systems.powerDistribution,
-    'Main power trunking — 100×100',
-    'power',
-  );
-  addEntity(sheet, trunkSpine);
-  containmentList.push(trunkSpine);
-
-  // Lighting basket — runs on the left of the corridor spine, smaller cross-section.
-  // Vertices placed at every lighting drop so the graph stitches them in.
-  const lightBasketPoints: Vec2[] = level === 'G'
-    ? [
-        { x: 1200, y: corridorY + 250 },
-        { x: brXDropEast, y: corridorY + 250 },
-        { x: brXEM, y: corridorY + 250 },
-        { x: brXDropWest, y: corridorY + 250 },
-        { x: 22800, y: corridorY + 250 },
-      ]
-    : [
-        { x: 1200, y: corridorY + 250 },
-        { x: brXDropEast, y: corridorY + 250 },
-        { x: brXDropWest, y: corridorY + 250 },
-        { x: 22800, y: corridorY + 250 },
-      ];
-  const lightBasket = containment(
-    layers.containment,
-    'basket',
-    lightBasketPoints,
-    150,
-    100,
-    systems.lighting,
-    'Lighting basket — 150×100',
-    'power',
-  );
-  addEntity(sheet, lightBasket);
-  containmentList.push(lightBasket);
-
-  // Data basket parallel to the spine — vertices at every data-branch drop
-  // so the graph stitches in the IDF / CR / IDF-1 branches as shared nodes.
-  const dataBasketPoints: Vec2[] = level === 'G'
-    ? [
-        { x: 1200, y: corridorY - 250 },
-        { x: brXIDFg, y: corridorY - 250 },
-        { x: brXCR, y: corridorY - 250 },
-        { x: 22800, y: corridorY - 250 },
-      ]
-    : [
-        { x: 1200, y: corridorY - 250 },
-        { x: brXIDF1, y: corridorY - 250 },
-        { x: 22800, y: corridorY - 250 },
-      ];
-  const dataBasket = containment(
-    layers.containment,
-    'basket',
-    dataBasketPoints,
-    300,
-    100,
-    systems.data,
-    'Data basket — 300×100',
-    'data',
-  );
-  addEntity(sheet, dataBasket);
-  containmentList.push(dataBasket);
-
-  // Fire alarm conduit running just below the data basket — vertex at the
-  // FAP drop and at every FA loop endpoint so the FA branches attach via
-  // shared nodes.
-  const brXFA1 = 8000;
-  const faConduitPoints: Vec2[] = level === 'G'
-    ? [
-        { x: 600, y: corridorY - 450 },
-        { x: brXFAP, y: corridorY - 450 },
-        { x: brXFA1, y: corridorY - 450 },
-        { x: 23400, y: corridorY - 450 },
-      ]
-    : [
-        { x: 600, y: corridorY - 450 },
-        { x: 23400, y: corridorY - 450 },
-      ];
-  const faConduit = containment(
-    layers.containment,
-    'conduit',
-    faConduitPoints,
-    25,
-    undefined,
-    systems.fireAlarm,
-    'FP200 fire alarm route',
-    'fire-alarm',
-  );
-  addEntity(sheet, faConduit);
-  containmentList.push(faConduit);
-
-  // Conduit drops into east and west open-plan offices
-  const drop1 = containment(
-    layers.containment,
-    'conduit',
-    [{ x: brXDropEast, y: corridorY }, { x: brXDropEast, y: 12000 }],
-    32,
-    undefined,
-    systems.lighting,
-    'Lighting drop east office',
-    'power',
-  );
-  addEntity(sheet, drop1);
-  containmentList.push(drop1);
-
-  const drop2 = containment(
-    layers.containment,
-    'conduit',
-    [{ x: brXDropWest, y: corridorY }, { x: brXDropWest, y: 12000 }],
-    32,
-    undefined,
-    systems.lighting,
-    'Lighting drop west office',
-    'power',
-  );
-  addEntity(sheet, drop2);
-  containmentList.push(drop2);
-
-  if (level === 'G') {
-    // Emergency lighting drop near the west corridor end
-    const emDrop = containment(
-      layers.containment,
-      'conduit',
-      [{ x: brXEM, y: corridorY }, { x: brXEM, y: 11500 }],
-      25,
-      undefined,
-      systems.emergencyLighting,
-      'Emergency lighting drop',
-      'emergency',
-    );
-    addEntity(sheet, emDrop);
-    containmentList.push(emDrop);
-  }
-
-  // Equipment branches — short conduits / trunking dropping from the
-  // corridor spine into each room so the cable router can find a node
-  // within snap tolerance of every panel/cabinet. Each branch's first
-  // vertex must coincide exactly with a vertex on the parent spine so
-  // the containment graph stitches them into a connected network.
-  if (level === 'G') {
-    // Power branch reaching MCC-01 (in plant @ ~y=4800), continuing on
-    // to the supply transformer TX-01 in the corner so the incomer cable
-    // has a real source-to-MCC route.
-    const brMCC = containment(
-      layers.containment,
-      'trunking',
-      [
-        { x: brXMCC, y: corridorY },
-        { x: brXMCC, y: 4800 },
-        { x: brXMCC, y: 1550 },
-        { x: 1350, y: 1550 },
-      ],
-      300,
-      250,
-      systems.powerDistribution,
-      'Incomer route TX-01 → MCC-01',
-      'power',
-    );
-    addEntity(sheet, brMCC);
-    containmentList.push(brMCC);
-
-    // Power branch reaching DB-OF-G (in plant @ ~y=4625)
-    const brDBg = containment(
-      layers.containment,
-      'conduit',
-      [{ x: brXDBg, y: corridorY }, { x: brXDBg, y: 4625 }],
-      63,
-      undefined,
-      systems.powerDistribution,
-      'Branch to DB-OF-G',
-      'power',
-    );
-    addEntity(sheet, brDBg);
-    containmentList.push(brDBg);
-
-    // Fire-alarm conduit branch to FAP-01 (in plant @ ~y=6325)
-    const brFAP = containment(
-      layers.containment,
-      'conduit',
-      [{ x: brXFAP, y: corridorY - 450 }, { x: brXFAP, y: 6325 }],
-      32,
-      undefined,
-      systems.fireAlarm,
-      'Branch to FAP-01',
-      'fire-alarm',
-    );
-    addEntity(sheet, brFAP);
-    containmentList.push(brFAP);
-
-    // Fire-alarm conduit drop to FA-LOOP-1 first detector
-    const brFA1 = containment(
-      layers.containment,
-      'conduit',
-      [{ x: brXFA1, y: corridorY - 450 }, { x: brXFA1, y: 9100 }],
-      25,
-      undefined,
-      systems.fireAlarm,
-      'FA loop 1 drop',
-      'fire-alarm',
-    );
-    addEntity(sheet, brFA1);
-    containmentList.push(brFA1);
-
-    // Data basket branch into comms room reaching CR-01 (@ ~(15100,5300))
-    const brCR = containment(
-      layers.containment,
-      'basket',
-      [{ x: brXCR, y: corridorY - 250 }, { x: brXCR, y: 5300 }],
-      300,
-      100,
-      systems.data,
-      'Branch to CR-01',
-      'data',
-    );
-    addEntity(sheet, brCR);
-    containmentList.push(brCR);
-
-    // Data basket branch reaching IDF-OF-G in east office (~y=10100)
-    const brIDFg = containment(
-      layers.containment,
-      'basket',
-      [{ x: brXIDFg, y: corridorY - 250 }, { x: brXIDFg, y: 10100 }],
-      200,
-      100,
-      systems.data,
-      'Branch to IDF-OF-G',
-      'data',
-    );
-    addEntity(sheet, brIDFg);
-    containmentList.push(brIDFg);
-  } else {
-    // Office L1 — branch reaching DB-OF-1 near riser (~(1600,5525))
-    const brDB1 = containment(
-      layers.containment,
-      'trunking',
-      [{ x: brXDB1, y: corridorY }, { x: brXDB1, y: 5525 }],
-      150,
-      150,
-      systems.powerDistribution,
-      'Branch to DB-OF-1',
-      'power',
-    );
-    addEntity(sheet, brDB1);
-    containmentList.push(brDB1);
-
-    // Data basket branch reaching IDF-OF-1 (~(19400,5900))
-    const brIDF1 = containment(
-      layers.containment,
-      'basket',
-      [{ x: brXIDF1, y: corridorY - 250 }, { x: brXIDF1, y: 5900 }],
-      200,
-      100,
-      systems.data,
-      'Branch to IDF-OF-1',
-      'data',
-    );
-    addEntity(sheet, brIDF1);
-    containmentList.push(brIDF1);
-  }
-
-  // Riser positions — top-left corner of plant on level G, same point on L1
-  const riserPositions: Vec2[] = level === 'G' ? [{ x: 1200, y: 6800 }] : [{ x: 1200, y: 6800 }];
-
-  // Title block annotation
-  addEntity(sheet, text(layers.annotation, { x: 600, y: 15600 }, level === 'G'
-    ? 'OFFICE BUILDING — GROUND FLOOR PLAN'
-    : 'OFFICE BUILDING — LEVEL 1 FLOOR PLAN', 200));
-  addEntity(sheet, text(layers.annotation, { x: 600, y: 15300 },
-    'Power · Lighting · Data · Fire alarm · Emergency lighting',
-    100));
-
-  return { sheet, zones, equipment: equipmentList, containment: containmentList, riserPositions };
+const CORPORATE_LEVEL_META: Record<CorporateLevel, CorporateLevelMeta> = {
+  G: {
+    sheetName: 'Corporate HQ — Ground Floor',
+    sheetNumber: '101',
+    floorName: 'Ground Floor',
+    title: 'CORPORATE HQ — GROUND FLOOR PLAN',
+    titleSuffix: 'Ground Floor Plan',
+    levelCode: '00',
+    levelNumber: 0,
+    ffl: 0,
+    floorHeight: 4200,
+    slabThickness: 300,
+    ceilingVoid: 850,
+    raisedFloor: 150,
+  },
+  1: {
+    sheetName: 'Corporate HQ — Level 1 Office',
+    sheetNumber: '102',
+    floorName: 'Level 1',
+    title: 'CORPORATE HQ — LEVEL 1 WORKPLACE PLAN',
+    titleSuffix: 'Level 1 Workplace Plan',
+    levelCode: '01',
+    levelNumber: 1,
+    ffl: 4200,
+    floorHeight: 3900,
+    slabThickness: 275,
+    ceilingVoid: 750,
+    raisedFloor: 150,
+  },
+  2: {
+    sheetName: 'Corporate HQ — Level 2 Office',
+    sheetNumber: '103',
+    floorName: 'Level 2',
+    title: 'CORPORATE HQ — LEVEL 2 WORKPLACE PLAN',
+    titleSuffix: 'Level 2 Workplace Plan',
+    levelCode: '02',
+    levelNumber: 2,
+    ffl: 8100,
+    floorHeight: 3900,
+    slabThickness: 275,
+    ceilingVoid: 750,
+    raisedFloor: 150,
+  },
+  3: {
+    sheetName: 'Corporate HQ — Level 3 Client Suite',
+    sheetNumber: '104',
+    floorName: 'Level 3',
+    title: 'CORPORATE HQ — LEVEL 3 CLIENT SUITE PLAN',
+    titleSuffix: 'Level 3 Client Suite Plan',
+    levelCode: '03',
+    levelNumber: 3,
+    ffl: 12000,
+    floorHeight: 3900,
+    slabThickness: 275,
+    ceilingVoid: 750,
+    raisedFloor: 150,
+  },
+  R: {
+    sheetName: 'Corporate HQ — Roof Plant',
+    sheetNumber: '105',
+    floorName: 'Roof Plant',
+    title: 'CORPORATE HQ — ROOF PLANT PLAN',
+    titleSuffix: 'Roof Plant Plan',
+    levelCode: 'RF',
+    levelNumber: 4,
+    ffl: 15900,
+    floorHeight: 3600,
+    slabThickness: 250,
+    ceilingVoid: 0,
+  },
 };
 
-// Plant floor — single open hall plus a mezzanine "deck"
-interface PlantFloorOpts {
-  floorId: string;
-  buildingId: string;
-  isMezzanine: boolean;
-  systems: Record<string, SystemId>;
-  layers: FloorLayers;
-}
+const BUILDING_WIDTH = 36000;
+const BUILDING_DEPTH = 24000;
+const CORE = { minX: 14500, minY: 7600, maxX: 21500, maxY: 16400 };
+const POWER_Y = 12000;
+const DATA_Y = 11400;
+const FIRE_Y = 10950;
+const SECURITY_Y = 10600;
+const LIGHTING_Y = 12600;
+const CONTROLS_Y = 13100;
+const POWER_RISER_X = 15500;
+const LIFE_SAFETY_RISER_X = 18000;
+const CONTROLS_RISER_X = 19000;
+const DATA_RISER_X = 20500;
+const RISERS: ServiceRiserPositions = {
+  power: { x: POWER_RISER_X, y: POWER_Y },
+  data: { x: DATA_RISER_X, y: DATA_Y },
+  lifeSafety: { x: LIFE_SAFETY_RISER_X, y: FIRE_Y },
+  controls: { x: CONTROLS_RISER_X, y: CONTROLS_Y },
+};
 
-const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
-  const { floorId, isMezzanine, systems, layers } = opts;
+const routePoints = (y: number, xs: number[]): Vec2[] => (
+  [...new Set(xs)].sort((a, b) => a - b).map((x) => ({ x, y }))
+);
+
+const zoneRecord = (
+  floorId: string,
+  name: string,
+  classification: ZoneClassification,
+  bounds: Zone['bounds'],
+  ipRating = 'IP20',
+  fireRating: Zone['fireRating'] = 60,
+  uniclass?: string,
+): Zone => ({
+  id: newId(),
+  floorId,
+  name,
+  classification,
+  bounds,
+  ipRating,
+  fireRating,
+  uniclass,
+});
+
+const addRoomForZone = (
+  sheet: Sheet,
+  layer: LayerId,
+  z: Zone,
+  floorColor: string,
+  label = z.name,
+): void => {
+  if (!z.bounds) return;
+  addEntity(sheet, room(
+    layer,
+    { x: z.bounds.minX, y: z.bounds.minY },
+    { x: z.bounds.maxX, y: z.bounds.maxY },
+    label,
+    z.classification,
+    z.id,
+    floorColor,
+  ));
+};
+
+const addRectWalls = (
+  sheet: Sheet,
+  layer: LayerId,
+  bounds: NonNullable<Zone['bounds']>,
+  thickness: number,
+  options: Parameters<typeof wallSegment>[3],
+): void => {
+  addEntity(sheet, wallSegment(layer, [
+    { x: bounds.minX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.maxY },
+    { x: bounds.minX, y: bounds.maxY },
+    { x: bounds.minX, y: bounds.minY },
+  ], thickness, options));
+};
+
+const addRun = (
+  sheet: Sheet,
+  list: ContainmentEntity[],
+  layer: LayerId,
+  type: ContainmentType,
+  points: Vec2[],
+  width: number,
+  height: number | undefined,
+  systemId: SystemId,
+  label: string,
+  cableCategory: ContainmentEntity['cableCategory'],
+  patch: Partial<ContainmentEntity> = {},
+): ContainmentEntity => {
+  const c = containment(layer, type, points, width, height, systemId, label, cableCategory);
+  Object.assign(c, patch);
+  addEntity(sheet, c);
+  list.push(c);
+  return c;
+};
+
+const addEquipment = (
+  sheet: Sheet,
+  list: EquipmentEntity[],
+  layer: LayerId,
+  tag: string,
+  description: string,
+  kind: EquipmentEntity['equipmentKind'],
+  origin: Vec2,
+  size: { w: number; h: number },
+  systemId?: SystemId,
+  ratings?: { current?: number; voltage?: number; ip?: EquipmentEntity['ipRating'] },
+  patch: Partial<EquipmentEntity> = {},
+): EquipmentEntity => {
+  const e = equipment(layer, tag, description, kind, origin, size, systemId, ratings);
+  Object.assign(e, patch);
+  addEntity(sheet, e);
+  list.push(e);
+  return e;
+};
+
+const addCorporateEnvelope = (
+  sheet: Sheet,
+  layers: FloorLayers,
+  meta: CorporateLevelMeta,
+  roof = false,
+): void => {
+  const construction: WallEntity['construction'] = roof ? 'concrete' : 'glazed';
+  const height = roof ? 1400 : meta.floorHeight - 350;
+  const wallOpts = { external: true, height, construction };
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 0, y: 0 }, { x: BUILDING_WIDTH, y: 0 }], 320, wallOpts));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: BUILDING_WIDTH, y: 0 }, { x: BUILDING_WIDTH, y: BUILDING_DEPTH }], 320, wallOpts));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: BUILDING_WIDTH, y: BUILDING_DEPTH }, { x: 0, y: BUILDING_DEPTH }], 320, wallOpts));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 0, y: BUILDING_DEPTH }, { x: 0, y: 0 }], 320, wallOpts));
+};
+
+const addCorporateCoreWalls = (
+  sheet: Sheet,
+  layers: FloorLayers,
+  meta: CorporateLevelMeta,
+): void => {
+  const coreWall = {
+    height: meta.floorHeight - 350,
+    fireRating: 120 as WallEntity['fireRating'],
+    construction: 'concrete' as WallEntity['construction'],
+  };
+  addRectWalls(sheet, layers.wall, CORE, 250, coreWall);
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 16500, y: 7600 }, { x: 16500, y: 16400 }], 180, coreWall));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 19500, y: 7600 }, { x: 19500, y: 16400 }], 180, coreWall));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 14500, y: 10400 }, { x: 21500, y: 10400 }], 180, coreWall));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 14500, y: 12000 }, { x: 21500, y: 12000 }], 180, coreWall));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 14500, y: 13600 }, { x: 21500, y: 13600 }], 180, coreWall));
+};
+
+const addWorkplacePlanningWalls = (
+  sheet: Sheet,
+  layers: FloorLayers,
+  meta: CorporateLevelMeta,
+  level: CorporateLevel,
+): void => {
+  const partition = {
+    height: meta.floorHeight - 650,
+    construction: 'metal-stud' as WallEntity['construction'],
+  };
+  const glazed = {
+    height: meta.floorHeight - 650,
+    construction: 'glazed' as WallEntity['construction'],
+  };
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 0, y: 10400 }, { x: 13200, y: 10400 }], 120, partition));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 22800, y: 10400 }, { x: BUILDING_WIDTH, y: 10400 }], 120, partition));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 0, y: 13600 }, { x: 13200, y: 13600 }], 120, partition));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 22800, y: 13600 }, { x: BUILDING_WIDTH, y: 13600 }], 120, partition));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 11800, y: 0 }, { x: 11800, y: 10400 }], 120, glazed));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 24200, y: 0 }, { x: 24200, y: 10400 }], 120, glazed));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 11800, y: 13600 }, { x: 11800, y: BUILDING_DEPTH }], 120, glazed));
+  addEntity(sheet, wallSegment(layers.wall, [{ x: 24200, y: 13600 }, { x: 24200, y: BUILDING_DEPTH }], 120, glazed));
+  if (level === '3') {
+    addEntity(sheet, wallSegment(layers.wall, [{ x: 24600, y: 13600 }, { x: 24600, y: BUILDING_DEPTH }], 140, glazed));
+    addEntity(sheet, wallSegment(layers.wall, [{ x: 24600, y: 17800 }, { x: BUILDING_WIDTH, y: 17800 }], 140, glazed));
+  }
+};
+
+const addOccupiedZones = (
+  sheet: Sheet,
+  layers: FloorLayers,
+  floorId: string,
+  level: CorporateLevel,
+): Zone[] => {
+  const zones: Zone[] = [];
+  const push = (
+    name: string,
+    classification: ZoneClassification,
+    bounds: NonNullable<Zone['bounds']>,
+    color: string,
+    ipRating = 'IP20',
+    fireRating: Zone['fireRating'] = 60,
+    uniclass?: string,
+  ): Zone => {
+    const z = zoneRecord(floorId, name, classification, bounds, ipRating, fireRating, uniclass);
+    zones.push(z);
+    addRoomForZone(sheet, layers.room, z, color);
+    return z;
+  };
+
+  if (level === 'G') {
+    push('Reception and Visitor Lobby', 'office', { minX: 0, minY: 7600, maxX: 14500, maxY: 16400 }, '#202a38', 'IP20', 60, 'SL_25_10_70');
+    push('Client Briefing Suite', 'office', { minX: 0, minY: 16400, maxX: 14500, maxY: BUILDING_DEPTH }, '#1e2c3a', 'IP20', 60);
+    push('Cafe and Town Hall', 'kitchen', { minX: 21500, minY: 16400, maxX: BUILDING_WIDTH, maxY: BUILDING_DEPTH }, '#243328', 'IP44', 60);
+    push('Main Electrical Intake', 'electrical-riser', { minX: 0, minY: 0, maxX: 8500, maxY: 7600 }, '#3b2a1d', 'IP31', 120);
+    push('Main Comms and UPS Room', 'data-room', { minX: 8500, minY: 0, maxX: 14500, maxY: 7600 }, '#1d3335', 'IP20', 90);
+    push('Security Control Room', 'office', { minX: 21500, minY: 0, maxX: 28500, maxY: 7600 }, '#2c2540', 'IP20', 60);
+    push('Facilities and Loading', 'storage', { minX: 28500, minY: 0, maxX: BUILDING_WIDTH, maxY: 7600 }, '#2f3034', 'IP44', 60);
+  } else if (level === '3') {
+    push('Executive Workplace West', 'office', { minX: 0, minY: 0, maxX: 14500, maxY: 10400 }, '#1c2634', 'IP20', 60);
+    push('Project Studio East', 'office', { minX: 21500, minY: 0, maxX: BUILDING_WIDTH, maxY: 10400 }, '#1b2b31', 'IP20', 60);
+    push('Client Boardroom Suite', 'office', { minX: 0, minY: 13600, maxX: 14500, maxY: BUILDING_DEPTH }, '#232b42', 'IP20', 60);
+    push('Executive Meeting Rooms', 'office', { minX: 21500, minY: 13600, maxX: BUILDING_WIDTH, maxY: BUILDING_DEPTH }, '#202a3a', 'IP20', 60);
+  } else {
+    push(`Level ${level} West Open Office`, 'office', { minX: 0, minY: 0, maxX: 14500, maxY: 10400 }, '#1c2634', 'IP20', 60, 'SL_25_10_70');
+    push(`Level ${level} East Meeting Suite`, 'office', { minX: 21500, minY: 0, maxX: BUILDING_WIDTH, maxY: 10400 }, '#1e2a38', 'IP20', 60);
+    push(`Level ${level} Collaboration Lounge`, 'office', { minX: 0, minY: 13600, maxX: 14500, maxY: BUILDING_DEPTH }, '#1b2d34', 'IP20', 60);
+    push(`Level ${level} East Open Office`, 'office', { minX: 21500, minY: 13600, maxX: BUILDING_WIDTH, maxY: BUILDING_DEPTH }, '#1c2934', 'IP20', 60, 'SL_25_10_70');
+  }
+
+  push('West Corridor', 'corridor', { minX: 0, minY: 10400, maxX: 14500, maxY: 13600 }, '#28313a', 'IP20', 60);
+  push('East Corridor', 'corridor', { minX: 21500, minY: 10400, maxX: BUILDING_WIDTH, maxY: 13600 }, '#28313a', 'IP20', 60);
+  push('Power Riser Room', 'electrical-riser', { minX: 14500, minY: 7600, maxX: 16500, maxY: 10400 }, '#3b2a1d', 'IP31', 120);
+  push('Lift Lobby and Core', 'circulation', { minX: 16500, minY: 7600, maxX: 19500, maxY: 12000 }, '#303541', 'IP20', 120);
+  push('Data Riser Room', 'data-room', { minX: 19500, minY: 7600, maxX: 21500, maxY: 10400 }, '#1d3335', 'IP20', 90);
+  push('Life Safety Riser', 'electrical-riser', { minX: 14500, minY: 12000, maxX: 16500, maxY: 16400 }, '#322837', 'IP31', 120);
+  push('WCs and Cleaners Store', 'wet-area', { minX: 16500, minY: 12000, maxX: 19500, maxY: 16400 }, '#26343d', 'IP44', 60);
+  push('Controls Riser', 'electrical-riser', { minX: 19500, minY: 12000, maxX: 21500, maxY: 16400 }, '#263a2d', 'IP31', 90);
+  return zones;
+};
+
+const addRoofZones = (
+  sheet: Sheet,
+  layers: FloorLayers,
+  floorId: string,
+): Zone[] => {
+  const zones: Zone[] = [];
+  const push = (
+    name: string,
+    classification: ZoneClassification,
+    bounds: NonNullable<Zone['bounds']>,
+    color: string,
+    ipRating = 'IP54',
+    fireRating: Zone['fireRating'] = 60,
+  ): void => {
+    const z = zoneRecord(floorId, name, classification, bounds, ipRating, fireRating);
+    zones.push(z);
+    addRoomForZone(sheet, layers.room, z, color);
+  };
+  push('Roof AHU Yard', 'mechanical', { minX: 0, minY: 13600, maxX: BUILDING_WIDTH, maxY: BUILDING_DEPTH }, '#25303a', 'IP54', 60);
+  push('Roof Plant Electrical Room', 'electrical-riser', { minX: 14000, minY: 7600, maxX: 21500, maxY: 13600 }, '#3b2a1d', 'IP55', 120);
+  push('PV Inverter Terrace', 'external', { minX: 26000, minY: 0, maxX: BUILDING_WIDTH, maxY: 7600 }, '#303536', 'IP65', 0);
+  push('Chilled Water Plant Zone', 'mechanical', { minX: 0, minY: 0, maxX: 14000, maxY: 7600 }, '#28323a', 'IP55', 60);
+  push('Roof Access Walkway', 'circulation', { minX: 0, minY: 7600, maxX: BUILDING_WIDTH, maxY: 13600 }, '#2d3238', 'IP44', 60);
+  return zones;
+};
+
+const addCommonServiceSpines = (
+  sheet: Sheet,
+  list: ContainmentEntity[],
+  layers: FloorLayers,
+  systems: Record<string, SystemId>,
+  labelPrefix: string,
+  level: CorporateLevel,
+): void => {
+  const baseXs = [2400, 5200, 6200, 7600, 9500, 12200, POWER_RISER_X, LIFE_SAFETY_RISER_X, CONTROLS_RISER_X, DATA_RISER_X, 24500, 28500, 30500, 33600];
+  const powerType: ContainmentType = level === 'G' ? 'busbar' : 'trunking';
+  addRun(sheet, list, layers.containment, powerType, routePoints(POWER_Y, baseXs), level === 'G' ? 450 : 300, 150,
+    systems.powerDistribution, `${labelPrefix} power ${level === 'G' ? 'busbar' : 'trunking'} — ${level === 'G' ? '800 A' : '300×150'}`, 'power',
+    { elevation: level === 'G' ? 3550 : 3200, subType: level === 'G' ? 'feeder-busbar' : 'standard' });
+  addRun(sheet, list, layers.containment, 'basket', routePoints(DATA_Y, [2400, 9500, DATA_RISER_X, 24500, 28500, 33600]), 300, 100,
+    systems.data, `${labelPrefix} data basket — 300×100`, 'data', { elevation: 3350, subType: 'wire-mesh' });
+  addRun(sheet, list, layers.containment, 'conduit', routePoints(FIRE_Y, [2400, 9500, LIFE_SAFETY_RISER_X, 30500, 33600]), 32, undefined,
+    systems.fireAlarm, `${labelPrefix} FP200 fire alarm conduit`, 'fire-alarm', { elevation: 3100, material: 'lsoh' });
+  addRun(sheet, list, layers.containment, 'basket', routePoints(LIGHTING_Y, [2400, 7600, 12200, POWER_RISER_X, LIFE_SAFETY_RISER_X, 28500, 30500, 33600]), 150, 100,
+    systems.lighting, `${labelPrefix} lighting basket — 150×100`, 'power', { elevation: 3050, subType: 'wire-mesh' });
+  addRun(sheet, list, layers.containment, 'conduit', routePoints(SECURITY_Y, [2400, 9500, DATA_RISER_X, 24500, 28500, 33600]), 32, undefined,
+    systems.security, `${labelPrefix} security containment conduit`, 'data', { elevation: 3000, material: 'lsoh' });
+  addRun(sheet, list, layers.containment, 'conduit', routePoints(CONTROLS_Y, [2400, 12200, CONTROLS_RISER_X, 24500, 28500, 33600]), 32, undefined,
+    systems.bms, `${labelPrefix} BMS controls conduit`, 'instrumentation', { elevation: 2950, material: 'lsoh' });
+};
+
+const addOccupiedEquipmentAndBranches = (
+  sheet: Sheet,
+  equipmentList: EquipmentEntity[],
+  containmentList: ContainmentEntity[],
+  layers: FloorLayers,
+  systems: Record<string, SystemId>,
+  level: CorporateLevel,
+): void => {
+  const levelTag = level === 'G' ? 'LG' : `L0${level}`;
+  const labelPrefix = level === 'G' ? 'Ground' : `Level ${level}`;
+  const dbTag = `DB-${levelTag}`;
+  const idfTag = `IDF-${levelTag}`;
+  const lightingTag = `LT-${levelTag}-01`;
+  const socketTag = `SK-${levelTag}-RING`;
+  const fireTag = `FA-${levelTag}-LOOP`;
+  const emergencyTag = `EM-${levelTag}-01`;
+
+  if (level === 'G') {
+    addEquipment(sheet, equipmentList, layers.panel, 'TX-01', '11 kV/400 V package substation transformer', 'transformer',
+      { x: 1200, y: 1600 }, { w: 2200, h: 1800 }, systems.powerDistribution, { current: 1000, voltage: 400, ip: 'IP30' }, { height: 2200 });
+    addEquipment(sheet, equipmentList, layers.panel, 'MSB-01', 'Main LV switchboard — 800 A TP+N', 'switchboard',
+      { x: 4400, y: 2200 }, { w: 3600, h: 900 }, systems.powerDistribution, { current: 800, voltage: 400, ip: 'IP30' }, { height: 2100 });
+    addEquipment(sheet, equipmentList, layers.panel, 'FAP-01', 'Addressable fire alarm panel — 8 loop', 'fire-alarm-panel',
+      { x: 16800, y: 8200 }, { w: 800, h: 300 }, systems.fireAlarm, { ip: 'IP30' });
+    addEquipment(sheet, equipmentList, layers.panel, 'CR-01', 'Main communications rack room core switch (42U)', 'comms-rack',
+      { x: 9500, y: 2100 }, { w: 1100, h: 1100 }, systems.data, { ip: 'IP20' }, { height: 2200 });
+    addEquipment(sheet, equipmentList, layers.panel, 'UPS-01', '60 kVA UPS with bypass panel', 'ups',
+      { x: 11200, y: 2100 }, { w: 1300, h: 1000 }, systems.powerDistribution, { current: 90, voltage: 400, ip: 'IP20' }, { height: 1900 });
+    addEquipment(sheet, equipmentList, layers.panel, 'SEC-CP-01', 'Security head-end and access-control panel', 'control-panel',
+      { x: 22800, y: 2400 }, { w: 1200, h: 800 }, systems.security, { ip: 'IP20' });
+    addEquipment(sheet, equipmentList, layers.panel, 'BMS-CP-01', 'BMS supervisor panel', 'control-panel',
+      { x: 24600, y: 2400 }, { w: 1200, h: 800 }, systems.bms, { ip: 'IP20' });
+  }
+
+  addEquipment(sheet, equipmentList, layers.panel, dbTag, `${labelPrefix} distribution board — 250 A`, 'distribution-board',
+    { x: 14900, y: 8200 }, { w: 1200, h: 450 }, systems.powerDistribution, { current: 250, voltage: 400, ip: 'IP30' });
+  addEquipment(sheet, equipmentList, layers.panel, idfTag, `${labelPrefix} floor IDF cabinet (24U)`, 'comms-rack',
+    { x: 19800, y: 8200 }, { w: 1000, h: 1000 }, systems.data, { ip: 'IP20' });
+  addEquipment(sheet, equipmentList, layers.panel, lightingTag, `${labelPrefix} lighting circuit endpoint`, 'other',
+    { x: 7600, y: 17600 }, { w: 220, h: 220 }, systems.lighting, { ip: 'IP20' });
+  addEquipment(sheet, equipmentList, layers.panel, socketTag, `${labelPrefix} ring-final socket circuit endpoint`, 'other',
+    { x: 30500, y: 17600 }, { w: 220, h: 220 }, systems.powerDistribution, { ip: 'IP20' });
+  addEquipment(sheet, equipmentList, layers.panel, fireTag, `${labelPrefix} fire alarm loop endpoint`, 'other',
+    { x: 9500, y: 10800 }, { w: 220, h: 220 }, systems.fireAlarm, { ip: 'IP30' });
+  addEquipment(sheet, equipmentList, layers.panel, emergencyTag, `${labelPrefix} emergency lighting endpoint`, 'other',
+    { x: 28500, y: 12650 }, { w: 220, h: 220 }, systems.emergencyLighting, { ip: 'IP20' });
+
+  if (level === '2') {
+    addEquipment(sheet, equipmentList, layers.panel, 'SEC-L02-ACS', 'Level 2 access-control door controller', 'control-panel',
+      { x: 24600, y: 10200 }, { w: 700, h: 450 }, systems.security, { ip: 'IP20' });
+    addEquipment(sheet, equipmentList, layers.panel, 'BMS-L02-VAV', 'Level 2 VAV controller panel', 'control-panel',
+      { x: 12200, y: 10200 }, { w: 700, h: 450 }, systems.bms, { ip: 'IP20' });
+  }
+
+  if (level === '3') {
+    addEquipment(sheet, equipmentList, layers.panel, 'AV-L03-RACK', 'Client suite AV rack', 'cabinet',
+      { x: 24800, y: 15000 }, { w: 900, h: 900 }, systems.data, { ip: 'IP20' });
+  }
+
+  if (level === 'G') {
+    addRun(sheet, containmentList, layers.containment, 'busbar',
+      [{ x: 6200, y: POWER_Y }, { x: 6200, y: 3100 }, { x: 5500, y: 3100 }, { x: 2300, y: 2500 }],
+      450, 150, systems.powerDistribution, 'Transformer to MSB busbar tap', 'power',
+      { elevation: 3550, subType: 'feeder-busbar' });
+    addRun(sheet, containmentList, layers.containment, 'trunking',
+      [{ x: 12200, y: POWER_Y }, { x: 12200, y: 3000 }],
+      225, 150, systems.powerDistribution, 'UPS essential power branch', 'power', { elevation: 3250 });
+    addRun(sheet, containmentList, layers.containment, 'basket',
+      [{ x: 9500, y: DATA_Y }, { x: 9500, y: 3200 }],
+      300, 100, systems.data, 'Main comms room basket branch', 'data', { elevation: 3350 });
+    addRun(sheet, containmentList, layers.containment, 'conduit',
+      [{ x: 24500, y: SECURITY_Y }, { x: 24500, y: 3200 }],
+      32, undefined, systems.security, 'Security head-end conduit drop', 'data', { elevation: 3000, material: 'lsoh' });
+    addRun(sheet, containmentList, layers.containment, 'conduit',
+      [{ x: 24500, y: CONTROLS_Y }, { x: 24500, y: 3200 }],
+      32, undefined, systems.bms, 'BMS supervisor conduit drop', 'instrumentation', { elevation: 2950, material: 'lsoh' });
+  }
+
+  addRun(sheet, containmentList, layers.containment, level === 'G' ? 'busbar' : 'trunking',
+    [{ x: POWER_RISER_X, y: POWER_Y }, { x: POWER_RISER_X, y: 8650 }, { x: 15500, y: 8650 }],
+    level === 'G' ? 450 : 225, 150, systems.powerDistribution, `${labelPrefix} DB vertical riser tap`, 'power',
+    { elevation: level === 'G' ? 3550 : 3200, subType: level === 'G' ? 'feeder-busbar' : 'standard' });
+  addRun(sheet, containmentList, layers.containment, 'conduit',
+    [{ x: POWER_RISER_X, y: POWER_Y }, { x: POWER_RISER_X, y: LIGHTING_Y }],
+    40, undefined, systems.lighting, `${labelPrefix} lighting board transition`, 'power', { elevation: 3000, material: 'galvanised-steel' });
+  addRun(sheet, containmentList, layers.containment, 'trunking',
+    [{ x: 30500, y: POWER_Y }, { x: 30500, y: 17800 }],
+    150, 100, systems.powerDistribution, `${labelPrefix} ring-final power drop`, 'power', { elevation: 3000 });
+  addRun(sheet, containmentList, layers.containment, 'conduit',
+    [{ x: 7600, y: LIGHTING_Y }, { x: 7600, y: 17800 }],
+    32, undefined, systems.lighting, `${labelPrefix} lighting drop west`, 'power', { elevation: 3000 });
+  addRun(sheet, containmentList, layers.containment, 'conduit',
+    [{ x: 28500, y: LIGHTING_Y }, { x: 28500, y: 12800 }],
+    25, undefined, systems.emergencyLighting, `${labelPrefix} emergency-lighting drop`, 'emergency', { elevation: 3000 });
+  addRun(sheet, containmentList, layers.containment, 'basket',
+    [{ x: DATA_RISER_X, y: DATA_Y }, { x: DATA_RISER_X, y: 9200 }],
+    200, 100, systems.data, `${labelPrefix} IDF basket drop`, 'data', { elevation: 3350 });
+  addRun(sheet, containmentList, layers.containment, 'conduit',
+    [{ x: 9500, y: FIRE_Y }, { x: 9500, y: 10900 }],
+    25, undefined, systems.fireAlarm, `${labelPrefix} fire alarm detector drop`, 'fire-alarm', { elevation: 3100, material: 'lsoh' });
+  addRun(sheet, containmentList, layers.containment, 'conduit',
+    [{ x: LIFE_SAFETY_RISER_X, y: FIRE_Y }, { x: LIFE_SAFETY_RISER_X, y: 8500 }],
+    32, undefined, systems.fireAlarm, `${labelPrefix} fire alarm panel/riser branch`, 'fire-alarm', { elevation: 3100, material: 'lsoh' });
+
+  if (level === '2') {
+    addRun(sheet, containmentList, layers.containment, 'conduit',
+      [{ x: 24500, y: SECURITY_Y }, { x: 24500, y: 10400 }],
+      32, undefined, systems.security, 'Level 2 access-control conduit drop', 'data', { elevation: 3000, material: 'lsoh' });
+    addRun(sheet, containmentList, layers.containment, 'conduit',
+      [{ x: 12200, y: CONTROLS_Y }, { x: 12200, y: 10400 }],
+      32, undefined, systems.bms, 'Level 2 BMS VAV controls drop', 'instrumentation', { elevation: 2950, material: 'lsoh' });
+  }
+
+  if (level === '3') {
+    addRun(sheet, containmentList, layers.containment, 'basket',
+      [{ x: 24500, y: DATA_Y }, { x: 24500, y: 15450 }],
+      200, 100, systems.data, 'Level 3 AV rack basket drop', 'data', { elevation: 3350 });
+  }
+};
+
+const addRoofEquipmentAndContainment = (
+  sheet: Sheet,
+  equipmentList: EquipmentEntity[],
+  containmentList: ContainmentEntity[],
+  layers: FloorLayers,
+  systems: Record<string, SystemId>,
+): void => {
+  addEquipment(sheet, equipmentList, layers.panel, 'DB-RF', 'Roof plant distribution board — 250 A', 'distribution-board',
+    { x: 17000, y: 9000 }, { w: 1200, h: 450 }, systems.powerDistribution, { current: 250, voltage: 400, ip: 'IP55' });
+  addEquipment(sheet, equipmentList, layers.panel, 'AHU-RF-01', 'Air-handling unit north — 42 A', 'air-handling-unit',
+    { x: 5600, y: 16500 }, { w: 4200, h: 2400 }, systems.powerDistribution, { current: 42, voltage: 400, ip: 'IP55' }, { height: 2200 });
+  addEquipment(sheet, equipmentList, layers.panel, 'AHU-RF-02', 'Air-handling unit east — 38 A', 'air-handling-unit',
+    { x: 22400, y: 16500 }, { w: 4200, h: 2400 }, systems.powerDistribution, { current: 38, voltage: 400, ip: 'IP55' }, { height: 2200 });
+  addEquipment(sheet, equipmentList, layers.panel, 'CHWP-RF-01', 'Chilled-water pump package — 22 A', 'pump',
+    { x: 6600, y: 3000 }, { w: 2400, h: 1600 }, systems.powerDistribution, { current: 22, voltage: 400, ip: 'IP55' }, { height: 1400 });
+  addEquipment(sheet, equipmentList, layers.panel, 'PV-INV-01', 'PV inverter — 50 kW', 'other',
+    { x: 30500, y: 3600 }, { w: 1600, h: 900 }, systems.powerDistribution, { current: 80, voltage: 400, ip: 'IP65' });
+  addEquipment(sheet, equipmentList, layers.panel, 'BMS-RF-IO', 'Roof plant BMS I/O panel', 'control-panel',
+    { x: 19000, y: 8500 }, { w: 900, h: 650 }, systems.bms, { ip: 'IP55' });
+  addEquipment(sheet, equipmentList, layers.panel, 'FA-RF-01', 'Roof plant fire alarm interface', 'other',
+    { x: 11000, y: 11100 }, { w: 250, h: 250 }, systems.fireAlarm, { ip: 'IP55' });
+
+  const roofXs = [2400, 6600, 7800, POWER_RISER_X, LIFE_SAFETY_RISER_X, CONTROLS_RISER_X, DATA_RISER_X, 24500, 28500, 30500, 33600];
+  addRun(sheet, containmentList, layers.containment, 'ladder', routePoints(POWER_Y, roofXs), 600, 100,
+    systems.powerDistribution, 'Roof plant ladder — 600 mm', 'power', { elevation: 2600, subType: 'heavy-duty-ladder', material: 'hot-dip-galvanised' });
+  addRun(sheet, containmentList, layers.containment, 'trunking',
+    [{ x: POWER_RISER_X, y: POWER_Y }, { x: 17000, y: POWER_Y }, { x: 17000, y: 9450 }],
+    225, 150, systems.powerDistribution, 'Roof DB riser tap', 'power', { elevation: 2600 });
+  addRun(sheet, containmentList, layers.containment, 'conduit',
+    [{ x: 6600, y: POWER_Y }, { x: 6600, y: 17700 }],
+    50, undefined, systems.powerDistribution, 'AHU-RF-01 power drop', 'power', { elevation: 2450, material: 'galvanised-steel' });
+  addRun(sheet, containmentList, layers.containment, 'conduit',
+    [{ x: 24500, y: POWER_Y }, { x: 24500, y: 17700 }],
+    50, undefined, systems.powerDistribution, 'AHU-RF-02 power drop', 'power', { elevation: 2450, material: 'galvanised-steel' });
+  addRun(sheet, containmentList, layers.containment, 'conduit',
+    [{ x: 7800, y: POWER_Y }, { x: 7800, y: 3800 }],
+    40, undefined, systems.powerDistribution, 'CHWP-RF-01 power drop', 'power', { elevation: 2450, material: 'galvanised-steel' });
+  addRun(sheet, containmentList, layers.containment, 'trunking',
+    [{ x: 30500, y: POWER_Y }, { x: 30500, y: 4050 }],
+    150, 100, systems.powerDistribution, 'PV inverter AC trunking', 'power', { elevation: 2500 });
+  addRun(sheet, containmentList, layers.containment, 'basket', routePoints(DATA_Y, [2400, DATA_RISER_X, 24500, 33600]), 300, 100,
+    systems.data, 'Roof data basket — 300×100', 'data', { elevation: 2600, subType: 'wire-mesh' });
+  addRun(sheet, containmentList, layers.containment, 'conduit', routePoints(FIRE_Y, [2400, 11000, LIFE_SAFETY_RISER_X, 33600]), 32, undefined,
+    systems.fireAlarm, 'Roof FP200 fire alarm conduit', 'fire-alarm', { elevation: 2400, material: 'lsoh' });
+  addRun(sheet, containmentList, layers.containment, 'conduit',
+    [{ x: 11000, y: FIRE_Y }, { x: 11000, y: 11200 }],
+    25, undefined, systems.fireAlarm, 'Roof fire alarm interface drop', 'fire-alarm', { elevation: 2400, material: 'lsoh' });
+  addRun(sheet, containmentList, layers.containment, 'conduit', routePoints(CONTROLS_Y, [2400, CONTROLS_RISER_X, 24500, 33600]), 32, undefined,
+    systems.bms, 'Roof BMS controls conduit', 'instrumentation', { elevation: 2350, material: 'lsoh' });
+  addRun(sheet, containmentList, layers.containment, 'conduit',
+    [{ x: CONTROLS_RISER_X, y: CONTROLS_Y }, { x: CONTROLS_RISER_X, y: 8900 }],
+    32, undefined, systems.bms, 'Roof BMS I/O drop', 'instrumentation', { elevation: 2350, material: 'lsoh' });
+};
+
+const buildCorporateFloor = (opts: CorporateFloorOpts): FloorBuildResult => {
+  const { floorId, level, systems, layers } = opts;
+  const meta = CORPORATE_LEVEL_META[level];
   const sheet: Sheet = {
     id: newId(),
-    name: isMezzanine ? 'Plant Building — Roof Deck' : 'Plant Building — Ground',
-    number: isMezzanine ? '202' : '201',
+    name: meta.sheetName,
+    number: meta.sheetNumber,
     kind: 'floor-plan',
-    width: 30000,
-    height: 18000,
+    width: BUILDING_WIDTH,
+    height: BUILDING_DEPTH,
     entities: {},
     entityOrder: [],
     background: '#0a0e14',
@@ -865,325 +840,54 @@ const buildPlantFloor = (opts: PlantFloorOpts): FloorBuildResult => {
     buildingId: opts.buildingId,
   };
 
-  const zones: Zone[] = [
-    {
-      id: newId(),
-      floorId,
-      name: isMezzanine ? 'Plant Deck' : 'Production Floor',
-      classification: isMezzanine ? 'mechanical' : 'plant-room',
-      ipRating: isMezzanine ? 'IP54' : 'IP44',
-      fireRating: 60,
-    },
-    {
-      id: newId(),
-      floorId,
-      name: isMezzanine ? 'Roof Riser' : 'MCC Room',
-      classification: 'electrical-riser',
-      ipRating: 'IP31',
-      fireRating: 90,
-    },
-  ];
-  const [zMain, zMcc] = zones;
+  const zones = level === 'R'
+    ? addRoofZones(sheet, layers, floorId)
+    : addOccupiedZones(sheet, layers, floorId, level);
 
-  // Rooms / footprints
-  addEntity(sheet, room(layers.room, { x: 4500, y: 0 }, { x: 30000, y: 18000 }, zMain.name,
-    isMezzanine ? 'mechanical' : 'plant-room', zMain.id, isMezzanine ? '#222a30' : '#2a2228'));
-  addEntity(sheet, room(layers.room, { x: 0, y: 0 }, { x: 4400, y: 18000 }, zMcc.name,
-    'electrical-riser', zMcc.id, '#3a2a1a'));
-
-  // External perimeter
-  addEntity(sheet, wallSegment(layers.wall, [
-    { x: 0, y: 0 },
-    { x: 30000, y: 0 },
-    { x: 30000, y: 18000 },
-    { x: 0, y: 18000 },
-    { x: 0, y: 0 },
-  ], 300, true));
-
-  // MCC partition wall with a doorway. The MCC / electrical-riser room is
-  // a 90-min fire compartment, so its boundary wall is rated.
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 4400, y: 0 }, { x: 4400, y: 7000 }], 200, false, 90));
-  addEntity(sheet, wallSegment(layers.wall, [{ x: 4400, y: 8000 }, { x: 4400, y: 18000 }], 200, false, 90));
+  addCorporateEnvelope(sheet, layers, meta, level === 'R');
+  if (level !== 'R') {
+    addCorporateCoreWalls(sheet, layers, meta);
+    addWorkplacePlanningWalls(sheet, layers, meta, level);
+  } else {
+    addRectWalls(sheet, layers.wall, { minX: 14000, minY: 7600, maxX: 21500, maxY: 13600 }, 250, {
+      height: 3000,
+      fireRating: 120,
+      construction: 'concrete',
+    });
+  }
 
   const equipmentList: EquipmentEntity[] = [];
   const containmentList: ContainmentEntity[] = [];
+  const labelPrefix = level === 'G' ? 'Ground' : level === 'R' ? 'Roof' : `Level ${level}`;
 
-  if (!isMezzanine) {
-    // Plant ground DB
-    const db = equipment(
-      layers.panel,
-      'DB-PL-G',
-      'Plant Ground DB — 250 A',
-      'distribution-board',
-      { x: 600, y: 9000 },
-      { w: 1000, h: 350 },
-      systems.powerDistribution,
-      { current: 250, voltage: 400, ip: 'IP54' },
-    );
-    addEntity(sheet, db);
-    equipmentList.push(db);
-
-    // AHU and pump
-    const ahu = equipment(
-      layers.panel,
-      'AHU-01',
-      'Air-handling unit — 38 A',
-      'air-handling-unit',
-      { x: 8000, y: 8500 },
-      { w: 3000, h: 2000 },
-      systems.powerDistribution,
-      { current: 38, voltage: 400, ip: 'IP54' },
-    );
-    addEntity(sheet, ahu);
-    equipmentList.push(ahu);
-
-    const pump = equipment(
-      layers.panel,
-      'P-01',
-      'Booster pump — 14 A',
-      'pump',
-      { x: 18000, y: 13500 },
-      { w: 1500, h: 1500 },
-      systems.powerDistribution,
-      { current: 14, voltage: 400, ip: 'IP55' },
-    );
-    addEntity(sheet, pump);
-    equipmentList.push(pump);
-
-    const cabPlant = equipment(
-      layers.panel,
-      'CAB-PL-G',
-      'Plant comms cabinet (12U)',
-      'cabinet',
-      { x: 600, y: 6500 },
-      { w: 800, h: 800 },
-      systems.data,
-      { ip: 'IP54' },
-    );
-    addEntity(sheet, cabPlant);
-    equipmentList.push(cabPlant);
-
-    // FA loop 2 endpoint — first detector in the production hall, placed
-    // close to the FA conduit so the router has a real terminator.
-    const fa2 = equipment(
-      layers.panel,
-      'FA-LOOP-2',
-      'Fire alarm loop 2 first detector (Plant)',
-      'other',
-      { x: 14500, y: 8650 },
-      { w: 200, h: 200 },
-      systems.fireAlarm,
-      { ip: 'IP54' },
-    );
-    addEntity(sheet, fa2);
-    equipmentList.push(fa2);
+  if (level !== 'R') {
+    addCommonServiceSpines(sheet, containmentList, layers, systems, labelPrefix, level);
+    addOccupiedEquipmentAndBranches(sheet, equipmentList, containmentList, layers, systems, level);
   } else {
-    const dbDeck = equipment(
-      layers.panel,
-      'DB-PL-D',
-      'Plant Deck DB — 125 A',
-      'distribution-board',
-      { x: 600, y: 9000 },
-      { w: 1000, h: 350 },
-      systems.powerDistribution,
-      { current: 125, voltage: 400, ip: 'IP55' },
-    );
-    addEntity(sheet, dbDeck);
-    equipmentList.push(dbDeck);
+    addRoofEquipmentAndContainment(sheet, equipmentList, containmentList, layers, systems);
   }
 
-  // Branch x-coordinates — must match polyline vertices on the spine.
-  const ahuX = 9500;
-  const pumpX = 18750;
-  const plantLadderY = 9000;
-  const plantPowerBranchY = 7200;
-  const plantDataBasketY = 11200;
-  const plantHighLevelElevation = isMezzanine ? 2400 : 5300;
-  const atPlantHighLevel = (entity: ContainmentEntity): ContainmentEntity => ({
-    ...entity,
-    elevation: plantHighLevelElevation,
-  });
+  addEntity(sheet, text(layers.annotation, { x: 800, y: BUILDING_DEPTH - 700 }, meta.title, 220));
+  addEntity(sheet, text(layers.annotation, { x: 800, y: BUILDING_DEPTH - 1100 },
+    'Power · Lighting · Structured data · Fire alarm · Security · BMS · Emergency lighting',
+    100));
 
-  // Containment — heavy ladder on long wall plus a basket spur. The
-  // ladder polyline has explicit vertices at every drop so the graph
-  // creates shared nodes connecting branches.
-  const ladderPoints: Vec2[] = !isMezzanine
-    ? [
-        { x: 4500, y: plantLadderY },
-        { x: ahuX, y: plantLadderY },
-        { x: pumpX, y: plantLadderY },
-        { x: 27000, y: plantLadderY },
-      ]
-    : [{ x: 4500, y: plantLadderY }, { x: 27000, y: plantLadderY }];
-  const ladder = atPlantHighLevel(containment(
-    layers.containment,
-    'ladder',
-    ladderPoints,
-    600,
-    100,
-    systems.powerDistribution,
-    'Plant ladder — 600 mm',
-    'power',
-  ));
-  addEntity(sheet, ladder);
-  containmentList.push(ladder);
-
-  const basket = atPlantHighLevel(containment(
-    layers.containment,
-    'basket',
-    [{ x: 4500, y: plantDataBasketY }, { x: 27000, y: plantDataBasketY }],
-    300,
-    100,
-    systems.data,
-    'Data basket — 300 mm',
-    'data',
-  ));
-  addEntity(sheet, basket);
-  containmentList.push(basket);
-
-  const conduit = containment(
-    layers.containment,
-    'conduit',
-    [{ x: 4500, y: 8800 }, { x: 27000, y: 8800 }],
-    32,
-    undefined,
-    systems.fireAlarm,
-    'FP200 plant fire alarm',
-    'fire-alarm',
-  );
-  addEntity(sheet, conduit);
-  containmentList.push(conduit);
-
-  if (!isMezzanine) {
-    // Plant power trunking — straight and parallel to the ladder, with a
-    // clear horizontal lane between the two containments.
-    const mccFeeder = atPlantHighLevel(containment(
-      layers.containment,
-      'trunking',
-      [
-        { x: 4500, y: plantPowerBranchY },
-        { x: ahuX, y: plantPowerBranchY },
-        { x: pumpX, y: plantPowerBranchY },
-        { x: 27000, y: plantPowerBranchY },
-      ],
-      200,
-      150,
-      systems.powerDistribution,
-      'MCC-room sub-main feeder',
-      'power',
-    ));
-    addEntity(sheet, mccFeeder);
-    containmentList.push(mccFeeder);
-
-    const dbBranch = atPlantHighLevel(containment(
-      layers.containment,
-      'trunking',
-      [
-        { x: 4500, y: plantPowerBranchY },
-        { x: 1100, y: plantPowerBranchY },
-        { x: 1100, y: 9175 },
-      ],
-      200,
-      150,
-      systems.powerDistribution,
-      'DB-PL-G power trunking branch',
-      'power',
-    ));
-    addEntity(sheet, dbBranch);
-    containmentList.push(dbBranch);
-
-    // Data branch into the MCC room reaching CAB-PL-G
-    const cabBranch = atPlantHighLevel(containment(
-      layers.containment,
-      'basket',
-      [
-        { x: 4500, y: plantDataBasketY },
-        { x: 1000, y: plantDataBasketY },
-        { x: 1000, y: 6900 },
-      ],
-      200,
-      100,
-      systems.data,
-      'Branch to CAB-PL-G',
-      'data',
-    ));
-    addEntity(sheet, cabBranch);
-    containmentList.push(cabBranch);
-
-    // AHU drop — short conduit from ladder to AHU-01 connection (~y=9500)
-    const ahuBranch = containment(
-      layers.containment,
-      'conduit',
-      [{ x: ahuX, y: plantLadderY }, { x: ahuX, y: 9500 }],
-      40,
-      undefined,
-      systems.powerDistribution,
-      'Branch to AHU-01',
-      'power',
-    );
-    addEntity(sheet, ahuBranch);
-    containmentList.push(ahuBranch);
-
-    // Pump P-01 branch — runs from ladder to pump (~y=14250)
-    const pumpBranch = containment(
-      layers.containment,
-      'conduit',
-      [{ x: pumpX, y: plantLadderY }, { x: pumpX, y: 14250 }],
-      40,
-      undefined,
-      systems.powerDistribution,
-      'Branch to P-01',
-      'power',
-    );
-    addEntity(sheet, pumpBranch);
-    containmentList.push(pumpBranch);
-  } else {
-    // Plant deck DB sub-main — short branch from ladder up to DB-PL-D
-    const dbDeckBranch = atPlantHighLevel(containment(
-      layers.containment,
-      'trunking',
-      [
-        { x: 4500, y: plantPowerBranchY },
-        { x: ahuX, y: plantPowerBranchY },
-        { x: pumpX, y: plantPowerBranchY },
-        { x: 27000, y: plantPowerBranchY },
-      ],
-      150,
-      150,
-      systems.powerDistribution,
-      'Branch to DB-PL-D',
-      'power',
-    ));
-    addEntity(sheet, dbDeckBranch);
-    containmentList.push(dbDeckBranch);
-  }
-
-  // Title block
-  addEntity(sheet, text(layers.annotation, { x: 600, y: 17500 },
-    isMezzanine ? 'PLANT BUILDING — ROOF DECK PLAN' : 'PLANT BUILDING — GROUND FLOOR PLAN', 220));
-  addEntity(sheet, text(layers.annotation, { x: 600, y: 17200 },
-    'Production hall · Plant DB · Cable management · FA route', 100));
-
-  // Riser position — same north-west corner on both floors
-  return { sheet, zones, equipment: equipmentList, containment: containmentList,
-    riserPositions: [{ x: 1500, y: 7500 }] };
+  return { sheet, zones, equipment: equipmentList, containment: containmentList, risers: RISERS };
 };
 
 // ---------- Project assembly --------------------------------------------
 
 export const createWholeSiteSampleProject = (): Project => {
   const project = createEmptyProject();
-  project.name = 'Whole-Site Containment Demo';
-  project.description = 'Multi-floor commercial / light-industrial demo project — Acme Industrial Park';
-  project.client = 'Acme Industrial';
+  project.name = 'Corporate HQ Containment Model';
+  project.description = 'Implementation-grade multi-floor corporate office model with coordinated electrical containment, risers and roof plant.';
+  project.client = 'Apex Corporate Estates';
   project.engineer = 'OpenCAD Demo';
-  project.projectNumber = 'P-2024-001';
+  project.projectNumber = 'HQ-2026-001';
   project.originatorCode = 'OPC';
   project.standard = 'IEC';
   project.standardsProfile = DEFAULT_STANDARDS.BS7671;
 
-  // Re-use the existing layer palette. Index pins layer roles to match the
-  // order in `defaultLayers()` in store.ts.
   const layers: FloorLayers = {
     containment: project.layerOrder[6],
     wall: project.layerOrder[7],
@@ -1192,29 +896,22 @@ export const createWholeSiteSampleProject = (): Project => {
     annotation: project.layerOrder[4],
   };
 
-  // Drop the four default schematic sheets — the whole-site demo is plan
-  // driven, so its own sheets are added below.
   for (const sid of project.sheetOrder) delete project.sheets[sid];
   project.sheetOrder = [];
 
-  // ---------- Site / building / floor scaffold ----------
   const siteId = newId();
-  const officeBuildingId = newId();
-  const plantBuildingId = newId();
+  const buildingId = newId();
+  const floorIds = Object.fromEntries(
+    CORPORATE_LEVEL_ORDER.map((level) => [level, newId()]),
+  ) as Record<CorporateLevel, string>;
 
-  const officeGroundId = newId();
-  const officeLevel1Id = newId();
-  const plantGroundId = newId();
-  const plantDeckId = newId();
-
-  // ---------- Systems (cut-across logical groupings) ----------
   const systemPower: ElectricalSystem = {
     id: newId(),
     name: 'Power Distribution',
     kind: 'power-distribution',
     color: SYSTEM_COLORS.powerDistribution,
     band: 'II',
-    description: 'LV mains, sub-mains and final circuits',
+    description: 'LV mains, sub-mains, busbar riser and final circuits',
   };
   const systemLight: ElectricalSystem = {
     id: newId(),
@@ -1238,7 +935,7 @@ export const createWholeSiteSampleProject = (): Project => {
     kind: 'data',
     color: SYSTEM_COLORS.data,
     band: 'I',
-    description: 'Structured cabling — fibre + Cat 6A',
+    description: 'Structured cabling — fibre backbone and Cat 6A',
   };
   const systemEM: ElectricalSystem = {
     id: newId(),
@@ -1246,7 +943,23 @@ export const createWholeSiteSampleProject = (): Project => {
     kind: 'emergency-lighting',
     color: SYSTEM_COLORS.emergencyLighting,
     band: 'II',
-    description: 'Self-contained emergency luminaires + maintained circuits',
+    description: 'Self-contained emergency luminaires and maintained circuits',
+  };
+  const systemSecurity: ElectricalSystem = {
+    id: newId(),
+    name: 'Security',
+    kind: 'security',
+    color: SYSTEM_COLORS.security,
+    band: 'I',
+    description: 'Access control, CCTV and security head-end cabling',
+  };
+  const systemBms: ElectricalSystem = {
+    id: newId(),
+    name: 'BMS Controls',
+    kind: 'bms',
+    color: SYSTEM_COLORS.bms,
+    band: 'I',
+    description: 'BMS field bus, I/O and plant control cabling',
   };
 
   const systemMap = {
@@ -1255,6 +968,8 @@ export const createWholeSiteSampleProject = (): Project => {
     fireAlarm: systemFA.id,
     data: systemData.id,
     emergencyLighting: systemEM.id,
+    security: systemSecurity.id,
+    bms: systemBms.id,
   };
 
   const systems: Record<SystemId, ElectricalSystem> = {
@@ -1263,61 +978,45 @@ export const createWholeSiteSampleProject = (): Project => {
     [systemFA.id]: systemFA,
     [systemData.id]: systemData,
     [systemEM.id]: systemEM,
+    [systemSecurity.id]: systemSecurity,
+    [systemBms.id]: systemBms,
   };
 
-  // ---------- Build per-floor sheets ----------
-  const officeG = buildOfficeFloor({
-    floorId: officeGroundId,
-    buildingId: officeBuildingId,
-    level: 'G',
-    systems: systemMap,
-    layers,
-  });
-  const officeL1 = buildOfficeFloor({
-    floorId: officeLevel1Id,
-    buildingId: officeBuildingId,
-    level: '1',
-    systems: systemMap,
-    layers,
-  });
-  const plantG = buildPlantFloor({
-    floorId: plantGroundId,
-    buildingId: plantBuildingId,
-    isMezzanine: false,
-    systems: systemMap,
-    layers,
-  });
-  const plantD = buildPlantFloor({
-    floorId: plantDeckId,
-    buildingId: plantBuildingId,
-    isMezzanine: true,
-    systems: systemMap,
-    layers,
-  });
+  const floorBuildByLevel = {} as Record<CorporateLevel, FloorBuildResult>;
+  for (const level of CORPORATE_LEVEL_ORDER) {
+    floorBuildByLevel[level] = buildCorporateFloor({
+      floorId: floorIds[level],
+      buildingId,
+      level,
+      systems: systemMap,
+      layers,
+    });
+  }
+  const floorBuilds = CORPORATE_LEVEL_ORDER.map((level) => floorBuildByLevel[level]);
 
-  // Register sheets
-  for (const r of [officeG, officeL1, plantG, plantD]) {
-    project.sheets[r.sheet.id] = r.sheet;
-    project.sheetOrder.push(r.sheet.id);
+  for (const floorBuild of floorBuilds) {
+    project.sheets[floorBuild.sheet.id] = floorBuild.sheet;
+    project.sheetOrder.push(floorBuild.sheet.id);
   }
 
-  // Populate per-sheet title block metadata so the title block renders out
-  // of the box. Each floor plan gets a unique sequence number under the
-  // project / originator code, scoped by level so future drawings on the
-  // same floor pick up sequential numbers.
   const today = Date.now();
-  type FloorMetaPlan = {
+  const metaPlan: Record<string, {
     floorId: string;
     levelCode: string;
     seq: number;
     titleSuffix: string;
-  };
-  const metaPlan: Record<string, FloorMetaPlan> = {
-    [officeG.sheet.id]: { floorId: officeGroundId, levelCode: '00', seq: 1, titleSuffix: 'Ground Floor Plan' },
-    [officeL1.sheet.id]: { floorId: officeLevel1Id, levelCode: '01', seq: 2, titleSuffix: 'Level 1 Floor Plan' },
-    [plantG.sheet.id]: { floorId: plantGroundId, levelCode: '00', seq: 3, titleSuffix: 'Plant Ground Plan' },
-    [plantD.sheet.id]: { floorId: plantDeckId, levelCode: '01', seq: 4, titleSuffix: 'Plant Deck Plan' },
-  };
+  }> = {};
+  CORPORATE_LEVEL_ORDER.forEach((level, index) => {
+    const build = floorBuildByLevel[level];
+    const meta = CORPORATE_LEVEL_META[level];
+    metaPlan[build.sheet.id] = {
+      floorId: floorIds[level],
+      levelCode: meta.levelCode,
+      seq: index + 1,
+      titleSuffix: meta.titleSuffix,
+    };
+  });
+
   for (const sid of Object.keys(metaPlan)) {
     const sheet = project.sheets[sid];
     if (!sheet) continue;
@@ -1336,16 +1035,14 @@ export const createWholeSiteSampleProject = (): Project => {
       paperSize: 'A1',
       status: 'S0',
       currentRevision: 'P01',
-      revisions: [
-        {
-          id: `rev-${sid}-1`,
-          code: 'P01',
-          status: 'S0',
-          date: today,
-          description: 'Initial issue',
-          author: project.engineer ?? 'OpenCAD Demo',
-        },
-      ],
+      revisions: [{
+        id: `rev-${sid}-1`,
+        code: 'P01',
+        status: 'S0',
+        date: today,
+        description: 'Initial issue',
+        author: project.engineer ?? 'OpenCAD Demo',
+      }],
       drawnBy: project.engineer ?? 'OpenCAD Demo',
       drawnDate: today,
       designer: project.engineer ?? 'OpenCAD Demo',
@@ -1362,179 +1059,106 @@ export const createWholeSiteSampleProject = (): Project => {
     sheet.meta = meta;
   }
 
-  // ---------- Risers spanning floors ----------
-  const officeRiser = riser(
-    layers.containment,
-    officeG.riserPositions[0],
-    officeGroundId,
-    officeLevel1Id,
-    systemPower.id,
-    'Office vertical riser',
-  );
-  addEntity(project.sheets[officeG.sheet.id], officeRiser);
-  // Mirror riser marker on the upper floor for clarity
-  const officeRiserL1 = riser(
-    layers.containment,
-    officeL1.riserPositions[0],
-    officeGroundId,
-    officeLevel1Id,
-    systemPower.id,
-    'Office vertical riser',
-  );
-  addEntity(project.sheets[officeL1.sheet.id], officeRiserL1);
+  const powerRiserBySheetId: Record<string, RiserEntity> = {};
+  const addServiceRiserPair = (
+    fromLevel: CorporateLevel,
+    toLevel: CorporateLevel,
+    position: Vec2,
+    systemId: SystemId,
+    label: string,
+    containmentType: ContainmentType,
+    size: { width: number; height: number },
+  ): void => {
+    const fromBuild = floorBuildByLevel[fromLevel];
+    const toBuild = floorBuildByLevel[toLevel];
+    const lower = riser(layers.containment, position, floorIds[fromLevel], floorIds[toLevel], systemId, label, containmentType, size);
+    const upper = riser(layers.containment, position, floorIds[fromLevel], floorIds[toLevel], systemId, label, containmentType, size);
+    addEntity(project.sheets[fromBuild.sheet.id], lower);
+    addEntity(project.sheets[toBuild.sheet.id], upper);
+    if (label.includes('Power')) {
+      powerRiserBySheetId[fromBuild.sheet.id] ??= lower;
+      powerRiserBySheetId[toBuild.sheet.id] ??= upper;
+    }
+  };
 
-  const plantRiser = riser(
-    layers.containment,
-    plantG.riserPositions[0],
-    plantGroundId,
-    plantDeckId,
-    systemPower.id,
-    'Plant vertical riser',
-  );
-  addEntity(project.sheets[plantG.sheet.id], plantRiser);
-  const plantRiserDeck = riser(
-    layers.containment,
-    plantD.riserPositions[0],
-    plantGroundId,
-    plantDeckId,
-    systemPower.id,
-    'Plant vertical riser',
-  );
-  addEntity(project.sheets[plantD.sheet.id], plantRiserDeck);
+  for (let i = 0; i < CORPORATE_LEVEL_ORDER.length - 1; i++) {
+    const fromLevel = CORPORATE_LEVEL_ORDER[i];
+    const toLevel = CORPORATE_LEVEL_ORDER[i + 1];
+    addServiceRiserPair(fromLevel, toLevel, RISERS.power, systemPower.id, 'Power busbar vertical riser', 'busbar', { width: 700, height: 220 });
+    addServiceRiserPair(fromLevel, toLevel, RISERS.data, systemData.id, 'Structured data vertical riser', 'basket', { width: 450, height: 180 });
+    addServiceRiserPair(fromLevel, toLevel, RISERS.lifeSafety, systemFA.id, 'Life-safety vertical riser', 'conduit', { width: 220, height: 220 });
+    addServiceRiserPair(fromLevel, toLevel, RISERS.controls, systemBms.id, 'BMS controls vertical riser', 'conduit', { width: 180, height: 180 });
+  }
 
-  // ---------- Build hierarchy records ----------
   const allZones: Record<string, Zone> = {};
-  for (const z of [...officeG.zones, ...officeL1.zones, ...plantG.zones, ...plantD.zones]) {
+  for (const z of floorBuilds.flatMap((floorBuild) => floorBuild.zones)) {
     allZones[z.id] = z;
   }
 
-  const floors: Record<string, Floor> = {
-    [officeGroundId]: {
-      id: officeGroundId,
-      buildingId: officeBuildingId,
-      name: 'Ground Floor',
-      level: 0,
-      ffl: 0,
-      floorHeight: 3000,
-      slabThickness: 250,
-      ceilingVoid: 600,
-      raisedFloor: 150,
-      zoneOrder: officeG.zones.map((z) => z.id),
-      sheetIds: [officeG.sheet.id],
-    },
-    [officeLevel1Id]: {
-      id: officeLevel1Id,
-      buildingId: officeBuildingId,
-      name: 'Level 1',
-      level: 1,
-      ffl: 3000,
-      floorHeight: 3000,
-      slabThickness: 250,
-      ceilingVoid: 600,
-      raisedFloor: 150,
-      zoneOrder: officeL1.zones.map((z) => z.id),
-      sheetIds: [officeL1.sheet.id],
-    },
-    [plantGroundId]: {
-      id: plantGroundId,
-      buildingId: plantBuildingId,
-      name: 'Ground (Plant Hall)',
-      level: 0,
-      ffl: -100,
-      floorHeight: 6000,
-      slabThickness: 300,
-      ceilingVoid: 1500,
-      zoneOrder: plantG.zones.map((z) => z.id),
-      sheetIds: [plantG.sheet.id],
-    },
-    [plantDeckId]: {
-      id: plantDeckId,
-      buildingId: plantBuildingId,
-      name: 'Roof Deck',
-      level: 1,
-      ffl: 6300,
-      floorHeight: 3000,
-      slabThickness: 200,
-      ceilingVoid: 0,
-      zoneOrder: plantD.zones.map((z) => z.id),
-      sheetIds: [plantD.sheet.id],
-    },
-  };
+  const floors: Record<string, Floor> = {};
+  for (const level of CORPORATE_LEVEL_ORDER) {
+    const meta = CORPORATE_LEVEL_META[level];
+    const build = floorBuildByLevel[level];
+    floors[floorIds[level]] = {
+      id: floorIds[level],
+      buildingId,
+      name: meta.floorName,
+      level: meta.levelNumber,
+      ffl: meta.ffl,
+      floorHeight: meta.floorHeight,
+      slabThickness: meta.slabThickness,
+      ceilingVoid: meta.ceilingVoid,
+      raisedFloor: meta.raisedFloor,
+      zoneOrder: build.zones.map((z) => z.id),
+      sheetIds: [build.sheet.id],
+    };
+  }
 
   const buildings: Record<string, Building> = {
-    [officeBuildingId]: {
-      id: officeBuildingId,
+    [buildingId]: {
+      id: buildingId,
       siteId,
-      name: 'Main Office',
-      number: 'B-01',
-      use: 'Office / commercial',
-      height: 6500,
+      name: 'Apex Corporate Headquarters',
+      number: 'HQ-01',
+      use: 'Corporate office / commercial workplace',
+      height: 19500,
       gridOriginX: 0,
       gridOriginY: 0,
-      floorOrder: [officeGroundId, officeLevel1Id],
-    },
-    [plantBuildingId]: {
-      id: plantBuildingId,
-      siteId,
-      name: 'Plant Building',
-      number: 'B-02',
-      use: 'Light industrial / plant',
-      height: 9500,
-      gridOriginX: 30000,
-      gridOriginY: 0,
-      floorOrder: [plantGroundId, plantDeckId],
+      floorOrder: CORPORATE_LEVEL_ORDER.map((level) => floorIds[level]),
     },
   };
 
   const sites: Record<string, Site> = {
     [siteId]: {
       id: siteId,
-      name: 'Acme Industrial Park',
-      description: 'Two-building demonstration campus',
-      address: '1 Innovation Way, Demo Town',
+      name: 'Apex Corporate Campus',
+      description: 'Single-building corporate office with coordinated risers, workplace floors and roof plant',
+      address: '1 Innovation Way, London',
       supplyVoltage: 400,
       frequency: 50,
       earthingSystem: 'TN-S',
-      buildingOrder: [officeBuildingId, plantBuildingId],
+      buildingOrder: [buildingId],
     },
   };
 
-  // ---------- Cable schedule ----------
-  // Build a tag → entity-id map for from/to references
   const tagMap: Record<string, string> = {};
-  const allEquipment: EquipmentEntity[] = [
-    ...officeG.equipment,
-    ...officeL1.equipment,
-    ...plantG.equipment,
-    ...plantD.equipment,
-  ];
+  const allEquipment = floorBuilds.flatMap((floorBuild) => floorBuild.equipment);
   for (const eq of allEquipment) tagMap[eq.tag] = eq.id;
+  const cableSchedule = createSampleCableSchedule({ byTag: tagMap, systems: systemMap });
 
-  const cableSchedule = createSampleCableSchedule({
-    byTag: tagMap,
-    systems: systemMap,
-  });
-
-  // ---------- Penetration seals (manually authored examples) ----------
   const seals: Record<string, PenetrationSeal> = {};
   const sealRows: Array<{
     ref: string;
     rating: PenetrationSeal['requiredRating'];
     type: PenetrationSeal['sealType'];
   }> = [
-    { ref: 'FS-001', rating: 90, type: 'batt' },
-    { ref: 'FS-002', rating: 60, type: 'collar' },
+    { ref: 'FS-001', rating: 120, type: 'batt' },
+    { ref: 'FS-002', rating: 120, type: 'collar' },
     { ref: 'FS-003', rating: 90, type: 'composite' },
-    { ref: 'FS-004', rating: 60, type: 'pillow' },
+    { ref: 'FS-004', rating: 90, type: 'pillow' },
+    { ref: 'FS-005', rating: 60, type: 'mortar' },
   ];
-  // Use the first containment from each floor as a stand-in penetration
-  // entity. Boundary entity refs the exterior plant wall.
-  const sealCandidates = [
-    officeG.containment[0],
-    officeL1.containment[0],
-    plantG.containment[0],
-    plantD.containment[0],
-  ];
+  const sealCandidates = floorBuilds.map((floorBuild) => floorBuild.containment[0]).filter(Boolean);
   for (let i = 0; i < sealRows.length; i++) {
     const r = sealRows[i];
     const target = sealCandidates[i];
@@ -1549,157 +1173,37 @@ export const createWholeSiteSampleProject = (): Project => {
       requiredRating: r.rating,
       sealType: r.type,
       achievedRating: r.rating,
-      openingWidth: 200,
-      openingHeight: 100,
+      openingWidth: 260,
+      openingHeight: 160,
       status: i === 0 ? 'inspected' : i === 1 ? 'designed' : 'flagged',
-      notes: 'Seal at fire compartment boundary — inspect and certify before closing.',
+      notes: 'Seal at service riser or fire compartment boundary — inspect and certify before closing.',
     };
   }
-
-  // Stitch the seals onto the project up-front so the auto-detection step
-  // below can pick a unique reference (FS-005 onwards) for any newly
-  // detected penetrations without colliding with the manual entries.
   project.penetrationSeals = seals;
 
-  // ---------- Auto-place fittings, supports, penetrations ----------
-  // Iterate every containment on every sheet and run the three auto-feature
-  // generators. Their output is added to the same sheet, and any newly
-  // detected penetration seals merge into the project-wide seal map.
-  const floorBuilds = [officeG, officeL1, plantG, plantD] as const;
-  for (const fb of floorBuilds) {
-    const sheet = project.sheets[fb.sheet.id];
+  for (const floorBuild of floorBuilds) {
+    const sheet = project.sheets[floorBuild.sheet.id];
     if (!sheet) continue;
-    // Snapshot the containment IDs first — auto-features mutate the sheet
-    // entity list and we don't want to iterate over fittings/supports we
-    // just placed.
-    const containmentIds = fb.containment.map((c) => c.id);
+    const containmentIds = floorBuild.containment.map((c) => c.id);
     for (const cid of containmentIds) {
-      const fittings = autoPlaceFittingsForContainment(project, fb.sheet.id, cid);
+      const fittings = autoPlaceFittingsForContainment(project, floorBuild.sheet.id, cid);
       for (const f of fittings) addEntity(sheet, f as FittingEntity);
 
-      const supports = autoPlaceSupportsForContainment(project, fb.sheet.id, cid);
+      const supports = autoPlaceSupportsForContainment(project, floorBuild.sheet.id, cid);
       for (const s of supports) addEntity(sheet, s as SupportEntity);
 
-      const detected = autoDetectPenetrationsForContainment(project, fb.sheet.id, cid);
+      const detected = autoDetectPenetrationsForContainment(project, floorBuild.sheet.id, cid);
       for (const p of detected.penetrations) addEntity(sheet, p as PenetrationEntity);
       for (const sealId of Object.keys(detected.seals)) {
         seals[sealId] = detected.seals[sealId];
       }
-      // Update project so the next call's nextSealReference picks unique refs.
       project.penetrationSeals = seals;
     }
   }
 
-  // ---------- Inter-building services ----------
-  // The campus is two separate buildings. Model the physical connection as
-  // underground ducts from the Office corridor containment to Plant west-wall
-  // entry sleeves, then short Plant-side duct entries into the internal ladder,
-  // basket and FA routes.
-  const undergroundDuct = (
-    label: string,
-    points: Vec2[],
-    systemId: SystemId,
-    cableCategory: ContainmentEntity['cableCategory'],
-    width = 180,
-  ): ContainmentEntity => ({
-    ...containment(layers.containment, 'duct', points, width, 100, systemId, label, cableCategory),
-    subType: 'underground-duct',
-    elevation: 80,
-    material: 'grp',
-    loadClass: 'D',
-  });
-
-  const officeGroundSheet = project.sheets[officeG.sheet.id];
-  const plantGroundSheet = project.sheets[plantG.sheet.id];
-  if (officeGroundSheet && plantGroundSheet) {
-    const siteLvDuct = undergroundDuct(
-      'Site LV duct bank — Office to Plant',
-      [
-        { x: 22800, y: 8400 },
-        { x: 24000, y: 8400 },
-        { x: 30000, y: 7200 },
-      ],
-      systemPower.id,
-      'power',
-      300,
-    );
-    const plantLvEntry = undergroundDuct(
-      'Plant LV duct entry sleeve',
-      [
-        { x: 0, y: 7200 },
-        { x: 400, y: 7200 },
-        { x: 4200, y: 7200 },
-        { x: 4500, y: 7200 },
-      ],
-      systemPower.id,
-      'power',
-      300,
-    );
-    const siteDataDuct = undergroundDuct(
-      'Site data duct bank — Office to Plant',
-      [
-        { x: 22800, y: 8150 },
-        { x: 24000, y: 8150 },
-        { x: 30000, y: 9300 },
-      ],
-      systemData.id,
-      'data',
-      220,
-    );
-    const plantDataEntry = undergroundDuct(
-      'Plant data duct entry sleeve',
-      [
-        { x: 0, y: 9300 },
-        { x: 400, y: 11350 },
-        { x: 4200, y: 11350 },
-        { x: 4500, y: 11200 },
-      ],
-      systemData.id,
-      'data',
-      220,
-    );
-    const siteFaDuct = undergroundDuct(
-      'Site fire alarm duct — Office to Plant',
-      [
-        { x: 23400, y: 7950 },
-        { x: 24000, y: 7950 },
-        { x: 30000, y: 8800 },
-      ],
-      systemFA.id,
-      'fire-alarm',
-      120,
-    );
-    const plantFaEntry = undergroundDuct(
-      'Plant fire alarm duct entry sleeve',
-      [
-        { x: 0, y: 8800 },
-        { x: 400, y: 8500 },
-        { x: 4200, y: 8500 },
-        { x: 4500, y: 8800 },
-      ],
-      systemFA.id,
-      'fire-alarm',
-      120,
-    );
-
-    for (const duct of [siteLvDuct, siteDataDuct, siteFaDuct]) {
-      addEntity(officeGroundSheet, duct);
-      officeG.containment.push(duct);
-    }
-    for (const duct of [plantLvEntry, plantDataEntry, plantFaEntry]) {
-      addEntity(plantGroundSheet, duct);
-      plantG.containment.push(duct);
-    }
-  }
-
-  // ---------- Auto-route every cable through the containment graph ----------
-  // Aggregate every containment in the project (across floors) in site
-  // coordinates. Risers are deliberately excluded because they're modelled as
-  // point markers, not polylines, so the 2D router can't traverse them.
   const allContainments: ContainmentEntity[] = [];
   const equipmentCenterById = new Map<string, Vec2>();
   const equipmentCenterByTag = new Map<string, Vec2>();
-  const equipmentBuildingByTag = new Map<string, string | undefined>();
   const sheetOrigin = (sheet: Sheet): Vec2 => {
     const building = sheet.buildingId ? buildings[sheet.buildingId] : undefined;
     return {
@@ -1707,6 +1211,7 @@ export const createWholeSiteSampleProject = (): Project => {
       y: building?.gridOriginY ?? 0,
     };
   };
+
   for (const sid of project.sheetOrder) {
     const sheet = project.sheets[sid];
     if (!sheet) continue;
@@ -1728,7 +1233,6 @@ export const createWholeSiteSampleProject = (): Project => {
         };
         equipmentCenterById.set(eq.id, center);
         equipmentCenterByTag.set(eq.tag, center);
-        equipmentBuildingByTag.set(eq.tag, sheet.buildingId);
       }
     }
   }
@@ -1745,23 +1249,16 @@ export const createWholeSiteSampleProject = (): Project => {
       equipmentCenterByTag.get(cable.to);
     if (!fromPos || !toPos) {
       cable.route = [];
-      cable.notes =
-        'Manual routing required — endpoints not modelled as equipment';
+      cable.notes = 'Manual routing required — endpoints not modelled as equipment';
       continue;
     }
-    const fromBuilding = equipmentBuildingByTag.get(cable.from);
-    const toBuilding = equipmentBuildingByTag.get(cable.to);
-    const crossesBuilding = !!(fromBuilding && toBuilding && fromBuilding !== toBuilding);
 
     const result = routeCableThroughGraph(graph, fromPos, toPos, cable, allContainments, {
-      snapTolerance: 2000,
+      snapTolerance: 2200,
     });
     if (result.found && result.path.length > 0) {
       cable.route = result.path.map((c) => c.id);
-      // estimatedLength is in metres (1 dp). result.length is in mm.
       cable.estimatedLength = Math.round(result.length / 100) / 10;
-      // Tag affected containments with the cable id so the fill overlay
-      // and BOM can sum cables-per-containment.
       for (const c of result.path) {
         const sheetForC = (() => {
           for (const sid of project.sheetOrder) {
@@ -1781,24 +1278,13 @@ export const createWholeSiteSampleProject = (): Project => {
       }
     } else {
       cable.route = [];
-      cable.notes = crossesBuilding
-        ? 'Manual routing required — no modelled inter-building duct path'
-        : result.warnings[0]
-          ? `Manual routing required — ${result.warnings[0]}`
-          : 'Manual routing required — no compliant path through containment';
+      cable.notes = result.warnings[0]
+        ? `Manual routing required — ${result.warnings[0]}`
+        : 'Manual routing required — no compliant path through containment';
     }
   }
 
-  // ---------- Annotations: north arrows, scale bars, grid lines, leaders ----------
-  // Floor plans look richer with the standard sheet furniture. We add a
-  // north arrow + scale bar in the bottom-left of every plan, two grid
-  // lines per sheet, and a couple of leader callouts for the spine and
-  // the riser.
-  const arrow = (
-    layer: LayerId,
-    pos: Vec2,
-    size = 600,
-  ): NorthArrowEntity => ({
+  const arrow = (layer: LayerId, pos: Vec2, size = 600): NorthArrowEntity => ({
     id: newEntityId(),
     kind: 'north-arrow',
     layerId: layer,
@@ -1865,70 +1351,55 @@ export const createWholeSiteSampleProject = (): Project => {
     targetEntityId,
   });
 
-  const annotateOfficeSheet = (
+  const annotateCorporateSheet = (
     sheetRef: Sheet,
     spine: ContainmentEntity,
-    riserMarker: RiserEntity,
+    riserMarker: RiserEntity | undefined,
+    label: string,
   ): void => {
-    addEntity(sheetRef, arrow(layers.annotation, { x: 1200, y: 1200 }, 700));
-    addEntity(sheetRef, scaleBar(layers.annotation, { x: 2200, y: 1000 }, 50, 1000, 5));
-    // Office plans are 24m × 16m — gridlines at A/B and 1/2 frame the layout.
-    addEntity(sheetRef, gridLine(layers.annotation, 'vertical', 4000, 0, 16000, 'A'));
-    addEntity(sheetRef, gridLine(layers.annotation, 'vertical', 12000, 0, 16000, 'B'));
-    addEntity(sheetRef, gridLine(layers.annotation, 'vertical', 20000, 0, 16000, 'C'));
-    addEntity(sheetRef, gridLine(layers.annotation, 'horizontal', 4000, 0, 24000, '1'));
-    addEntity(sheetRef, gridLine(layers.annotation, 'horizontal', 12000, 0, 24000, '2'));
-    // Leader callouts pointing to the main spine and riser
+    addEntity(sheetRef, arrow(layers.annotation, { x: 1300, y: 1300 }, 800));
+    addEntity(sheetRef, scaleBar(layers.annotation, { x: 2600, y: 1100 }, 50, 1000, 5));
+    ['A', 'B', 'C', 'D', 'E', 'F'].forEach((grid, index) => {
+      addEntity(sheetRef, gridLine(layers.annotation, 'vertical', 6000 * (index + 1), 0, BUILDING_DEPTH, grid));
+    });
+    ['1', '2', '3'].forEach((grid, index) => {
+      addEntity(sheetRef, gridLine(layers.annotation, 'horizontal', 6000 * (index + 1), 0, BUILDING_WIDTH, grid));
+    });
     addEntity(sheetRef, leader(layers.annotation,
-      [{ x: 12000, y: 8400 }, { x: 13000, y: 11000 }, { x: 16000, y: 11000 }],
-      'Main power trunking — 100×100',
+      [{ x: POWER_RISER_X, y: POWER_Y }, { x: 12600, y: 15200 }, { x: 8500, y: 15200 }],
+      `${label} primary power route`,
       spine.id,
     ));
-    addEntity(sheetRef, leader(layers.annotation,
-      [{ x: riserMarker.position.x, y: riserMarker.position.y },
-       { x: 3500, y: 4500 }, { x: 5500, y: 4500 }],
-      'Vertical power riser',
-      riserMarker.id,
-    ));
+    if (riserMarker) {
+      addEntity(sheetRef, leader(layers.annotation,
+        [{ x: riserMarker.position.x, y: riserMarker.position.y },
+         { x: 12800, y: 8800 }, { x: 8500, y: 8800 }],
+        'Stacked power riser',
+        riserMarker.id,
+      ));
+    }
   };
 
-  const annotatePlantSheet = (
-    sheetRef: Sheet,
-    spine: ContainmentEntity,
-    riserMarker: RiserEntity,
-  ): void => {
-    addEntity(sheetRef, arrow(layers.annotation, { x: 1500, y: 1500 }, 800));
-    addEntity(sheetRef, scaleBar(layers.annotation, { x: 2700, y: 1300 }, 50, 1000, 5));
-    addEntity(sheetRef, gridLine(layers.annotation, 'vertical', 5000, 0, 18000, 'A'));
-    addEntity(sheetRef, gridLine(layers.annotation, 'vertical', 15000, 0, 18000, 'B'));
-    addEntity(sheetRef, gridLine(layers.annotation, 'vertical', 25000, 0, 18000, 'C'));
-    addEntity(sheetRef, gridLine(layers.annotation, 'horizontal', 5000, 0, 30000, '1'));
-    addEntity(sheetRef, gridLine(layers.annotation, 'horizontal', 12000, 0, 30000, '2'));
-    addEntity(sheetRef, leader(layers.annotation,
-      [{ x: 14000, y: 9000 }, { x: 15000, y: 5000 }, { x: 17500, y: 5000 }],
-      'Plant ladder — 600 mm cable run',
-      spine.id,
-    ));
-    addEntity(sheetRef, leader(layers.annotation,
-      [{ x: riserMarker.position.x, y: riserMarker.position.y },
-       { x: 3000, y: 5000 }, { x: 5500, y: 5000 }],
-      'Plant vertical riser',
-      riserMarker.id,
-    ));
-  };
+  for (const level of CORPORATE_LEVEL_ORDER) {
+    const build = floorBuildByLevel[level];
+    const sheet = project.sheets[build.sheet.id];
+    const primaryRoute = build.containment.find((c) => c.label?.includes('power') || c.label?.includes('Roof plant ladder'));
+    if (sheet && primaryRoute) {
+      annotateCorporateSheet(
+        sheet,
+        primaryRoute,
+        powerRiserBySheetId[sheet.id],
+        CORPORATE_LEVEL_META[level].floorName,
+      );
+    }
+  }
 
-  annotateOfficeSheet(project.sheets[officeG.sheet.id], officeG.containment[0], officeRiser);
-  annotateOfficeSheet(project.sheets[officeL1.sheet.id], officeL1.containment[0], officeRiserL1);
-  annotatePlantSheet(project.sheets[plantG.sheet.id], plantG.containment[0], plantRiser);
-  annotatePlantSheet(project.sheets[plantD.sheet.id], plantD.containment[0], plantRiserDeck);
-
-  // ---------- ITP items ----------
   const itp: Record<string, ITPItem> = {};
   const itpRows: Array<Omit<ITPItem, 'id'>> = [
     {
       reference: 'ITP-01',
-      activity: 'Containment installation — primary trunking',
-      acceptanceCriteria: 'Routes installed on agreed elevation; supports at <=1.2 m centres; clean cuts and capped ends.',
+      activity: 'Primary riser and corridor containment installation',
+      acceptanceCriteria: 'Routes installed to coordinated elevations; supports at scheduled centres; prefabricated riser penetrations sealed before ceiling close.',
       controlPoint: 'I',
       responsibility: 'Electrical Contractor',
       status: 'pending',
@@ -1944,7 +1415,7 @@ export const createWholeSiteSampleProject = (): Project => {
     {
       reference: 'ITP-03',
       activity: 'Fire-stopping inspection',
-      acceptanceCriteria: 'Penetration seals match approved system, no gaps, certified product reference recorded.',
+      acceptanceCriteria: 'Power, data, life-safety and controls riser penetrations match approved tested systems with certification recorded.',
       controlPoint: 'H',
       responsibility: 'Fire-stopping Specialist',
       status: 'in-progress',
@@ -1960,17 +1431,17 @@ export const createWholeSiteSampleProject = (): Project => {
     {
       reference: 'ITP-05',
       activity: 'Insulation resistance test',
-      acceptanceCriteria: '>= 1 MΩ at 500 V DC across each circuit; record on commissioning sheet.',
+      acceptanceCriteria: '>= 1 MOhm at 500 V DC across each circuit; record on commissioning sheet.',
       controlPoint: 'W',
       responsibility: 'Test Engineer',
       status: 'pending',
     },
     {
       reference: 'ITP-06',
-      activity: 'Fire alarm cause-and-effect verification',
-      acceptanceCriteria: 'Each detector and call-point tested; outputs match cause-and-effect matrix.',
+      activity: 'Life-safety and security integration test',
+      acceptanceCriteria: 'Fire alarm, access control, BMS shutdowns and emergency-lighting outputs match approved cause-and-effect matrix.',
       controlPoint: 'H',
-      responsibility: 'FA Commissioning Engineer',
+      responsibility: 'Systems Commissioning Engineer',
       status: 'pending',
     },
   ];
@@ -1979,16 +1450,15 @@ export const createWholeSiteSampleProject = (): Project => {
     itp[id] = { ...r, id };
   }
 
-  // ---------- Stitch onto the project ----------
   project.sites = sites;
   project.buildings = buildings;
   project.floors = floors;
   project.zones = allZones;
   project.systems = systems;
   project.activeSiteId = siteId;
-  project.activeBuildingId = officeBuildingId;
-  project.activeFloorId = officeGroundId;
-  project.activeSheetId = officeG.sheet.id;
+  project.activeBuildingId = buildingId;
+  project.activeFloorId = floorIds.G;
+  project.activeSheetId = floorBuildByLevel.G.sheet.id;
   project.cableSchedule = cableSchedule;
   project.penetrationSeals = seals;
   project.itpItems = itp;

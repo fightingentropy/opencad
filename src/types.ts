@@ -418,7 +418,7 @@ export interface FireBarrierEntity extends BaseEntity {
   boundaryKind: 'wall' | 'floor' | 'ceiling';
   // Reference to the wall entity if paired
   wallEntityId?: EntityId;
-  // Optional name e.g. "MCC Room compartment"
+  // Optional name e.g. "Electrical Riser compartment"
   label?: string;
 }
 

@@ -646,6 +646,41 @@ function wallOpeningsForSegment(
   return mergeWallOpenings(spans, wallLen, wallHeight);
 }
 
+function wallMaterialFor(wall: WallEntity): THREE.MeshStandardMaterial {
+  if (wall.construction === 'glazed') {
+    return new THREE.MeshStandardMaterial({
+      color: 0x9fc5d5,
+      metalness: 0.0,
+      roughness: 0.12,
+      transparent: true,
+      opacity: wall.external ? 0.46 : 0.58,
+      side: THREE.DoubleSide,
+    });
+  }
+
+  if (wall.fireRating && wall.fireRating >= 90) {
+    return new THREE.MeshStandardMaterial({
+      color: 0xd8d6d1,
+      metalness: 0.0,
+      roughness: 0.88,
+      side: THREE.DoubleSide,
+    });
+  }
+
+  const color = wall.external
+    ? 0xe4e7ea
+    : wall.construction === 'concrete' || wall.construction === 'masonry'
+      ? 0xd2d5d8
+      : 0xf0f1ef;
+
+  return new THREE.MeshStandardMaterial({
+    color,
+    metalness: 0.0,
+    roughness: 0.9,
+    side: THREE.DoubleSide,
+  });
+}
+
 function buildWallGroup(
   walls: WallEntity[],
   containmentRuns: WallOpeningRun[] = [],
@@ -653,16 +688,11 @@ function buildWallGroup(
 ): THREE.Group {
   const root = new THREE.Group();
   root.name = 'walls';
-  const mat = new THREE.MeshStandardMaterial({
-    color: 0xeceeef,
-    metalness: 0.0,
-    roughness: 0.92,
-    side: THREE.DoubleSide,
-  });
   for (const w of walls) {
     if (!w.points || w.points.length < 2) continue;
     const thickness = w.thickness ?? 200;
     const wallH = w.height ?? 3000;
+    const mat = wallMaterialFor(w);
     const grp = new THREE.Group();
     for (let i = 0; i < w.points.length - 1; i++) {
       const a = w.points[i];
