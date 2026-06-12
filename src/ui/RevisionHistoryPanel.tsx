@@ -1,13 +1,13 @@
 import React, { useMemo } from 'react';
 import { useStore } from '../state/store';
+import { useActiveSheet } from '../state/selectors';
 import { nanoid } from 'nanoid';
 import type { DrawingRevision, RevisionStatus, SheetMeta } from '../models/revision';
 import { REVISION_STATUSES } from '../models/revision';
 
 export function RevisionHistoryPanel() {
-  const project = useStore((s) => s.project);
   const setProject = useStore((s) => s.setProject);
-  const sheet = project.sheets[project.activeSheetId];
+  const sheet = useActiveSheet();
 
   if (!sheet) return null;
 
@@ -15,7 +15,10 @@ export function RevisionHistoryPanel() {
   const revisions = useMemo(() => meta.revisions ?? [], [meta.revisions]);
   const editable = !meta.status || REVISION_STATUSES[meta.status].editable;
 
+  // Spread the live project from getState() so the panel only subscribes to
+  // the active sheet it renders.
   const setMeta = (next: SheetMeta) => {
+    const project = useStore.getState().project;
     setProject({
       ...project,
       sheets: { ...project.sheets, [sheet.id]: { ...sheet, meta: next } },

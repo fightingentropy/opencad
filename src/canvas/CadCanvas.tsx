@@ -1,5 +1,13 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from '../state/store';
+import {
+  useActiveLayerId,
+  useActiveSheet,
+  useActiveSheetId,
+  useCableSchedule,
+  useLayers,
+  useStandardsProfile,
+} from '../state/selectors';
 import { render2d } from '../render/render2d';
 import { screenToWorld, zoomAtPoint } from '../lib/viewport';
 import { computeSnap } from '../lib/snap';
@@ -9,8 +17,8 @@ import { getSymbol } from '../symbols';
 import { fitViewportToSheet } from '../lib/fit';
 import { computeOrthogonalRoute } from '../lib/autoroute';
 import { newEntityId } from '../state/store';
-import type { Vec2, Entity, ToolId, PenetrationSeal } from '../types';
-import { exportSheetPDF } from '../io/pdf';
+import type { Vec2, Entity, PenetrationSeal } from '../types';
+import { dispatchShortcut } from '../lib/commands';
 import {
   autoPlaceFittingsForContainment,
   autoPlaceSupportsForContainment,
@@ -69,7 +77,15 @@ export function CadCanvas() {
     layerId: string;
   } | null>(null);
 
-  const project = useStore((s) => s.project);
+  // Narrow subscriptions: render2d reads the active sheet, the layer table,
+  // and (for the compliance overlay) the cable schedule + standards profile —
+  // edits to other sheets no longer trigger a redraw.
+  const sheet = useActiveSheet();
+  const layers = useLayers();
+  const activeSheetId = useActiveSheetId();
+  const activeLayerId = useActiveLayerId();
+  const cableSchedule = useCableSchedule();
+  const standardsProfile = useStandardsProfile();
   const editor = useStore((s) => s.editor);
   const setViewport = useStore((s) => s.setViewport);
   const setCursor = useStore((s) => s.setCursor);
@@ -83,8 +99,6 @@ export function CadCanvas() {
   const updateEntity = useStore((s) => s.updateEntity);
   const removeEntities = useStore((s) => s.removeEntities);
   const setStatus = useStore((s) => s.setStatus);
-  const setTool = useStore((s) => s.setTool);
-  const setOrtho = useStore((s) => s.setOrtho);
   const autoRoute = useStore((s) => s.autoRoute);
 
   // Transient ref: when true, the auto-route L-shape direction is flipped
@@ -95,8 +109,6 @@ export function CadCanvas() {
   // for remote peers without flooding awareness. ~30ms = 33Hz.
   const lastPresencePublishRef = useRef(0);
 
-  const sheet = project.sheets[project.activeSheetId];
-  const activeLayerId = project.activeLayerId;
   const lastFittedSheetIdRef = useRef<string | null>(null);
 
   // Resize observer
@@ -147,7 +159,10 @@ export function CadCanvas() {
       raf = null;
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-      render2d(ctx, project, editor, {
+      // render2d only reads the active sheet, layer table, cable schedule
+      // and standards profile — all deps of this effect, so the untracked
+      // handle is in sync.
+      render2d(ctx, useStore.getState().project, editor, {
         width: size.w,
         height: size.h,
         dpr,
@@ -181,7 +196,7 @@ export function CadCanvas() {
     return () => {
       if (raf !== null) cancelAnimationFrame(raf);
     };
-  }, [project, editor, size, dpr, marquee, autoRoute]);
+  }, [sheet, layers, cableSchedule, standardsProfile, editor, size, dpr, marquee, autoRoute]);
 
   const eventToWorld = (e: { clientX: number; clientY: number }): Vec2 => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -205,7 +220,7 @@ export function CadCanvas() {
       pixelsPerMm: editor.viewport.zoom,
       toleranceScreenPx: 12,
       symbolLookup: getSymbol,
-    }, (id) => project.layers[id]?.visible ?? true);
+    }, (id) => layers[id]?.visible ?? true);
     setCursor(world, snap.kind === 'none' ? null : snap.point, snap.kind);
 
     // Publish cursor to collaboration peers (no-op if collab inactive).
@@ -216,7 +231,7 @@ export function CadCanvas() {
     if (now - lastPresencePublishRef.current >= 30) {
       lastPresencePublishRef.current = now;
       publishCollabPresence({
-        sheetId: project.activeSheetId,
+        sheetId: activeSheetId,
         cursor: snap.kind === 'none' ? world : snap.point,
         selection: Array.from(editor.selection),
       });
@@ -256,7 +271,7 @@ export function CadCanvas() {
         tolerance: 8,
         pixelsPerMm: editor.viewport.zoom,
         symbolLookup: getSymbol,
-      }, (id) => project.layers[id]?.visible ?? true);
+      }, (id) => layers[id]?.visible ?? true);
       setHover(hit);
     } else {
       setHover(null);
@@ -350,7 +365,7 @@ export function CadCanvas() {
       pixelsPerMm: editor.viewport.zoom,
       toleranceScreenPx: 12,
       symbolLookup: getSymbol,
-    }, (id) => project.layers[id]?.visible ?? true);
+    }, (id) => layers[id]?.visible ?? true);
     const snapped = snap.kind === 'none' ? world : snap.point;
 
     if (editor.tool === 'select') {
@@ -358,9 +373,9 @@ export function CadCanvas() {
         tolerance: 8,
         pixelsPerMm: editor.viewport.zoom,
         symbolLookup: getSymbol,
-      }, (id) => project.layers[id]?.visible ?? true);
+      }, (id) => layers[id]?.visible ?? true);
       if (hit) {
-        const layer = project.layers[sheet.entities[hit].layerId];
+        const layer = layers[sheet.entities[hit].layerId];
         if (layer?.locked) return;
         if (e.shiftKey) {
           toggleInSelection(hit);
@@ -389,7 +404,7 @@ export function CadCanvas() {
         tolerance: 8,
         pixelsPerMm: editor.viewport.zoom,
         symbolLookup: getSymbol,
-      }, (id) => project.layers[id]?.visible ?? true);
+      }, (id) => layers[id]?.visible ?? true);
       if (hit) removeEntities([hit]);
       return;
     }
@@ -489,9 +504,14 @@ export function CadCanvas() {
           pixelsPerMm: editor.viewport.zoom,
           symbolLookup: getSymbol,
         },
-        (id) => project.layers[id]?.visible ?? true,
+        (id) => layers[id]?.visible ?? true,
         fullEnclosed
-      );
+      ).filter((id) => {
+        // Locked layers stay visible but never enter a marquee selection —
+        // same rule the click path applies above.
+        const ent = sheet.entities[id];
+        return ent ? !layers[ent.layerId]?.locked : false;
+      });
       if (e.shiftKey) addToSelection(ids);
       else setSelection(ids);
       setMarquee(null);
@@ -635,22 +655,11 @@ export function CadCanvas() {
 
   // Keyboard shortcuts. We register once with a stable handler that reads
   // the latest store state via useStore.getState() — the previous version
-  // captured stale closures and re-attached on every render.
+  // captured stale closures and re-attached on every render. Only keys tied
+  // to canvas-local state (space pan, drafting commits, the auto-route flip
+  // ref, …) are handled here; every global binding lives in the command
+  // registry so the shortcuts modal and the bindings cannot drift.
   useEffect(() => {
-    const TOOL_MAP: Record<string, ToolId> = {
-      's': 'select',
-      'l': 'line',
-      'w': 'wire',
-      'r': 'rectangle',
-      'c': 'circle',
-      'a': 'arc',
-      'p': 'polyline',
-      't': 'text',
-      'e': 'erase',
-      'm': 'measure',
-      'd': 'dimension',
-    };
-
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
@@ -667,27 +676,6 @@ export function CadCanvas() {
         return;
       }
 
-      // Alt + arrow = view-history navigation. Check before plain arrows.
-      if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-        e.preventDefault();
-        if (e.key === 'ArrowLeft') state.viewBack();
-        else state.viewForward();
-        return;
-      }
-
-      if (e.key.startsWith('Arrow')) {
-        e.preventDefault();
-        const v = ed.viewport;
-        const step = (e.shiftKey ? 80 : 30) / v.zoom;
-        const next = { ...v };
-        if (e.key === 'ArrowLeft') next.x -= step;
-        if (e.key === 'ArrowRight') next.x += step;
-        if (e.key === 'ArrowUp') next.y += step;
-        if (e.key === 'ArrowDown') next.y -= step;
-        state.setViewport(next);
-        return;
-      }
-
       // Tab: flip auto-route direction while drawing a wire
       if (e.key === 'Tab' && ed.tool === 'wire' && state.autoRoute && ed.drafting && ed.drafting.points.length > 0) {
         e.preventDefault();
@@ -699,14 +687,11 @@ export function CadCanvas() {
       }
 
       if (e.key === 'Escape') {
-        state.setDrafting(null);
-        state.clearSelection();
-        state.setTool('select');
-        state.setPendingSymbol(null);
-        state.setStatus('');
+        // Local cleanup only — the store-side cancel (clear draft, selection,
+        // tool, status) is the registry's `edit.cancel` command, dispatched
+        // below.
         autoRouteFlipRef.current = false;
         setTextInput(null);
-        return;
       }
 
       if (e.key === 'Enter') {
@@ -727,77 +712,8 @@ export function CadCanvas() {
         return;
       }
 
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (ed.selection.size > 0) state.removeEntities(Array.from(ed.selection));
-        return;
-      }
-
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        if (e.shiftKey) state.redo();
-        else state.undo();
-        return;
-      }
-
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'h') {
-        e.preventDefault();
-        state.flipEntities('horizontal');
-        return;
-      }
-
-      // Ctrl+Shift+V for flip vertical. Must check before Ctrl+V (paste).
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'v') {
-        e.preventDefault();
-        state.flipEntities('vertical');
-        return;
-      }
-
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') {
-        e.preventDefault();
-        state.setSelection(sh.entityOrder);
-        return;
-      }
-
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c') {
-        e.preventDefault();
-        state.copySelection();
-        return;
-      }
-
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') {
-        e.preventDefault();
-        const cursor = ed.cursorSnap ?? ed.cursor;
-        state.pasteFromClipboard(cursor);
-        return;
-      }
-
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
-        e.preventDefault();
-        state.duplicateSelection();
-        return;
-      }
-
-      // Ctrl/Cmd + Shift + P  →  Export PDF
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'p') {
-        e.preventDefault();
-        exportSheetPDF(proj);
-        return;
-      }
-
-      if (e.key === 'F3') {
-        e.preventDefault();
-        state.setSnap({ osnap: !ed.snap.osnap });
-        return;
-      }
-
-      if (e.key === 'F8') {
-        e.preventDefault();
-        state.setOrtho(!ed.ortho);
-        return;
-      }
-
       // R: rotate selected symbols/text 90° if anything's selected; otherwise
-      // fall through and let the tool-shortcut path bind R to Rectangle.
+      // fall through and let the registry bind R to the Rectangle tool.
       if ((e.key === 'r' || e.key === 'R') && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if (ed.selection.size > 0) {
           let rotated = false;
@@ -811,12 +727,26 @@ export function CadCanvas() {
           }
           if (rotated) return;
         }
-        // No rotatable selection — let the tool-map below switch tools.
+        // No rotatable selection — let the registry switch tools.
       }
 
-      const lower = e.key.toLowerCase();
-      if (!e.metaKey && !e.ctrlKey && !e.altKey && TOOL_MAP[lower]) {
-        state.setTool(TOOL_MAP[lower]);
+      // Everything global — undo/redo, clipboard, delete, Esc cancel, tool
+      // hotkeys, F-keys, Alt+arrow view history, ⌘K, export PDF — dispatches
+      // through the command registry.
+      if (dispatchShortcut(e)) return;
+
+      // Plain arrows pan the viewport (Shift = larger step). Alt+arrows were
+      // already consumed above by the view-history commands.
+      if (e.key.startsWith('Arrow')) {
+        e.preventDefault();
+        const v = ed.viewport;
+        const step = (e.shiftKey ? 80 : 30) / v.zoom;
+        const next = { ...v };
+        if (e.key === 'ArrowLeft') next.x -= step;
+        if (e.key === 'ArrowRight') next.x += step;
+        if (e.key === 'ArrowUp') next.y += step;
+        if (e.key === 'ArrowDown') next.y -= step;
+        state.setViewport(next);
         return;
       }
     };
@@ -971,8 +901,8 @@ function ContextMenu({ x, y, onClose }: { x: number; y: number; onClose: () => v
   const copySelection = useStore((s) => s.copySelection);
   const pasteFromClipboard = useStore((s) => s.pasteFromClipboard);
   const duplicateSelection = useStore((s) => s.duplicateSelection);
-  const project = useStore((s) => s.project);
-  const sheet = project.sheets[project.activeSheetId];
+  const sheet = useActiveSheet();
+  const layers = useLayers();
 
   const sel = Array.from(editor.selection);
   const has = sel.length > 0;
@@ -1013,9 +943,20 @@ function ContextMenu({ x, y, onClose }: { x: number; y: number; onClose: () => v
           if (e && e.kind === 'symbol') updateEntity(id, { mirror: !e.mirror } as Partial<Entity>);
         }
         close();
-      }}>Mirror <span className="key">M</span></div>
+        // No key hint: M is the Measure tool hotkey; mirror is menu-only.
+      }}>Mirror</div>
       <div className="divider" />
-      <div className="item" onClick={() => { setSelection(sheet.entityOrder); close(); }}>
+      <div className="item" onClick={() => {
+        // Skip entities on hidden or locked layers — they can't be reached
+        // by click or marquee either.
+        setSelection(sheet.entityOrder.filter((id) => {
+          const e = sheet.entities[id];
+          if (!e || !e.visible) return false;
+          const layer = layers[e.layerId];
+          return (layer?.visible ?? true) && !layer?.locked;
+        }));
+        close();
+      }}>
         Select all <span className="key">⌘A</span>
       </div>
       <div className="item" onClick={() => { setSelection([]); close(); }}>Deselect</div>

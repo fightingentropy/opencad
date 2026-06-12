@@ -26,42 +26,12 @@ export function AboutModal({ onClose }: { onClose: () => void }) {
             preview powered by Three.js. Built as an alternative to AutoCAD Electrical
             for control engineers, panel builders, and electricians.
           </p>
-          <h4 style={{ fontSize: 12, textTransform: 'uppercase', color: 'var(--text-mute)', marginBottom: 8, letterSpacing: 0.5 }}>Keyboard Shortcuts</h4>
-          <table style={{ width: '100%', fontSize: 12 }}>
-            <tbody>
-              {[
-                ['S', 'Select tool'],
-                ['L', 'Line'],
-                ['W', 'Wire'],
-                ['R', 'Rectangle / Rotate selection'],
-                ['C', 'Circle'],
-                ['A', 'Arc'],
-                ['P', 'Polyline'],
-                ['T', 'Text'],
-                ['D', 'Dimension'],
-                ['M', 'Measure'],
-                ['E', 'Erase'],
-                ['F8', 'Toggle Ortho mode'],
-                ['Esc', 'Cancel current operation'],
-                ['Enter', 'Finish polyline / wire'],
-                ['Del', 'Delete selection'],
-                ['⌘Z / ⌘⇧Z', 'Undo / Redo'],
-                ['⌘A', 'Select all'],
-                ['⌘D', 'Duplicate selection'],
-                ['Mouse wheel', 'Zoom in / out'],
-                ['Trackpad 2-finger', 'Pan'],
-                ['Space + drag', 'Pan (any device)'],
-                ['Arrow keys', 'Pan (Shift = larger step)'],
-                ['Middle drag', 'Pan'],
-                ['Right click', 'Context menu / commit drafting'],
-              ].map(([key, desc]) => (
-                <tr key={key as string}>
-                  <td style={{ padding: '3px 8px 3px 0', whiteSpace: 'nowrap' }}><span className="kbd">{key}</span></td>
-                  <td style={{ padding: '3px 0', color: 'var(--text)' }}>{desc}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {/* The full shortcut table lives in ShortcutsModal, generated from
+              the command registry so it can never drift from the bindings. */}
+          <p style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+            Looking for the shortcut list? Press <span className="kbd">?</span> or
+            use Help → Keyboard Shortcuts for the full table.
+          </p>
         </div>
         <div className="modal-footer">
           <button className="btn-primary" onClick={onClose}>Got it</button>

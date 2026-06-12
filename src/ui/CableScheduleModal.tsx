@@ -1,5 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../state/store';
+import {
+  useCableSchedule,
+  useProjectName,
+  useSheetOrder,
+  useSheets,
+  useStandardsProfile,
+  useSystems,
+} from '../state/selectors';
+import { notify } from '../state/notifications';
 import { nanoid } from 'nanoid';
 import type { Cable, CableCircuitType, CableSchedule } from '../models/cable';
 import type { ContainmentEntity, EquipmentEntity, Vec2 } from '../types';
@@ -12,12 +21,25 @@ import { routeCableThroughGraph } from '../lib/cable-router';
 type SortKey = 'reference' | 'from' | 'to' | 'systemId' | 'circuitType' | 'csa' | 'voltage';
 
 export function CableScheduleModal({ onClose }: { onClose: () => void }) {
-  const project = useStore((s) => s.project);
+  // The schedule is cross-sheet by nature — subscribe to the slices the
+  // table actually reads instead of the whole project.
+  const cableScheduleSlice = useCableSchedule();
+  const sheets = useSheets();
+  const sheetOrder = useSheetOrder();
+  const systemsMap = useSystems();
+  const standardsProfile = useStandardsProfile();
+  const projectName = useProjectName();
   const setProject = useStore((s) => s.setProject);
 
+  // Untracked handle for the row helpers (estimateCableLength reads
+  // sheets/sheetOrder, estimateAmpacity reads cableSchedule) — all of which
+  // are subscribed above, so this stays consistent with the render. Write
+  // paths re-read getState() inside their handlers instead.
+  const project = useStore.getState().project;
+
   const schedule: CableSchedule = useMemo(
-    () => project.cableSchedule ?? { cables: {}, cableOrder: [] },
-    [project.cableSchedule],
+    () => cableScheduleSlice ?? { cables: {}, cableOrder: [] },
+    [cableScheduleSlice],
   );
 
   const [editing, setEditing] = useState<Cable | null>(null);
@@ -28,7 +50,7 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
   const [sortDir, setSortDir] = useState<1 | -1>(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  const systems = Object.values(project.systems ?? {});
+  const systems = Object.values(systemsMap ?? {});
 
   const visible = useMemo(() => {
     const items = schedule.cableOrder.map((id) => schedule.cables[id]).filter(Boolean);
@@ -45,7 +67,9 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
   }, [schedule, filterSystem, filterCircuit, sortKey, sortDir]);
 
   const updateSchedule = (next: CableSchedule) => {
-    setProject({ ...project, cableSchedule: next, modified: Date.now() });
+    // Spread the live project — the render-scope handle above may be stale
+    // for fields this modal doesn't subscribe to.
+    setProject({ ...useStore.getState().project, cableSchedule: next, modified: Date.now() });
   };
 
   const upsertCable = (c: Cable) => {
@@ -91,7 +115,7 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
     const blob = new Blob([head + body], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${project.name.replace(/\s+/g, '_')}_cables.csv`;
+    a.download = `${projectName.replace(/\s+/g, '_')}_cables.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -105,7 +129,10 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
       if (!f) return;
       const text = await f.text();
       const lines = text.split(/\r?\n/).filter(Boolean);
-      if (lines.length < 2) return alert('CSV is empty');
+      if (lines.length < 2) {
+        notify('warning', 'CSV is empty');
+        return;
+      }
       const cables = { ...schedule.cables };
       const order = [...schedule.cableOrder];
       for (let i = 1; i < lines.length; i++) {
@@ -138,14 +165,17 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
   };
 
   const onAutoRoute = () => {
-    if (selected.size === 0) return alert('Select cables to auto-route first');
+    if (selected.size === 0) {
+      notify('warning', 'Select cables to auto-route first');
+      return;
+    }
     // Collect every containment in the project plus a tag→position map for
     // equipment so the router can resolve `from`/`to` references.
     const containments: ContainmentEntity[] = [];
     const equipmentByTag = new Map<string, Vec2>();
     const equipmentById = new Map<string, Vec2>();
-    for (const sid of project.sheetOrder) {
-      const sheet = project.sheets[sid];
+    for (const sid of sheetOrder) {
+      const sheet = sheets[sid];
       if (!sheet) continue;
       for (const eid of sheet.entityOrder) {
         const e = sheet.entities[eid];
@@ -160,7 +190,8 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
       }
     }
     if (containments.length === 0) {
-      return alert('No containment entities found — draw containment routes first.');
+      notify('warning', 'No containment entities found — draw containment routes first.');
+      return;
     }
     const graph = buildContainmentGraph(containments);
     const routed: { ref: string; ok: boolean; reason?: string }[] = [];
@@ -198,14 +229,15 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
     updateSchedule({ cables: updatedCables, cableOrder: schedule.cableOrder });
     const okCount = routed.filter((r) => r.ok).length;
     const failed = routed.filter((r) => !r.ok);
-    const summary = [
-      `Auto-routed ${okCount} of ${routed.length} cables.`,
-      ...(failed.length > 0
-        ? ['', 'Failed:', ...failed.slice(0, 5).map((r) => `  ${r.ref}: ${r.reason}`)]
-        : []),
-      ...(failed.length > 5 ? [`  …and ${failed.length - 5} more`] : []),
+    const failDetail = [
+      ...failed.slice(0, 5).map((r) => `${r.ref}: ${r.reason}`),
+      ...(failed.length > 5 ? [`…and ${failed.length - 5} more`] : []),
     ].join('\n');
-    alert(summary);
+    notify(
+      failed.length > 0 ? 'warning' : 'success',
+      `Auto-routed ${okCount} of ${routed.length} cables.`,
+      failed.length > 0 ? { detail: failDetail } : undefined,
+    );
   };
 
   const toggleAll = () => {
@@ -221,7 +253,7 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          Cable Schedule — {project.name}
+          Cable Schedule — {projectName}
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ color: 'var(--text-mute)', fontSize: 12, fontWeight: 'normal' }}>
               {visible.length} of {schedule.cableOrder.length} cables
@@ -296,12 +328,12 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
                   systemVoltageV: c.voltage || 230,
                   phasing: c.cores >= 3 ? 'three' : 'single',
                   loadCategory: 'other',
-                  standardsCode: project.standardsProfile?.code ?? 'BS7671',
+                  standardsCode: standardsProfile?.code ?? 'BS7671',
                 });
                 const failures: string[] = [];
                 if (!amp.ok && amp.ib > 0) failures.push('ampacity');
                 if (!vd.withinLimits) failures.push('vdrop');
-                const sysName = c.systemId ? project.systems?.[c.systemId]?.name ?? c.systemId : '—';
+                const sysName = c.systemId ? systemsMap?.[c.systemId]?.name ?? c.systemId : '—';
                 return (
                   <tr key={c.id} className={failures.length ? 'has-warn' : ''}>
                     <td>

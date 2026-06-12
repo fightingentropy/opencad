@@ -1,11 +1,22 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../state/store';
+import {
+  useCatalogues,
+  useProjectName,
+  useSheetOrder,
+  useSheets,
+} from '../state/selectors';
 import { generateCostEstimate, costEstimateToCSV } from '../io/cost-estimate';
 import type { CostEstimateOptions } from '../io/cost-estimate';
 import { fmtNum } from './whole-site-helpers';
 
 export function CostEstimationModal({ onClose }: { onClose: () => void }) {
-  const project = useStore((s) => s.project);
+  // generateCostEstimate reads project.name plus the containment BOM inputs
+  // (sheets, sheetOrder, catalogues) — subscribe to exactly those slices.
+  const sheets = useSheets();
+  const sheetOrder = useSheetOrder();
+  const catalogues = useCatalogues();
+  const projectName = useProjectName();
 
   const [hourlyRate, setHourlyRate] = useState(45);
   const [overheadPct, setOverheadPct] = useState(12);
@@ -25,7 +36,10 @@ export function CostEstimationModal({ onClose }: { onClose: () => void }) {
     labourPerMConduit,
   }), [hourlyRate, overheadPct, profitPct, contingencyPct, labourPerMTrunking, labourPerMTray, labourPerMConduit]);
 
-  const estimate = useMemo(() => generateCostEstimate(project, options), [project, options]);
+  const estimate = useMemo(
+    () => generateCostEstimate(useStore.getState().project, options),
+    [sheets, sheetOrder, catalogues, projectName, options],
+  );
 
   const materialItems = estimate.lineItems.filter((l) => l.category === 'material');
   const labourItems = estimate.lineItems.filter((l) => l.category === 'labour');
@@ -35,7 +49,7 @@ export function CostEstimationModal({ onClose }: { onClose: () => void }) {
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${project.name.replace(/\s+/g, '_')}_cost.csv`;
+    a.download = `${projectName.replace(/\s+/g, '_')}_cost.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -53,7 +67,7 @@ export function CostEstimationModal({ onClose }: { onClose: () => void }) {
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal cost-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          Cost Estimate — {project.name}
+          Cost Estimate — {projectName}
           <span className="close" onClick={onClose} style={{ marginLeft: 'auto', cursor: 'pointer' }}>×</span>
         </div>
         <div className="modal-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>

@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { useStore } from '../state/store';
+import { useStandardsProfile, useSystems } from '../state/selectors';
+import { notify } from '../state/notifications';
 import type { Cable, CableConstruction, CableCircuitType } from '../models/cable';
 import { STANDARD_CSA } from '../models/cable';
 import { computeVoltageDrop, suggestCableSize } from '../calc';
-import { fmtNum, projectStandardsCode } from './whole-site-helpers';
+import { fmtNum } from './whole-site-helpers';
 
 const CONSTRUCTIONS: CableConstruction[] = [
   'XLPE/SWA/LSOH',
@@ -45,8 +46,9 @@ export function CableEditDialog({
   onClose: () => void;
   onSave: (cable: Cable) => void;
 }) {
-  const project = useStore((s) => s.project);
-  const systems = useMemo(() => Object.values(project.systems ?? {}), [project.systems]);
+  const systemsMap = useSystems();
+  const standardsProfile = useStandardsProfile();
+  const systems = useMemo(() => Object.values(systemsMap ?? {}), [systemsMap]);
 
   const [draft, setDraft] = useState<Cable>(() => cable ?? {
     id: '',
@@ -70,7 +72,7 @@ export function CableEditDialog({
     setDraft((d) => ({ ...d, [key]: val }));
   };
 
-  const standardsCode = projectStandardsCode(project);
+  const standardsCode = standardsProfile?.code ?? 'BS7671';
 
   const vdrop = useMemo(() => computeVoltageDrop({
     construction: draft.construction,
@@ -98,7 +100,10 @@ export function CableEditDialog({
   const ampacityIz = suggestion ? suggestion.ampacity : 0;
 
   const handleSave = () => {
-    if (!draft.reference.trim()) return alert('Reference is required');
+    if (!draft.reference.trim()) {
+      notify('warning', 'Reference is required');
+      return;
+    }
     onSave(draft);
     onClose();
   };

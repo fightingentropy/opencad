@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../state/store';
+import { useActiveLayerId, useLayerOrder, useLayers } from '../state/selectors';
 import { CATEGORY_LABELS, searchSymbols, renderSymbolPreview, symbolsByCategory } from '../symbols';
 import { CONTAINMENT_DEFAULTS } from '../canvas/tools';
 import type { ContainmentType, SymbolCategory, ToolId, Layer } from '../types';
@@ -90,7 +91,6 @@ function findContainmentLayer(project: ReturnType<typeof useStore.getState>['pro
 }
 
 function ContainmentLibrary() {
-  const project = useStore((s) => s.project);
   const tool = useStore((s) => s.editor.tool);
   const viewMode = useStore((s) => s.editor.viewMode);
   const setTool = useStore((s) => s.setTool);
@@ -100,7 +100,8 @@ function ContainmentLibrary() {
   const activeContainment = CONTAINMENT_PALETTE.find((item) => item.tool === tool);
 
   const selectTool = (id: ContainmentTool, label: string) => {
-    const containmentLayer = findContainmentLayer(project);
+    // Layer lookup happens on click only — no project subscription needed.
+    const containmentLayer = findContainmentLayer(useStore.getState().project);
     if (containmentLayer) setActiveLayer(containmentLayer);
     if (viewMode === '3d') setViewMode('split');
     setTool(id);
@@ -234,7 +235,9 @@ function SymbolLibrary() {
 }
 
 function Layers() {
-  const project = useStore((s) => s.project);
+  const layers = useLayers();
+  const layerOrder = useLayerOrder();
+  const activeLayerId = useActiveLayerId();
   const setActiveLayer = useStore((s) => s.setActiveLayer);
   const toggleLayerVisible = useStore((s) => s.toggleLayerVisible);
   const toggleLayerLocked = useStore((s) => s.toggleLayerLocked);
@@ -255,18 +258,18 @@ function Layers() {
           <button
             className="tool-btn-small"
             title="Remove active layer"
-            onClick={() => removeLayer(project.activeLayerId)}
+            onClick={() => removeLayer(activeLayerId)}
           >−</button>
         </div>
       </div>
       <div style={{ maxHeight: 220, overflowY: 'auto' }}>
-        {project.layerOrder.map((id) => {
-          const layer = project.layers[id];
-          const active = id === project.activeLayerId;
+        {layerOrder.map((id) => {
+          const layer = layers[id];
+          const active = id === activeLayerId;
           return (
             <div
               key={id}
-              className={`layer-row${active ? ' active' : ''}`}
+              className={`layer-row${active ? ' active' : ''}${layer.visible ? '' : ' hidden'}${layer.locked ? ' locked' : ''}`}
               style={{ position: 'relative' }}
               onClick={() => setActiveLayer(id)}
             >

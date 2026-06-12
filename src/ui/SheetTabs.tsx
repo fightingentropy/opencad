@@ -1,9 +1,11 @@
 import React from 'react';
 import { useStore } from '../state/store';
+import { useActiveSheetId, useSheetList } from '../state/selectors';
 import type { SheetKind } from '../types';
 
 export function SheetTabs() {
-  const project = useStore((s) => s.project);
+  const sheetList = useSheetList();
+  const activeSheetId = useActiveSheetId();
   const setActiveSheet = useStore((s) => s.setActiveSheet);
   const addSheet = useStore((s) => s.addSheet);
   const removeSheet = useStore((s) => s.removeSheet);
@@ -19,9 +21,9 @@ export function SheetTabs() {
 
   return (
     <div className="sheet-tabs">
-      {project.sheetOrder.map((id) => {
-        const sheet = project.sheets[id];
-        const active = id === project.activeSheetId;
+      {sheetList.map((sheet) => {
+        const id = sheet.id;
+        const active = id === activeSheetId;
         return (
           <div
             key={id}
@@ -35,7 +37,7 @@ export function SheetTabs() {
             <span className="num">{sheet.number}</span>
             <span>{sheet.name}</span>
             <span style={{ fontSize: 9, color: 'var(--text-mute)' }}>({sheet.kind})</span>
-            {project.sheetOrder.length > 1 && active && (
+            {sheetList.length > 1 && active && (
               <span
                 style={{ marginLeft: 6, opacity: 0.6, cursor: 'pointer' }}
                 onClick={(e) => { e.stopPropagation(); if (confirm('Delete sheet?')) removeSheet(id); }}
