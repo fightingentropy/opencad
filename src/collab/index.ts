@@ -8,13 +8,14 @@ export {
   isConnected,
   currentRoomCode,
   getYDoc,
-  getYProjectMap,
+  getYCollabMaps,
   getYAwareness,
   getProvider,
 } from './yjs-doc';
 export type { CollabHandle, ConnectOptions } from './yjs-doc';
 
-export { bindStoreToYjs, bindYjsToStore } from './sync';
+export { bindStoreToYjs, bindYjsToStore, getCollabMaps } from './sync';
+export type { CollabMaps } from './sync';
 
 export {
   getLocalIdentity,

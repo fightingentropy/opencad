@@ -1,6 +1,7 @@
-import type { Entity, Vec2, Sheet, SnapSettings, SnapKind, SymbolEntity, SymbolDef } from '../types';
-import { dist, snapToGrid, closestOnSegment, segIntersect } from './math';
+import type { Bounds, Entity, Vec2, Sheet, SnapSettings, SnapKind, SymbolEntity, SymbolDef } from '../types';
+import { dist, distToSegment, snapToGrid, closestOnSegment, segIntersect } from './math';
 import { transformSymbolPoint } from './hittest';
+import { getSpatialIndex } from './spatial-index';
 
 export type { SnapKind };
 
@@ -206,11 +207,26 @@ export const computeSnap = (
 
   // Object snap types — all gated by the master osnap toggle (F3)
   if (settings.osnap) {
+    // One spatial query bounds all the loops below: every snap point an
+    // entity can produce (endpoint, midpoint, center, pin, on-segment)
+    // lies within its indexed bounds, so entities farther than tol from
+    // the cursor can never pass `consider` and are skipped wholesale.
+    const region: Bounds = {
+      minX: cursor.x - tol,
+      minY: cursor.y - tol,
+      maxX: cursor.x + tol,
+      maxY: cursor.y + tol,
+    };
+    const nearby: { id: string; e: Entity }[] = [];
+    for (const id of getSpatialIndex(sheet, opts.symbolLookup).query(region)) {
+      const e = sheet.entities[id];
+      if (!e || !e.visible || !layerVisible(e.layerId)) continue;
+      nearby.push({ id, e });
+    }
+
     // Pin snaps (highest priority)
     if (settings.pin) {
-      for (const id of sheet.entityOrder) {
-        const e = sheet.entities[id];
-        if (!e || !e.visible || !layerVisible(e.layerId)) continue;
+      for (const { id, e } of nearby) {
         if (e.kind !== 'symbol') continue;
         const def = opts.symbolLookup(e.symbolId);
         if (!def) continue;
@@ -222,9 +238,7 @@ export const computeSnap = (
     }
 
     if (settings.endpoint) {
-      for (const id of sheet.entityOrder) {
-        const e = sheet.entities[id];
-        if (!e || !e.visible || !layerVisible(e.layerId)) continue;
+      for (const { id, e } of nearby) {
         for (const p of collectEndpoints(e, opts.symbolLookup)) {
           consider(p, 'endpoint', id, 0.5);
         }
@@ -232,21 +246,22 @@ export const computeSnap = (
     }
 
     if (settings.midpoint) {
-      for (const id of sheet.entityOrder) {
-        const e = sheet.entities[id];
-        if (!e || !e.visible || !layerVisible(e.layerId)) continue;
+      for (const { id, e } of nearby) {
         for (const p of collectMidpoints(e)) consider(p, 'midpoint', id, 0.6);
         for (const p of collectCenters(e)) consider(p, 'center', id, 0.6);
       }
     }
 
     if (settings.intersection) {
-      // O(n^2) intersection check, only if cursor is in tol of any segment
+      // Pairwise intersection over only the segments that pass within tol
+      // of the cursor. A crossing is accepted by `consider` only when the
+      // intersection point is within tol — and that point lies on both
+      // segments, so segments farther than tol can never contribute.
       const candidates: [Vec2, Vec2][] = [];
-      for (const id of sheet.entityOrder) {
-        const e = sheet.entities[id];
-        if (!e || !e.visible || !layerVisible(e.layerId)) continue;
-        for (const seg of collectSegments(e)) candidates.push(seg);
+      for (const { e } of nearby) {
+        for (const seg of collectSegments(e)) {
+          if (distToSegment(cursor, seg[0], seg[1]) <= tol) candidates.push(seg);
+        }
       }
       for (let i = 0; i < candidates.length; i++) {
         for (let j = i + 1; j < candidates.length; j++) {
@@ -257,9 +272,7 @@ export const computeSnap = (
     }
 
     // Nearest-on-segment fallback
-    for (const id of sheet.entityOrder) {
-      const e = sheet.entities[id];
-      if (!e || !e.visible || !layerVisible(e.layerId)) continue;
+    for (const { id, e } of nearby) {
       for (const seg of collectSegments(e)) {
         const { point } = closestOnSegment(cursor, seg[0], seg[1]);
         if (dist(cursor, point) < tol) consider(point, 'perpendicular', id, 0.85);

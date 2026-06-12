@@ -1,23 +1,30 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../state/store';
+import { useItpItems } from '../state/selectors';
 import { nanoid } from 'nanoid';
 import type { ITPItem } from '../models/fire';
 
 const STATUSES: ITPItem['status'][] = ['pending', 'in-progress', 'inspected-pass', 'inspected-fail', 'cleared'];
 
 export function ITPChecklistPanel() {
-  const project = useStore((s) => s.project);
   const setProject = useStore((s) => s.setProject);
 
   const [filter, setFilter] = useState<'all' | ITPItem['status']>('all');
 
-  const items = project.itpItems ?? {};
+  const items = useItpItems() ?? {};
   const list = useMemo(() => {
     return Object.values(items).filter((it) => filter === 'all' || it.status === filter);
   }, [items, filter]);
 
+  // Spread the live project from getState() so the panel only subscribes to
+  // the ITP slice it renders.
   const upsert = (it: ITPItem) => {
-    setProject({ ...project, itpItems: { ...items, [it.id]: it }, modified: Date.now() });
+    const project = useStore.getState().project;
+    setProject({
+      ...project,
+      itpItems: { ...(project.itpItems ?? {}), [it.id]: it },
+      modified: Date.now(),
+    });
   };
 
   const setStatus = (it: ITPItem, st: ITPItem['status']) => {

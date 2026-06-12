@@ -1,12 +1,47 @@
 import React from 'react';
 import { useStore } from '../state/store';
+import { useActiveSheet, useProjectMeta } from '../state/selectors';
+import { useSaveStatus } from '../state/save-status';
+
+const formatSaveTime = (ts: number): string =>
+  new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+/** Autosave indicator driven by the save-status store (fed by io/persist). */
+function SaveIndicator() {
+  const status = useSaveStatus((s) => s.status);
+  const lastSavedAt = useSaveStatus((s) => s.lastSavedAt);
+  const error = useSaveStatus((s) => s.error);
+
+  if (status === 'error') {
+    return (
+      <span
+        className="status-section status-save"
+        style={{ color: 'var(--danger)' }}
+        title={`Autosave failed (${error ?? 'unknown error'}). Use File → Save to download a copy.${
+          lastSavedAt ? ` Last saved ${formatSaveTime(lastSavedAt)}.` : ''
+        }`}
+      >
+        NOT SAVED — {(error ?? 'save failed').toUpperCase()}
+      </span>
+    );
+  }
+  return (
+    <span className="status-section status-save" style={{ color: 'var(--text-mute)' }}>
+      {status === 'saving' && 'SAVING…'}
+      {status === 'saved' && lastSavedAt !== null && (
+        <>SAVED <span style={{ color: 'var(--text-dim)' }}>{formatSaveTime(lastSavedAt)}</span></>
+      )}
+      {(status === 'idle' || (status === 'saved' && lastSavedAt === null)) && 'AUTOSAVE'}
+    </span>
+  );
+}
 
 export function StatusBar() {
-  const project = useStore((s) => s.project);
+  const { units, standard } = useProjectMeta();
+  const sheet = useActiveSheet();
   const editor = useStore((s) => s.editor);
   const setOrtho = useStore((s) => s.setOrtho);
   const setSnap = useStore((s) => s.setSnap);
-  const sheet = project.sheets[project.activeSheetId];
   const c = editor.cursorSnap ?? editor.cursor;
   const totalEntities = Object.keys(sheet?.entities ?? {}).length;
 
@@ -17,7 +52,7 @@ export function StatusBar() {
         <span style={{ color: 'var(--text)', minWidth: 64 }}>{c.x.toFixed(2)}</span>
         <span style={{ color: 'var(--text-mute)' }}>Y</span>
         <span style={{ color: 'var(--text)', minWidth: 64 }}>{c.y.toFixed(2)}</span>
-        <span style={{ color: 'var(--text-mute)' }}>{project.units}</span>
+        <span style={{ color: 'var(--text-mute)' }}>{units}</span>
       </span>
       <span
         className={`status-section status-snap ${editor.snap.enabled ? 'active' : ''}`}
@@ -31,7 +66,7 @@ export function StatusBar() {
         onClick={() => setSnap({ grid: !editor.snap.grid })}
         style={{ cursor: 'pointer' }}
       >
-        GRID {editor.snap.gridSize}{project.units}
+        GRID {editor.snap.gridSize}{units}
       </span>
       <span
         className={`status-section status-ortho ${editor.ortho ? 'active' : ''}`}
@@ -53,8 +88,9 @@ export function StatusBar() {
         SEL {editor.selection.size}
       </span>
       <span className="status-spacer" />
+      <SaveIndicator />
       <span className="status-section status-zoom" style={{ borderRight: 'none' }}>
-        Z{editor.viewport.zoom.toFixed(2)}× • {project.standard}
+        Z{editor.viewport.zoom.toFixed(2)}× • {standard}
       </span>
     </div>
   );

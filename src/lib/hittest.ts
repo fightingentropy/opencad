@@ -5,10 +5,9 @@ import {
   pointInRect,
   rectsOverlap,
   entityBounds,
-  rotate,
-  add,
 } from './math';
 import type { SymbolDef } from '../types';
+import { getSpatialIndex, symbolWorldBounds, transformSymbolPoint } from './spatial-index';
 
 export interface HitOptions {
   // pixel tolerance in screen space
@@ -19,14 +18,6 @@ export interface HitOptions {
 }
 
 const tolMm = (opts: HitOptions): number => opts.tolerance / opts.pixelsPerMm;
-
-const transformSymbolPoint = (sym: SymbolEntity, p: Vec2): Vec2 => {
-  let x = p.x * sym.scale * (sym.mirror ? -1 : 1);
-  let y = p.y * sym.scale;
-  const c = Math.cos(sym.rotation);
-  const s = Math.sin(sym.rotation);
-  return { x: sym.position.x + x * c - y * s, y: sym.position.y + x * s + y * c };
-};
 
 export const hitTestEntity = (e: Entity, p: Vec2, opts: HitOptions): boolean => {
   const tol = tolMm(opts);
@@ -114,21 +105,7 @@ export const hitTestEntity = (e: Entity, p: Vec2, opts: HitOptions): boolean => 
         return dist(p, e.position) <= 10 * e.scale;
       }
       // transform the bounds and check
-      const corners = [
-        { x: def.bounds.minX, y: def.bounds.minY },
-        { x: def.bounds.maxX, y: def.bounds.minY },
-        { x: def.bounds.maxX, y: def.bounds.maxY },
-        { x: def.bounds.minX, y: def.bounds.maxY },
-      ].map((c) => transformSymbolPoint(e, c));
-      const bb = corners.reduce(
-        (b, c) => ({
-          minX: Math.min(b.minX, c.x),
-          minY: Math.min(b.minY, c.y),
-          maxX: Math.max(b.maxX, c.x),
-          maxY: Math.max(b.maxY, c.y),
-        }),
-        { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
-      );
+      const bb = symbolWorldBounds(e, def);
       return pointInRect(p, { x: bb.minX, y: bb.minY }, { x: bb.maxX, y: bb.maxY });
     }
     case 'dimension':
@@ -174,9 +151,20 @@ export const findEntityAt = (
   opts: HitOptions,
   layerVisible: (layerId: string) => boolean
 ): EntityId | null => {
+  // The spatial index narrows the scan to entities near the cursor. Index
+  // bounds already include each kind's hit band (containment width, wall
+  // thickness), so inflating by the pixel tolerance makes the query a
+  // superset of every possible hit.
+  const tol = tolMm(opts);
+  const candidates = getSpatialIndex(sheet, opts.symbolLookup).query({
+    minX: p.x - tol,
+    minY: p.y - tol,
+    maxX: p.x + tol,
+    maxY: p.y + tol,
+  });
   // Iterate in reverse for top-most-first
-  for (let i = sheet.entityOrder.length - 1; i >= 0; i--) {
-    const id = sheet.entityOrder[i];
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const id = candidates[i];
     const e = sheet.entities[id];
     if (!e || !e.visible || !layerVisible(e.layerId)) continue;
     if (hitTestEntity(e, p, opts)) return id;
@@ -200,28 +188,16 @@ export const findEntitiesInRect = (
   const maxY = Math.max(a.y, b.y);
   const region: Bounds = { minX, minY, maxX, maxY };
   const out: EntityId[] = [];
-  for (const id of sheet.entityOrder) {
+  // Spatial query instead of a full sheet scan — results come back in
+  // draw order, so `out` keeps the same ordering the linear scan had.
+  for (const id of getSpatialIndex(sheet, opts.symbolLookup).query(region)) {
     const e = sheet.entities[id];
     if (!e || !e.visible || !layerVisible(e.layerId)) continue;
     const eb = entityBounds(e);
     if (e.kind === 'symbol') {
       const def = opts.symbolLookup(e.symbolId);
       if (def) {
-        const corners = [
-          { x: def.bounds.minX, y: def.bounds.minY },
-          { x: def.bounds.maxX, y: def.bounds.minY },
-          { x: def.bounds.maxX, y: def.bounds.maxY },
-          { x: def.bounds.minX, y: def.bounds.maxY },
-        ].map((c) => transformSymbolPoint(e, c));
-        const bb = corners.reduce(
-          (b, c) => ({
-            minX: Math.min(b.minX, c.x),
-            minY: Math.min(b.minY, c.y),
-            maxX: Math.max(b.maxX, c.x),
-            maxY: Math.max(b.maxY, c.y),
-          }),
-          { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
-        );
+        const bb = symbolWorldBounds(e, def);
         if (fullyEnclosed) {
           if (
             bb.minX >= region.minX &&

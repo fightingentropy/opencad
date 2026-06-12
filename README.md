@@ -30,8 +30,9 @@ OpenCAD ships with optional real-time multi-user editing — think Figma cursors
 - **Peer-to-peer over WebRTC.** No backend, no account, no install — connections go through free public signalling servers (`wss://signaling.yjs.dev` and friends) which only relay the WebRTC handshake. Once connected, every drawing update flows directly between browsers via [Yjs](https://yjs.dev) CRDTs.
 - **Persistent locally.** While a session is active, the shared document is mirrored into IndexedDB so a refresh re-joins the same room without losing work. Single-player still uses localStorage; the two paths don't interfere.
 - **Lazy-loaded.** The Yjs / WebRTC bundle (~60 kB gzipped) only loads when you actually open the Collaboration modal — pure single-player drawing pays nothing.
+- **Per-entity merging.** Each entity syncs as its own CRDT record, so two peers editing different entities — even on the same sheet — both keep their changes. Only when two peers edit the *same* entity at the same time does last-writer-wins kick in, and it resolves atomically: you get one peer's full version of that entity, never a half-and-half blend.
 
-This is an MVP. There is **no authentication and no permissions**: anyone with the room code can join and edit. Concurrent edits resolve at the project level (last writer wins) rather than per-entity. Don't use it for sensitive projects yet — generate a fresh hard-to-guess room code per session, or wait for the v2 with auth and per-entity CRDT merging.
+This is a beta. There is **no authentication and no permissions**: anyone with the room code can join and edit. Don't use it for sensitive projects yet — generate a fresh hard-to-guess room code per session, or wait for the version with auth.
 
 ## Run locally
 

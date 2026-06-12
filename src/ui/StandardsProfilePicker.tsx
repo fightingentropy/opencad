@@ -1,5 +1,6 @@
 import React from 'react';
 import { useStore } from '../state/store';
+import { useStandardsProfile } from '../state/selectors';
 import type { StandardsCode, StandardsProfile } from '../models/standards';
 import { DEFAULT_STANDARDS } from '../models/standards';
 
@@ -11,13 +12,12 @@ const CODES: { id: StandardsCode; label: string }[] = [
 ];
 
 export function StandardsProfilePicker({ compact }: { compact?: boolean } = {}) {
-  const project = useStore((s) => s.project);
   const setProject = useStore((s) => s.setProject);
-  const profile = project.standardsProfile ?? DEFAULT_STANDARDS.BS7671;
+  const profile = useStandardsProfile() ?? DEFAULT_STANDARDS.BS7671;
 
   const onChange = (code: StandardsCode) => {
     const next: StandardsProfile = DEFAULT_STANDARDS[code];
-    setProject({ ...project, standardsProfile: next, modified: Date.now() });
+    setProject({ ...useStore.getState().project, standardsProfile: next, modified: Date.now() });
   };
 
   if (compact) {

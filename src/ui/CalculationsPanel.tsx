@@ -1,5 +1,12 @@
 import React, { useMemo } from 'react';
 import { useStore } from '../state/store';
+import {
+  useActiveSheet,
+  useCableSchedule,
+  useSelectedEntity,
+  useSheets,
+  useStandardsProfile,
+} from '../state/selectors';
 import type { ContainmentEntity, Entity } from '../types';
 import type { Cable } from '../models/cable';
 import {
@@ -19,15 +26,10 @@ import {
   estimateCableLength,
   fmtNum,
   fmtPct,
-  projectStandardsCode,
 } from './whole-site-helpers';
 
 export function CalculationsPanel() {
-  const project = useStore((s) => s.project);
-  const editor = useStore((s) => s.editor);
-  const sheet = project.sheets[project.activeSheetId];
-  const sel = Array.from(editor.selection);
-  const ent: Entity | null = sel.length === 1 ? sheet?.entities[sel[0]] ?? null : null;
+  const ent: Entity | null = useSelectedEntity();
 
   return (
     <div className="panel-section">
@@ -51,11 +53,17 @@ export function CalculationsPanel() {
 }
 
 function ContainmentCalcs({ entity }: { entity: ContainmentEntity }) {
-  const project = useStore((s) => s.project);
-  const sheet = project.sheets[project.activeSheetId];
+  const sheet = useActiveSheet();
+  const cableSchedule = useCableSchedule();
+  const standardsProfile = useStandardsProfile();
 
-  const cables = useMemo(() => cablesOnContainment(project, entity.id), [project, entity.id]);
-  const standards = project.standardsProfile ?? DEFAULT_STANDARDS.BS7671;
+  // cablesOnContainment only consults project.cableSchedule, so the schedule
+  // slice is the exact recompute trigger; the full project is read untracked.
+  const cables = useMemo(
+    () => cablesOnContainment(useStore.getState().project, entity.id),
+    [cableSchedule, entity.id],
+  );
+  const standards = standardsProfile ?? DEFAULT_STANDARDS.BS7671;
   const fill = useMemo(
     () => computeContainmentFill(entity, cables, standards),
     [entity, cables, standards],
@@ -104,8 +112,10 @@ const installationMethodFor = (cable: Cable): InstallationMethod => {
 };
 
 function WireCalcs({ entity }: { entity: any }) {
-  const project = useStore((s) => s.project);
-  const cable = entity.cableId ? project.cableSchedule?.cables[entity.cableId] : null;
+  const cableSchedule = useCableSchedule();
+  const sheets = useSheets();
+  const standardsProfile = useStandardsProfile();
+  const cable = entity.cableId ? cableSchedule?.cables[entity.cableId] : null;
 
   if (!cable) {
     return (
@@ -115,12 +125,14 @@ function WireCalcs({ entity }: { entity: any }) {
     );
   }
 
+  // estimateCableLength walks every sheet's entities, so the sheets map is
+  // the exact recompute trigger; the full project is read untracked.
   const len = useMemo(
-    () => cable.estimatedLength ?? estimateCableLength(cable, project),
-    [cable, project],
+    () => cable.estimatedLength ?? estimateCableLength(cable, useStore.getState().project),
+    [cable, sheets],
   );
 
-  const standardsCode = projectStandardsCode(project);
+  const standardsCode = standardsProfile?.code ?? 'BS7671';
   const isXlpe = cable.construction.startsWith('XLPE');
   const baseTable = isXlpe ? AMPACITY_REF_C_XLPE_COPPER : AMPACITY_REF_C_PVC_COPPER;
   const baseAmp = baseTable[cable.csa] ?? 0;
@@ -128,14 +140,14 @@ function WireCalcs({ entity }: { entity: any }) {
   // Estimate group size from cables sharing route
   const numCircuits = useMemo(() => {
     if (cable.route.length === 0) return 1;
-    const cables = Object.values(project.cableSchedule?.cables ?? {});
+    const cables = Object.values(cableSchedule?.cables ?? {});
     let max = 1;
     for (const cid of cable.route) {
       const shared = cables.filter((c) => c.route.includes(cid)).length;
       if (shared > max) max = shared;
     }
     return max;
-  }, [cable, project]);
+  }, [cable, cableSchedule]);
 
   const derating = useMemo(() => computeDeratingFactors({
     numCircuits,
