@@ -1,20 +1,28 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../state/store';
+import {
+  useActiveFloorId,
+  useBuildings,
+  useFloors,
+  useSites,
+  useZones,
+} from '../state/selectors';
 import { nanoid } from 'nanoid';
+import { setActiveFloor } from '../state/site-actions';
 import { SheetTabs } from './SheetTabs';
+import type { Project } from '../types';
 import type { Building, Floor, Site, Zone, BuildingId, FloorId, ZoneId } from '../models/site';
 
 // SiteNavigator replaces SheetTabs when project hierarchy exists. Otherwise
 // falls back to plain SheetTabs.
 export function SiteNavigator() {
-  const project = useStore((s) => s.project);
   const setProject = useStore((s) => s.setProject);
-  const setActiveSheet = useStore((s) => s.setActiveSheet);
 
-  const sites = project.sites ?? {};
-  const buildings = project.buildings ?? {};
-  const floors = project.floors ?? {};
-  const zones = project.zones ?? {};
+  const sites = useSites() ?? {};
+  const buildings = useBuildings() ?? {};
+  const floors = useFloors() ?? {};
+  const zones = useZones() ?? {};
+  const activeFloorId = useActiveFloorId();
   const hasHierarchy = Object.keys(sites).length > 0;
 
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([
@@ -29,13 +37,14 @@ export function SiteNavigator() {
     setExpanded(s);
   };
 
-  const navigateToFloor = (f: Floor) => {
-    if (f.sheetIds.length > 0) setActiveSheet(f.sheetIds[0]);
-    setProject({ ...project, activeFloorId: f.id, activeBuildingId: f.buildingId, modified: Date.now() });
+  // Patch builders read the live project via getState() so this component
+  // never has to subscribe to the whole project just to spread it.
+  const updateProject = (patch: Partial<Project>) => {
+    setProject({ ...useStore.getState().project, ...patch, modified: Date.now() });
   };
 
-  const updateProject = (patch: Partial<typeof project>) => {
-    setProject({ ...project, ...patch, modified: Date.now() });
+  const navigateToFloor = (f: Floor) => {
+    setProject(setActiveFloor(useStore.getState().project, f.id));
   };
 
   const addBuilding = (siteId: string) => {
@@ -141,7 +150,7 @@ export function SiteNavigator() {
             onAddFloor={addFloor}
             onAddZone={addZone}
             onSelectFloor={navigateToFloor}
-            activeFloorId={project.activeFloorId}
+            activeFloorId={activeFloorId}
           />
         ))}
       </div>
