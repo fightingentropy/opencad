@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
 import { useStore } from '../state/store';
+import {
+  useActiveSheet,
+  useLayerOrder,
+  useLayers,
+  useProjectMeta,
+  useSelection,
+  useSystems,
+} from '../state/selectors';
 import { regenerateAutoFeaturesForContainments } from '../lib/auto-feature-actions';
 import { getSymbol } from '../symbols';
 import type {
@@ -7,6 +15,7 @@ import type {
   ContainmentMaterial,
   ContainmentType,
   Entity,
+  Project,
 } from '../types';
 import { CalculationsPanel } from './CalculationsPanel';
 import { FillVisualizationOverlay } from './FillVisualizationOverlay';
@@ -114,11 +123,10 @@ export function ReviewPanels() {
 }
 
 function Properties() {
-  const project = useStore((s) => s.project);
-  const editor = useStore((s) => s.editor);
+  const sheet = useActiveSheet();
+  const selection = useSelection();
   const updateEntity = useStore((s) => s.updateEntity);
-  const sheet = project.sheets[project.activeSheetId];
-  const sel = Array.from(editor.selection);
+  const sel = Array.from(selection);
   const single = sel.length === 1 ? sheet.entities[sel[0]] : null;
 
   return (
@@ -164,10 +172,12 @@ function Properties() {
 }
 
 function SinglePropertiesEditor({ entity, onUpdate }: { entity: Entity; onUpdate: (p: Partial<Entity>) => void }) {
-  const project = useStore((s) => s.project);
-  const layers = project.layerOrder.map((id) => project.layers[id]);
+  const layersMap = useLayers();
+  const layerOrder = useLayerOrder();
+  const systemsMap = useSystems();
+  const layers = layerOrder.map((id) => layersMap[id]);
   const symbolDef = entity.kind === 'symbol' ? getSymbol(entity.symbolId) : null;
-  const systems = Object.values(project.systems ?? {});
+  const systems = Object.values(systemsMap ?? {});
   const updateContainment = (patch: Partial<ContainmentEntity>, regenerate = false) => {
     onUpdate(patch as Partial<Entity>);
     if (regenerate) regenerateAutoFeaturesForContainments([entity.id]);
@@ -206,11 +216,11 @@ function SinglePropertiesEditor({ entity, onUpdate }: { entity: Entity; onUpdate
           </select>
         </Row>
         <Row label="Color">
-          <input type="color" value={entity.color ?? project.layers[entity.layerId].color}
+          <input type="color" value={entity.color ?? layersMap[entity.layerId].color}
             onChange={(e) => onUpdate({ color: e.target.value } as any)} />
         </Row>
         <Row label="Line Width">
-          <input type="number" step="0.1" min="0.1" max="5" value={entity.lineWidth ?? project.layers[entity.layerId].lineWidth}
+          <input type="number" step="0.1" min="0.1" max="5" value={entity.lineWidth ?? layersMap[entity.layerId].lineWidth}
             onChange={(e) => onUpdate({ lineWidth: parseFloat(e.target.value) } as any)} />
         </Row>
         <Row label="Locked">
@@ -457,31 +467,34 @@ function SinglePropertiesEditor({ entity, onUpdate }: { entity: Entity; onUpdate
 }
 
 function ProjectInfo() {
-  const project = useStore((s) => s.project);
+  const meta = useProjectMeta();
   const setProject = useStore((s) => s.setProject);
-  const upd = (patch: Partial<typeof project>) => setProject({ ...project, ...patch, modified: Date.now() });
+  // Spread the live project from getState() so this section only subscribes
+  // to the header fields it renders.
+  const upd = (patch: Partial<Project>) =>
+    setProject({ ...useStore.getState().project, ...patch, modified: Date.now() });
 
   return (
     <div className="panel-section">
       <div className="panel-header">Project</div>
       <div style={{ padding: '4px 0' }}>
         <Row label="Name">
-          <input value={project.name} onChange={(e) => upd({ name: e.target.value })} />
+          <input value={meta.name} onChange={(e) => upd({ name: e.target.value })} />
         </Row>
         <Row label="Client">
-          <input value={project.client ?? ''} onChange={(e) => upd({ client: e.target.value })} />
+          <input value={meta.client ?? ''} onChange={(e) => upd({ client: e.target.value })} />
         </Row>
         <Row label="Engineer">
-          <input value={project.engineer ?? ''} onChange={(e) => upd({ engineer: e.target.value })} />
+          <input value={meta.engineer ?? ''} onChange={(e) => upd({ engineer: e.target.value })} />
         </Row>
         <Row label="Standard">
-          <select value={project.standard} onChange={(e) => upd({ standard: e.target.value as any })}>
+          <select value={meta.standard} onChange={(e) => upd({ standard: e.target.value as any })}>
             <option value="IEEE">IEEE / JIC</option>
             <option value="IEC">IEC</option>
           </select>
         </Row>
         <Row label="Units">
-          <select value={project.units} onChange={(e) => upd({ units: e.target.value as any })}>
+          <select value={meta.units} onChange={(e) => upd({ units: e.target.value as any })}>
             <option value="mm">mm</option>
             <option value="in">inch</option>
           </select>

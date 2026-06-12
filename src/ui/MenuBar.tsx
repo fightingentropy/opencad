@@ -5,7 +5,8 @@ import { exportSheetSVG } from '../io/svg';
 import { exportSheetPNG } from '../io/png';
 import { exportSheetPDF } from '../io/pdf';
 import { autoNumberWires } from '../io/wire-numbering';
-import { fitViewportToSheet } from '../lib/fit';
+import { registerUiHandlers, runCommand, shortcutHint } from '../lib/commands';
+import { notify } from '../state/notifications';
 import { StandardsProfilePicker } from './StandardsProfilePicker';
 import { regenerateAutoFeaturesForContainments } from '../lib/auto-feature-actions';
 import { layoutContainmentsSideBySide } from '../lib/containment-layout';
@@ -45,7 +46,12 @@ export function MenuBar({
   onShowCrossSection?: () => void;
   onShowCollaboration?: () => void;
 }) {
-  const project = useStore((s) => s.project);
+  // Render only needs the project header line; every handler below reads the
+  // live project via useStore.getState() at invoke time instead of closing
+  // over a whole-project subscription.
+  const projectName = useStore((s) => s.project.name);
+  const projectStandard = useStore((s) => s.project.standard);
+  const sheetCount = useStore((s) => s.project.sheetOrder.length);
   const setProject = useStore((s) => s.setProject);
   const resetProject = useStore((s) => s.resetProject);
   const undo = useStore((s) => s.undo);
@@ -101,9 +107,15 @@ export function MenuBar({
     downloadBlob(new Blob([text], { type: mime }), filename);
   };
 
-  const safeProjectName = (): string => project.name.replace(/\s+/g, '_');
+  const safeProjectName = (): string =>
+    useStore.getState().project.name.replace(/\s+/g, '_');
+
+  const onNew = () => {
+    if (confirm('Discard current project?')) resetProject();
+  };
 
   const onSave = () => {
+    const project = useStore.getState().project;
     const json = exportProjectJSON(project);
     downloadText(json, `${safeProjectName()}.opencad.json`, 'application/json');
     setStatus(`Saved ${project.name}`);
@@ -114,31 +126,47 @@ export function MenuBar({
   const onFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const text = await file.text();
     try {
+      notify('info', 'Opening project…', { id: 'open-project', timeoutMs: null });
+      const text = await file.text();
       const p = importProjectJSON(text);
       setProject(p);
       setStatus(`Opened ${p.name}`);
+      notify('success', `Opened ${p.name}`, { id: 'open-project' });
     } catch (err) {
-      alert('Failed to open project: ' + (err as Error).message);
+      notify('error', 'Failed to open project', {
+        detail: (err as Error).message,
+        id: 'open-project',
+      });
     }
     e.target.value = '';
   };
 
   const onExportSVG = () => {
+    const project = useStore.getState().project;
     const svg = exportSheetSVG(project);
     const sheet = project.sheets[project.activeSheetId];
     downloadText(svg, `${sheet.name.replace(/\s+/g, '_')}.svg`, 'image/svg+xml');
   };
 
   const onExportPNG = async () => {
-    const blob = await exportSheetPNG(project, 2);
-    const sheet = project.sheets[project.activeSheetId];
-    downloadBlob(blob, `${sheet.name.replace(/\s+/g, '_')}.png`);
+    const project = useStore.getState().project;
+    try {
+      notify('info', 'Exporting PNG…', { id: 'export-png', timeoutMs: null });
+      const blob = await exportSheetPNG(project, 2);
+      const sheet = project.sheets[project.activeSheetId];
+      downloadBlob(blob, `${sheet.name.replace(/\s+/g, '_')}.png`);
+      notify('success', `Exported ${sheet.name.replace(/\s+/g, '_')}.png`, { id: 'export-png' });
+    } catch (err) {
+      notify('error', 'PNG export failed', {
+        detail: (err as Error).message,
+        id: 'export-png',
+      });
+    }
   };
 
   const onExportPDF = () => {
-    exportSheetPDF(project);
+    exportSheetPDF(useStore.getState().project);
   };
 
   const onAutoNumber = () => {
@@ -195,87 +223,133 @@ export function MenuBar({
 
   const onExportIFC = () => {
     try {
-      const ifc = exportIFC(project);
+      notify('info', 'Exporting IFC…', { id: 'export-ifc', timeoutMs: null });
+      const ifc = exportIFC(useStore.getState().project);
       downloadText(ifc, `${safeProjectName()}.ifc`, 'application/x-step');
       setStatus('Exported IFC (BIM) bundle');
+      notify('success', 'Exported IFC (BIM) bundle', { id: 'export-ifc' });
     } catch (err) {
-      alert('IFC export failed: ' + (err as Error).message);
+      notify('error', 'IFC export failed', {
+        detail: (err as Error).message,
+        id: 'export-ifc',
+      });
     }
   };
 
   const onExportCOBie = () => {
     try {
-      const bundle = exportCOBie(project);
+      notify('info', 'Exporting COBie…', { id: 'export-cobie', timeoutMs: null });
+      const bundle = exportCOBie(useStore.getState().project);
       const csv = cobieToCSVZip(bundle);
       downloadText(csv, `${safeProjectName()}.cobie.csv`, 'text/csv');
       setStatus('Exported COBie bundle');
+      notify('success', 'Exported COBie bundle', { id: 'export-cobie' });
     } catch (err) {
-      alert('COBie export failed: ' + (err as Error).message);
+      notify('error', 'COBie export failed', {
+        detail: (err as Error).message,
+        id: 'export-cobie',
+      });
     }
   };
 
   const onExportCableScheduleCSV = () => {
+    const project = useStore.getState().project;
     const cables = project.cableSchedule
       ? project.cableSchedule.cableOrder
           .map((id) => project.cableSchedule!.cables[id])
           .filter(Boolean)
       : [];
     if (cables.length === 0) {
-      alert('No cables in the cable schedule yet.');
+      notify('warning', 'No cables in the cable schedule yet.');
       return;
     }
     const csv = cablesToCSV(cables);
     downloadText(csv, `${safeProjectName()}_Cables.csv`, 'text/csv');
     setStatus(`Exported cable schedule (${cables.length} cables)`);
+    notify('success', `Exported cable schedule (${cables.length} cables)`, {
+      id: 'export-cable-schedule-csv',
+    });
   };
 
   const onExportCableSchedulePDF = async () => {
+    const project = useStore.getState().project;
     const rows = exportCableSchedule(project);
     if (rows.length === 0) {
-      alert('No cables in the cable schedule yet.');
+      notify('warning', 'No cables in the cable schedule yet.');
       return;
     }
     try {
+      notify('info', 'Exporting cable schedule PDF…', {
+        id: 'export-cable-schedule-pdf',
+        timeoutMs: null,
+      });
       const blob = await cableScheduleToPDF(rows, project);
       downloadBlob(blob, `${safeProjectName()}_CableSchedule.pdf`);
       setStatus(`Exported cable schedule PDF (${rows.length} cables)`);
+      notify('success', `Exported cable schedule PDF (${rows.length} cables)`, {
+        id: 'export-cable-schedule-pdf',
+      });
     } catch (err) {
-      alert('Cable schedule PDF failed: ' + (err as Error).message);
+      notify('error', 'Cable schedule PDF failed', {
+        detail: (err as Error).message,
+        id: 'export-cable-schedule-pdf',
+      });
     }
   };
 
   const onExportContainmentBOMCSV = () => {
-    const rows = generateContainmentBOM(project);
+    const rows = generateContainmentBOM(useStore.getState().project);
     if (rows.length === 0) {
-      alert('No containment runs to bill.');
+      notify('warning', 'No containment runs to bill.');
       return;
     }
     const csv = containmentBOMToCSV(rows);
     downloadText(csv, `${safeProjectName()}_ContainmentBOM.csv`, 'text/csv');
     setStatus(`Exported containment BOM (${rows.length} rows)`);
+    notify('success', `Exported containment BOM (${rows.length} rows)`, {
+      id: 'export-containment-bom',
+    });
   };
 
   const onExportCompliancePDF = async () => {
     try {
-      const data = generateComplianceReport(project);
+      notify('info', 'Generating compliance report…', {
+        id: 'export-compliance-pdf',
+        timeoutMs: null,
+      });
+      const data = generateComplianceReport(useStore.getState().project);
       const blob = await complianceReportToPDF(data);
       downloadBlob(blob, `${safeProjectName()}_Compliance.pdf`);
       setStatus('Exported compliance report');
+      notify('success', 'Exported compliance report', { id: 'export-compliance-pdf' });
     } catch (err) {
-      alert('Compliance report failed: ' + (err as Error).message);
+      notify('error', 'Compliance report failed', {
+        detail: (err as Error).message,
+        id: 'export-compliance-pdf',
+      });
     }
   };
 
   const onExportCostEstimateCSV = () => {
     try {
-      const est = generateCostEstimate(project);
+      notify('info', 'Exporting cost estimate…', {
+        id: 'export-cost-estimate',
+        timeoutMs: null,
+      });
+      const est = generateCostEstimate(useStore.getState().project);
       const csv = costEstimateToCSV(est);
       downloadText(csv, `${safeProjectName()}_CostEstimate.csv`, 'text/csv');
       setStatus(
         `Exported cost estimate (${est.currency} ${est.grandTotal.toFixed(2)})`,
       );
+      notify('success', `Exported cost estimate (${est.currency} ${est.grandTotal.toFixed(2)})`, {
+        id: 'export-cost-estimate',
+      });
     } catch (err) {
-      alert('Cost estimate export failed: ' + (err as Error).message);
+      notify('error', 'Cost estimate export failed', {
+        detail: (err as Error).message,
+        id: 'export-cost-estimate',
+      });
     }
   };
 
@@ -287,12 +361,17 @@ export function MenuBar({
     const file = e.target.files?.[0];
     if (!file) return;
     try {
+      notify('info', 'Importing DXF…', { id: 'import-dxf', timeoutMs: null });
       const text = await file.text();
       const underlay = parseDXF(text);
       addEntity(underlay);
       setStatus(`Imported DXF underlay (${file.name})`);
+      notify('success', `Imported DXF underlay (${file.name})`, { id: 'import-dxf' });
     } catch (err) {
-      alert('DXF import failed: ' + (err as Error).message);
+      notify('error', 'DXF import failed', {
+        detail: (err as Error).message,
+        id: 'import-dxf',
+      });
     }
     e.target.value = '';
   };
@@ -303,6 +382,7 @@ export function MenuBar({
     const file = e.target.files?.[0];
     if (!file) return;
     try {
+      notify('info', 'Importing IFC…', { id: 'import-ifc', timeoutMs: null });
       const text = await file.text();
       const result = importIFC(text);
       if (result.entities.length > 0) {
@@ -313,12 +393,22 @@ export function MenuBar({
         `Imported IFC (${result.entities.length} entities${warned ? `, ${warned} warnings` : ''})`,
       );
       if (result.entities.length === 0) {
-        alert(
-          `IFC import produced no entities.${warned ? '\n\n' + result.warnings.slice(0, 5).join('\n') : ''}`,
+        notify('warning', 'IFC import produced no entities.', {
+          detail: warned ? result.warnings.slice(0, 5).join('\n') : undefined,
+          id: 'import-ifc',
+        });
+      } else {
+        notify(
+          'success',
+          `Imported IFC (${result.entities.length} entities${warned ? `, ${warned} warnings` : ''})`,
+          { id: 'import-ifc' },
         );
       }
     } catch (err) {
-      alert('IFC import failed: ' + (err as Error).message);
+      notify('error', 'IFC import failed', {
+        detail: (err as Error).message,
+        id: 'import-ifc',
+      });
     }
     e.target.value = '';
   };
@@ -329,13 +419,15 @@ export function MenuBar({
     const file = e.target.files?.[0];
     if (!file) return;
     try {
+      notify('info', 'Importing cables…', { id: 'import-cables', timeoutMs: null });
       const text = await file.text();
       const result = cablesFromCSV(text);
       if (result.cables.length === 0) {
-        alert('No cables parsed from CSV.');
+        notify('warning', 'No cables parsed from CSV.', { id: 'import-cables' });
         return;
       }
       // Merge by reference: existing reference => replace; new => append.
+      const project = useStore.getState().project;
       const existing = project.cableSchedule ?? { cables: {}, cableOrder: [] };
       const cables = { ...existing.cables };
       const order = [...existing.cableOrder];
@@ -363,14 +455,49 @@ export function MenuBar({
         modified: Date.now(),
       });
       setStatus(`Imported ${added} new + ${merged} merged cables`);
+      notify('success', `Imported ${added} new + ${merged} merged cables`, {
+        id: 'import-cables',
+      });
       if (result.errors.length) {
         console.warn('[opencad] cable CSV warnings:', result.errors);
       }
     } catch (err) {
-      alert('Cable CSV import failed: ' + (err as Error).message);
+      notify('error', 'Cable CSV import failed', {
+        detail: (err as Error).message,
+        id: 'import-cables',
+      });
     }
     e.target.value = '';
   };
+
+  // Keep the command registry pointed at this render's handlers. They now
+  // read the live project via getState(), but some still close over props /
+  // local state. Runs after every render; registerUiHandlers is a cheap
+  // Object.assign.
+  useEffect(() => {
+    registerUiHandlers({
+      newProject: onNew,
+      openProject: onOpen,
+      saveProject: onSave,
+      exportSVG: onExportSVG,
+      exportPNG: onExportPNG,
+      exportPDF: onExportPDF,
+      exportIFC: onExportIFC,
+      exportCOBie: onExportCOBie,
+      exportCableScheduleCSV: onExportCableScheduleCSV,
+      exportCableSchedulePDF: onExportCableSchedulePDF,
+      exportContainmentBOMCSV: onExportContainmentBOMCSV,
+      exportCompliancePDF: onExportCompliancePDF,
+      exportCostEstimateCSV: onExportCostEstimateCSV,
+      importDXF: onImportDXF,
+      importIFC: onImportIFC,
+      importCablesCSV: onImportCables,
+      autoNumberWires: onAutoNumber,
+      rerunAutoFeatures: onRerunAutoFeatures,
+      straightenContainments: onStraightenAndSpaceContainments,
+      openViewGenerator: (kind) => setViewGeneratorKind(kind),
+    });
+  });
 
   return (
     <div className="menu-bar">
@@ -383,13 +510,13 @@ export function MenuBar({
       <input ref={ifcInputRef} type="file" accept=".ifc" onChange={onIFCChosen} style={{ display: 'none' }} />
       <input ref={cablesInputRef} type="file" accept=".csv" onChange={onCablesChosen} style={{ display: 'none' }} />
       <MenuButton label="File" open={openMenu === 'file'} onClick={click('file')}>
-        <MenuOpt label="New" onClick={action(() => { if (confirm('Discard current project?')) resetProject(); })} hint="" />
-        <MenuOpt label="Open…" onClick={action(onOpen)} hint="⌘O" />
-        <MenuOpt label="Save" onClick={action(onSave)} hint="⌘S" />
+        <MenuOpt label="New" onClick={action(onNew)} hint="" />
+        <MenuOpt label="Open…" onClick={action(onOpen)} hint={shortcutHint('file.open')} />
+        <MenuOpt label="Save" onClick={action(onSave)} hint={shortcutHint('file.save')} />
         <Divider />
         <MenuOpt label="Export SVG…" onClick={action(onExportSVG)} hint="" />
         <MenuOpt label="Export PNG…" onClick={action(onExportPNG)} hint="" />
-        <MenuOpt label="Export PDF…" onClick={action(onExportPDF)} hint="⌘⇧P" />
+        <MenuOpt label="Export PDF…" onClick={action(onExportPDF)} hint={shortcutHint('file.export-pdf')} />
         <Divider />
         <SubMenu
           label="Export"
@@ -423,13 +550,13 @@ export function MenuBar({
         )}
       </MenuButton>
       <MenuButton label="Edit" open={openMenu === 'edit'} onClick={click('edit')}>
-        <MenuOpt label="Undo" onClick={action(undo)} hint="⌘Z" />
-        <MenuOpt label="Redo" onClick={action(redo)} hint="⌘⇧Z" />
+        <MenuOpt label="Undo" onClick={action(undo)} hint={shortcutHint('edit.undo')} />
+        <MenuOpt label="Redo" onClick={action(redo)} hint={shortcutHint('edit.redo')} />
         <Divider />
-        <MenuOpt label="Select All" onClick={action(() => { const sheet = project.sheets[project.activeSheetId]; useStore.getState().setSelection(sheet.entityOrder); })} hint="⌘A" />
-        <MenuOpt label="Deselect" onClick={action(() => useStore.getState().clearSelection())} hint="Esc" />
+        <MenuOpt label="Select All" onClick={action(() => { const { project, setSelection } = useStore.getState(); const sheet = project.sheets[project.activeSheetId]; setSelection(sheet.entityOrder); })} hint={shortcutHint('edit.select-all')} />
+        <MenuOpt label="Deselect" onClick={action(() => useStore.getState().clearSelection())} hint={shortcutHint('edit.cancel')} />
         <Divider />
-        <MenuOpt label="Delete Selection" onClick={action(() => { const ids = Array.from(useStore.getState().editor.selection); useStore.getState().removeEntities(ids); })} hint="Del" />
+        <MenuOpt label="Delete Selection" onClick={action(() => { const ids = Array.from(useStore.getState().editor.selection); useStore.getState().removeEntities(ids); })} hint={shortcutHint('edit.delete')} />
         <Divider />
         <MenuOpt label="Align Left" onClick={action(() => useStore.getState().alignEntities('left'))} hint="" disabled={selectionSize < 2} />
         <MenuOpt label="Align Center Horizontal" onClick={action(() => useStore.getState().alignEntities('center-h'))} hint="" disabled={selectionSize < 2} />
@@ -440,17 +567,17 @@ export function MenuBar({
         <Divider />
         <MenuOpt label="Distribute Horizontal" onClick={action(() => useStore.getState().distributeEntities('horizontal'))} hint="" disabled={selectionSize < 3} />
         <MenuOpt label="Distribute Vertical" onClick={action(() => useStore.getState().distributeEntities('vertical'))} hint="" disabled={selectionSize < 3} />
-        <MenuOpt label="Flip Horizontal" onClick={action(() => useStore.getState().flipEntities('horizontal'))} hint="⌘⇧H" disabled={selectionSize < 1} />
-        <MenuOpt label="Flip Vertical" onClick={action(() => useStore.getState().flipEntities('vertical'))} hint="⌘⇧V" disabled={selectionSize < 1} />
+        <MenuOpt label="Flip Horizontal" onClick={action(() => useStore.getState().flipEntities('horizontal'))} hint={shortcutHint('edit.flip-horizontal')} disabled={selectionSize < 1} />
+        <MenuOpt label="Flip Vertical" onClick={action(() => useStore.getState().flipEntities('vertical'))} hint={shortcutHint('edit.flip-vertical')} disabled={selectionSize < 1} />
       </MenuButton>
       <MenuButton label="View" open={openMenu === 'view'} onClick={click('view')}>
-        <MenuOpt label="Zoom Extents" onClick={action(() => zoomExtents())} hint="" />
+        <MenuOpt label="Zoom Extents" onClick={action(() => runCommand('view.zoom-extents'))} hint="" />
         <MenuOpt label="2D Only" onClick={action(() => useStore.getState().setViewMode('2d'))} hint="" />
         <MenuOpt label="Split View" onClick={action(() => useStore.getState().setViewMode('split'))} hint="" />
         <MenuOpt label="3D Only" onClick={action(() => useStore.getState().setViewMode('3d'))} hint="" />
-        <MenuOpt label="Toggle Ortho" onClick={action(() => useStore.getState().setOrtho(!useStore.getState().editor.ortho))} hint="F8" />
-        <MenuOpt label="Toggle Snap" onClick={action(() => useStore.getState().setSnap({ enabled: !useStore.getState().editor.snap.enabled }))} hint="F9" />
-        <MenuOpt label="Toggle Grid" onClick={action(() => useStore.getState().setSnap({ grid: !useStore.getState().editor.snap.grid }))} hint="F7" />
+        <MenuOpt label="Toggle Ortho" onClick={action(() => useStore.getState().setOrtho(!useStore.getState().editor.ortho))} hint={shortcutHint('view.toggle-ortho')} />
+        <MenuOpt label="Toggle Snap" onClick={action(() => useStore.getState().setSnap({ enabled: !useStore.getState().editor.snap.enabled }))} hint={shortcutHint('view.toggle-snap')} />
+        <MenuOpt label="Toggle Grid" onClick={action(() => useStore.getState().setSnap({ grid: !useStore.getState().editor.snap.grid }))} hint={shortcutHint('view.toggle-grid')} />
       </MenuButton>
       <MenuButton label="Tools" open={openMenu === 'tools'} onClick={click('tools')}>
         <MenuOpt label="Auto-Number Wires" onClick={action(onAutoNumber)} hint="" />
@@ -492,11 +619,13 @@ export function MenuBar({
         </div>
       </MenuButton>
       <MenuButton label="Help" open={openMenu === 'help'} onClick={click('help')}>
+        <MenuOpt label="Command Palette…" onClick={action(() => runCommand('help.palette'))} hint={shortcutHint('help.palette')} />
+        <MenuOpt label="Keyboard Shortcuts" onClick={action(() => runCommand('help.shortcuts'))} hint={shortcutHint('help.shortcuts')} />
+        <Divider />
         <MenuOpt label="About OpenCAD Electrical" onClick={action(onShowAbout)} hint="" />
-        <MenuOpt label="Keyboard Shortcuts" onClick={action(onShowAbout)} hint="" />
       </MenuButton>
       <div className="menu-spacer" />
-      <span className="menu-info">{project.name} · {project.sheetOrder.length} sheets · {project.standard}</span>
+      <span className="menu-info">{projectName} · {sheetCount} sheets · {projectStandard}</span>
       {viewGeneratorKind && (
         <ViewGeneratorModal
           kind={viewGeneratorKind}
@@ -506,17 +635,6 @@ export function MenuBar({
     </div>
   );
 }
-
-const zoomExtents = () => {
-  const state = useStore.getState();
-  const sheet = state.project.sheets[state.project.activeSheetId];
-  if (!sheet) return;
-  // Best-effort canvas size: fall back to window if we can't query the canvas.
-  const canvas = document.querySelector('canvas.canvas-2d') as HTMLCanvasElement | null;
-  const w = canvas?.clientWidth ?? window.innerWidth - 500;
-  const h = canvas?.clientHeight ?? window.innerHeight - 200;
-  state.setViewport(fitViewportToSheet(sheet, w, h));
-};
 
 function MenuButton({
   label, open, onClick, children,

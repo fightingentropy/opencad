@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../state/store';
+import { useCatalogues, useSelectedEntity } from '../state/selectors';
+import { notify } from '../state/notifications';
 import type { CatalogueProduct, CatalogueCategory } from '../models/catalogue';
 
 const TABS: { id: CatalogueCategory; label: string }[] = [
@@ -15,8 +17,8 @@ const TABS: { id: CatalogueCategory; label: string }[] = [
 ];
 
 export function CatalogueBrowser({ onClose }: { onClose: () => void }) {
-  const project = useStore((s) => s.project);
-  const editor = useStore((s) => s.editor);
+  const catalogues = useCatalogues();
+  const selectedEntity = useSelectedEntity();
   const updateEntity = useStore((s) => s.updateEntity);
   const setStatus = useStore((s) => s.setStatus);
 
@@ -30,7 +32,7 @@ export function CatalogueBrowser({ onClose }: { onClose: () => void }) {
 
   const allProducts: CatalogueProduct[] = useMemo(() => {
     const out: CatalogueProduct[] = [];
-    const cats = project.catalogues ?? {};
+    const cats = catalogues ?? {};
     for (const k of Object.keys(cats)) {
       const cat = cats[k];
       for (const pid of cat.productOrder) {
@@ -39,7 +41,7 @@ export function CatalogueBrowser({ onClose }: { onClose: () => void }) {
       }
     }
     return out;
-  }, [project.catalogues]);
+  }, [catalogues]);
 
   const visible = useMemo(() => {
     const lc = search.toLowerCase();
@@ -62,14 +64,12 @@ export function CatalogueBrowser({ onClose }: { onClose: () => void }) {
   const materials = useMemo(() => Array.from(new Set(allProducts.map((p) => p.material).filter(Boolean) as string[])), [allProducts]);
   const ipRatings = useMemo(() => Array.from(new Set(allProducts.map((p) => p.ipRating).filter(Boolean) as string[])), [allProducts]);
 
-  const sel = Array.from(editor.selection);
-  const sheet = project.sheets[project.activeSheetId];
-  const selectedContainment = sel.length === 1 && sheet?.entities[sel[0]]?.kind === 'containment'
-    ? sheet.entities[sel[0]] : null;
+  const selectedContainment =
+    selectedEntity?.kind === 'containment' ? selectedEntity : null;
 
   const onApply = (p: CatalogueProduct) => {
     if (!selectedContainment) {
-      alert('Select a containment entity first');
+      notify('warning', 'Select a containment entity first');
       return;
     }
     updateEntity(selectedContainment.id, {

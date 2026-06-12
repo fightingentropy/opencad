@@ -24,7 +24,8 @@ const newId = () => nanoid(10);
 
 // Cap the undo stack so a long editing session doesn't grow without bound.
 // 50 keeps memory predictable while still spanning a meaningful history.
-const MAX_HISTORY = 50;
+// Exported for the history tests.
+export const MAX_HISTORY = 50;
 
 // Cap the camera-position history (Alt+←/Alt+→). 30 is plenty — this is
 // browser-style "zoom previous" navigation, not a long task list.
@@ -35,10 +36,28 @@ const viewportsEqual = (a: Viewport, b: Viewport): boolean =>
   Math.abs(a.y - b.y) < 0.01 &&
   Math.abs(a.zoom - b.zoom) < 0.0001;
 
+// History entries share structure with the live project: every mutation in
+// this store (and the companion action modules) builds new objects along the
+// changed path only, so pushing the outgoing project reference is O(1) and
+// unchanged sheets/entities are shared across history entries. The DEV-only
+// deep freeze below catches any future in-place mutation that would
+// otherwise silently corrupt these shared snapshots.
 const pushPast = (past: Project[], project: Project): Project[] => {
   const next = past.length >= MAX_HISTORY ? past.slice(past.length - MAX_HISTORY + 1) : past.slice();
-  next.push(cloneProject(project));
+  next.push(project);
   return next;
+};
+
+// Recursively freeze a committed project (dev only). Frozen subtrees are
+// skipped, so with structural sharing each commit only pays for the objects
+// it actually created — unchanged sheets/entities stay frozen from the
+// previous commit.
+const deepFreeze = (value: unknown): void => {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return;
+  Object.freeze(value);
+  for (const key of Object.keys(value)) {
+    deepFreeze((value as Record<string, unknown>)[key]);
+  }
 };
 
 // Pick the BS EN ISO 7200 paper-size letter that comfortably fits a sheet
@@ -504,26 +523,6 @@ interface Store {
   setAutoRoute: (on: boolean) => void;
 }
 
-const cloneProject = (p: Project): Project => {
-  // Shallow clone with re-cloned sheets/entities so undo snapshots are independent
-  const sheets: Record<SheetId, Sheet> = {};
-  for (const sid of p.sheetOrder) {
-    const s = p.sheets[sid];
-    sheets[sid] = {
-      ...s,
-      entities: { ...s.entities },
-      entityOrder: [...s.entityOrder],
-    };
-  }
-  return {
-    ...p,
-    layers: { ...p.layers },
-    layerOrder: [...p.layerOrder],
-    sheets,
-    sheetOrder: [...p.sheetOrder],
-  };
-};
-
 export const useStore = create<Store>((set, get) => ({
   project: createEmptyProject(),
   editor: initialEditor(),
@@ -905,7 +904,9 @@ export const useStore = create<Store>((set, get) => ({
     set({
       project: prev,
       past: past.slice(0, -1),
-      future: [cloneProject(project), ...future],
+      // Push the outgoing project by reference — history shares structure
+      // in both directions (see pushPast), so no clone is needed.
+      future: [project, ...future],
     });
   },
 
@@ -1212,5 +1213,21 @@ export const useStore = create<Store>((set, get) => ({
   },
   setAutoRoute: (on) => set({ autoRoute: on }),
 }));
+
+// DEV-only guard for the structurally-shared history: every committed
+// project is deep-frozen so an in-place mutation throws immediately
+// instead of silently corrupting past/future snapshots. Subscribing to
+// the store (rather than wrapping each action) is the single chokepoint
+// that covers every path that swaps `project` — store actions,
+// setProjectPatch from the companion action modules, setProject on load,
+// undo/redo, and direct useStore.setState calls from tests or collab.
+// Frozen-subtree skipping in deepFreeze keeps the cost proportional to
+// the objects each commit actually created.
+if (import.meta.env.DEV) {
+  deepFreeze(useStore.getState().project);
+  useStore.subscribe((state, prevState) => {
+    if (state.project !== prevState.project) deepFreeze(state.project);
+  });
+}
 
 export const newEntityId = newId;

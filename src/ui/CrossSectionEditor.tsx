@@ -1,5 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store';
+import {
+  useActiveSheet,
+  useCableSchedule,
+  useStandardsProfile,
+} from '../state/selectors';
 import type { ContainmentEntity } from '../types';
 import { cablesOnContainment, computeFill, fmtPct } from './whole-site-helpers';
 
@@ -8,12 +13,18 @@ type Pos = { id: string; x: number; y: number; r: number; color: string; label: 
 // Visual cross-section box for the selected containment, with cables packed
 // inside. Cables can be dragged to manual positions.
 export function CrossSectionEditor({ entityId, onClose }: { entityId: string; onClose: () => void }) {
-  const project = useStore((s) => s.project);
-  const sheet = project.sheets[project.activeSheetId];
+  const sheet = useActiveSheet();
+  const cableSchedule = useCableSchedule();
+  const standardsProfile = useStandardsProfile();
   const ent = sheet?.entities[entityId];
   if (!ent || ent.kind !== 'containment') return null;
   const cont = ent as ContainmentEntity;
-  const cables = useMemo(() => cablesOnContainment(project, cont.id), [project, cont.id]);
+  // cablesOnContainment only consults project.cableSchedule — the schedule
+  // slice is the exact recompute trigger; the project is read untracked.
+  const cables = useMemo(
+    () => cablesOnContainment(useStore.getState().project, cont.id),
+    [cableSchedule, cont.id],
+  );
 
   const w = cont.width ?? 100;
   const h = cont.height ?? 50;
@@ -63,7 +74,11 @@ export function CrossSectionEditor({ entityId, onClose }: { entityId: string; on
   const [dragId, setDragId] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
 
-  const fill = useMemo(() => computeFill(cont, cables, project), [cont, cables, project]);
+  // computeFill only reads project.standardsProfile beyond its arguments.
+  const fill = useMemo(
+    () => computeFill(cont, cables, useStore.getState().project),
+    [cont, cables, standardsProfile],
+  );
 
   // Render scale: fit width to ~480 px
   const scale = innerW > 0 ? Math.min(8, 480 / w) : 4;

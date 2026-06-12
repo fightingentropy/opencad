@@ -22,6 +22,17 @@ import type {
 // import dance prevented Vite from putting the library in its own chunk.
 import { getSymbol as _getSymbolImpl } from '../symbols';
 
+// Cheap structural-comparison helpers for the diff/update loop (replaces
+// the old JSON.stringify-based entity signatures).
+import {
+  nearlyEqual,
+  snapshotPoints,
+  diffPointsSig,
+  runSnapshotsEqual,
+  type RunSnapshot,
+  type SigDiff,
+} from './diff-utils';
+
 // Stub kept for call-site compatibility — the static import means the
 // library is always available.
 async function ensureSymbolLibrary(): Promise<void> {
@@ -90,7 +101,8 @@ interface MaterialBag {
   dispose: () => void;
 }
 
-function buildMaterials(): MaterialBag {
+// Exported for tests (geometry builders + in-place updaters are pure).
+export function buildMaterials(): MaterialBag {
   const steel = new THREE.MeshStandardMaterial({
     color: 0xb8bcc2,
     metalness: 0.85,
@@ -1128,7 +1140,7 @@ const BUILDING_ELEVATION: Record<string, number> = {
 // Build a Group representing one containment run by walking each polyline
 // segment and emitting the appropriate per-segment geometry. Corners may
 // show a small gap at sharp bends — acceptable for a panel-layout overview.
-function buildContainmentGroup(
+export function buildContainmentGroup(
   c: ContainmentEntity,
   H: number,
   mats: MaterialBag,
@@ -1193,6 +1205,8 @@ function buildContainmentGroup(
       wrap.rotation.z = heading;
       tube.castShadow = true;
       tube.receiveShadow = true;
+      wrap.userData.segIndex = i;
+      wrap.userData.builtLen = len;
       grp.add(wrap);
       continue;
     }
@@ -1227,6 +1241,8 @@ function buildContainmentGroup(
       body.castShadow = true;
       body.receiveShadow = true;
       lid.castShadow = true;
+      wrap.userData.segIndex = i;
+      wrap.userData.builtLen = len;
       grp.add(wrap);
       continue;
     }
@@ -1270,6 +1286,8 @@ function buildContainmentGroup(
       }
       wrap.position.set(cx, cy, baseZ + h / 2);
       wrap.rotation.z = heading;
+      wrap.userData.segIndex = i;
+      wrap.userData.builtLen = len;
       grp.add(wrap);
       continue;
     }
@@ -1316,6 +1334,8 @@ function buildContainmentGroup(
       }
       wrap.position.set(cx, cy, baseZ + h / 2);
       wrap.rotation.z = heading;
+      wrap.userData.segIndex = i;
+      wrap.userData.builtLen = len;
       grp.add(wrap);
       continue;
     }
@@ -1562,7 +1582,7 @@ function buildRoomGroup(
   return grp;
 }
 
-function buildWireMesh(w: WireEntity, H: number): THREE.Mesh | null {
+export function buildWireMesh(w: WireEntity, H: number): THREE.Mesh | null {
   if (!w.points || w.points.length < 2) return null;
   const color = w.color
     ? new THREE.Color(w.color).getHex()
@@ -1741,6 +1761,275 @@ function disposeObject(obj: THREE.Object3D) {
   });
 }
 
+// ---------- Diff signatures ---------------------------------------------------
+// Typed structural signatures for the incremental scene diff. Scalar fields
+// (ids/colors/flags/counts/dims) compare with exact equality; coordinates go
+// through a 1e-9 epsilon purely to swallow float noise — a genuine move
+// (even 1 mm) is far above the epsilon and still triggers an update.
+
+interface SymbolSig {
+  cat: string;
+  symbolId: string;
+  tag: string;
+  color: string;
+  mirror: boolean;
+}
+
+function symbolSigEqual(a: SymbolSig, b: SymbolSig): boolean {
+  return (
+    a.cat === b.cat &&
+    a.symbolId === b.symbolId &&
+    a.tag === b.tag &&
+    a.color === b.color &&
+    a.mirror === b.mirror
+  );
+}
+
+interface WireSig {
+  wireType: string;
+  color: string;
+  H: number;
+  points: Float64Array;
+}
+
+function makeWireSig(w: WireEntity, H: number): WireSig {
+  return {
+    wireType: w.wireType ?? '',
+    color: w.color ?? '',
+    H,
+    points: snapshotPoints(w.points),
+  };
+}
+
+function diffWireSig(sig: WireSig, w: WireEntity, H: number): SigDiff {
+  const fieldsEqual =
+    sig.H === H &&
+    sig.wireType === (w.wireType ?? '') &&
+    sig.color === (w.color ?? '');
+  return diffPointsSig(fieldsEqual, sig.points, w.points);
+}
+
+interface ContainmentSig {
+  containmentType: string;
+  width: number;
+  height: number;
+  color: string;
+  H: number;
+  baseZ: number;
+  points: Float64Array;
+}
+
+function makeContainmentSig(
+  c: ContainmentEntity,
+  H: number,
+  baseZ: number
+): ContainmentSig {
+  return {
+    containmentType: c.containmentType,
+    width: c.width ?? 50,
+    height: c.height ?? 50,
+    color: c.color ?? '',
+    H,
+    baseZ,
+    points: snapshotPoints(c.points),
+  };
+}
+
+function diffContainmentSig(
+  sig: ContainmentSig,
+  c: ContainmentEntity,
+  H: number,
+  baseZ: number
+): SigDiff {
+  const fieldsEqual =
+    sig.containmentType === c.containmentType &&
+    sig.width === (c.width ?? 50) &&
+    sig.height === (c.height ?? 50) &&
+    sig.color === (c.color ?? '') &&
+    sig.H === H &&
+    sig.baseZ === baseZ;
+  return diffPointsSig(fieldsEqual, sig.points, c.points);
+}
+
+interface WallSig {
+  thickness: number;
+  height: number;
+  H: number;
+  points: Float64Array;
+}
+
+function makeWallSig(w: WallEntity, H: number): WallSig {
+  return {
+    thickness: w.thickness ?? 200,
+    height: w.height ?? 3000,
+    H,
+    points: snapshotPoints(w.points),
+  };
+}
+
+function diffWallSig(sig: WallSig, w: WallEntity, H: number): SigDiff {
+  const fieldsEqual =
+    sig.thickness === (w.thickness ?? 200) &&
+    sig.height === (w.height ?? 3000) &&
+    sig.H === H;
+  return diffPointsSig(fieldsEqual, sig.points, w.points);
+}
+
+interface RoomSig {
+  ax: number;
+  ay: number;
+  bx: number;
+  by: number;
+  floorColor: string;
+  H: number;
+}
+
+function makeRoomSig(r: RoomEntity, H: number): RoomSig {
+  return {
+    ax: r.a.x,
+    ay: r.a.y,
+    bx: r.b.x,
+    by: r.b.y,
+    floorColor: r.floorColor ?? '',
+    H,
+  };
+}
+
+function roomSigMatches(sig: RoomSig, r: RoomEntity, H: number): boolean {
+  return (
+    sig.floorColor === (r.floorColor ?? '') &&
+    sig.H === H &&
+    nearlyEqual(sig.ax, r.a.x) &&
+    nearlyEqual(sig.ay, r.a.y) &&
+    nearlyEqual(sig.bx, r.b.x) &&
+    nearlyEqual(sig.by, r.b.y)
+  );
+}
+
+// ---------- In-place geometry updates -----------------------------------------
+// When ONLY point positions changed (same topology / point count / style /
+// cross-section), the existing scene objects are refreshed in place instead
+// of being disposed and rebuilt.
+
+// Wires: the tube's vertex layout depends only on the point COUNT
+// (tubularSegments = max(8, n*6), radialSegments = 8), so when the count is
+// unchanged the fresh positions/normals can be copied straight into the
+// live BufferGeometry attributes.
+export function updateWireGeometryInPlace(
+  mesh: THREE.Mesh,
+  w: WireEntity,
+  H: number
+): boolean {
+  if (!w.points || w.points.length < 2) return false;
+  const pts: THREE.Vector3[] = w.points.map(
+    (p, i) => new THREE.Vector3(p.x, H - p.y, 25 + (i % 2) * 1.5)
+  );
+  const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.2);
+  const fresh = new THREE.TubeGeometry(
+    curve,
+    Math.max(8, pts.length * 6),
+    1.2,
+    8,
+    false
+  );
+  const geom = mesh.geometry as THREE.BufferGeometry;
+  const dstPos = geom.getAttribute('position') as THREE.BufferAttribute | undefined;
+  const dstNrm = geom.getAttribute('normal') as THREE.BufferAttribute | undefined;
+  const srcPos = fresh.getAttribute('position') as THREE.BufferAttribute;
+  const srcNrm = fresh.getAttribute('normal') as THREE.BufferAttribute;
+  if (
+    !dstPos ||
+    !dstNrm ||
+    dstPos.count !== srcPos.count ||
+    dstNrm.count !== srcNrm.count
+  ) {
+    fresh.dispose();
+    return false;
+  }
+  (dstPos.array as Float32Array).set(srcPos.array as Float32Array);
+  (dstNrm.array as Float32Array).set(srcNrm.array as Float32Array);
+  dstPos.needsUpdate = true;
+  dstNrm.needsUpdate = true;
+  geom.computeBoundingBox();
+  geom.computeBoundingSphere();
+  // `fresh` was never rendered so it owns no GPU buffers; dispose anyway to
+  // keep the ownership contract obvious.
+  fresh.dispose();
+  return true;
+}
+
+// Containment runs: each non-degenerate polyline segment was built as one
+// wrap Group along its local +X (tagged with userData.segIndex/builtLen).
+// A position-only drag just re-poses each wrap — position, heading, and a
+// local X stretch (newLen / builtLen) — leaving every BufferGeometry and
+// material untouched. Returns false (caller rebuilds) when the wrap set no
+// longer matches the polyline, e.g. a segment crossed the 1e-3 degeneracy
+// threshold used by the builder.
+export function updateContainmentGroupInPlace(
+  grp: THREE.Group,
+  c: ContainmentEntity,
+  H: number,
+  baseZ: number
+): boolean {
+  const pts = c.points;
+  if (!pts || pts.length < 2) return false;
+  const w = c.width ?? 50;
+  const h = c.height ?? 50;
+  const zOff =
+    c.containmentType === 'conduit' ? baseZ + w / 2 : baseZ + h / 2;
+
+  let liveSegs = 0;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const len = Math.hypot(
+      pts[i + 1].x - pts[i].x,
+      pts[i + 1].y - pts[i].y
+    );
+    if (len >= 1e-3) liveSegs++;
+  }
+  if (liveSegs !== grp.children.length) return false;
+
+  // Validate every wrap before mutating anything so a failed pass leaves
+  // the group untouched for the rebuild path.
+  const placements: {
+    child: THREE.Object3D;
+    cx: number;
+    cy: number;
+    heading: number;
+    scaleX: number;
+  }[] = [];
+  for (const child of grp.children) {
+    const segIndex: unknown = child.userData.segIndex;
+    const builtLen: unknown = child.userData.builtLen;
+    if (typeof segIndex !== 'number' || typeof builtLen !== 'number') {
+      return false;
+    }
+    const a = pts[segIndex];
+    const b = pts[segIndex + 1];
+    if (!a || !b) return false;
+    const ax = a.x;
+    const ay = H - a.y;
+    const bx = b.x;
+    const by = H - b.y;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-3 || builtLen < 1e-3) return false;
+    placements.push({
+      child,
+      cx: (ax + bx) / 2,
+      cy: (ay + by) / 2,
+      heading: Math.atan2(dy, dx),
+      scaleX: len / builtLen,
+    });
+  }
+  for (const p of placements) {
+    p.child.position.set(p.cx, p.cy, zOff);
+    p.child.rotation.z = p.heading;
+    p.child.scale.x = p.scaleX;
+  }
+  return true;
+}
+
 // ---------- Active sheet selection -------------------------------------------
 function pickSheetForViewer(project: Project): { sheet: Sheet; isPanel: boolean } {
   const active = project.sheets[project.activeSheetId];
@@ -1891,25 +2180,28 @@ export function Panel3D({
   const symbolsGroupRef = useRef<THREE.Group | null>(null);
   const wiresGroupRef = useRef<THREE.Group | null>(null);
   const containmentGroupRef = useRef<THREE.Group | null>(null);
-  const symbolMapRef = useRef<Map<string, { group: THREE.Group; sig: string }>>(
-    new Map()
-  );
-  const wireMapRef = useRef<Map<string, { mesh: THREE.Mesh; sig: string }>>(
+  const symbolMapRef = useRef<
+    Map<string, { group: THREE.Group; sig: SymbolSig }>
+  >(new Map());
+  const wireMapRef = useRef<Map<string, { mesh: THREE.Mesh; sig: WireSig }>>(
     new Map()
   );
   const containmentMapRef = useRef<
-    Map<string, { group: THREE.Group; sig: string }>
+    Map<string, { group: THREE.Group; sig: ContainmentSig }>
   >(new Map());
   // Walls + rooms: only populated in building mode, but we keep refs at the
   // top level so cleanup mirrors the other diff maps.
   const wallsGroupRef = useRef<THREE.Group | null>(null);
   const roomsGroupRef = useRef<THREE.Group | null>(null);
   const wallMapRef = useRef<
-    Map<string, { group: THREE.Group; sig: string }>
+    Map<string, { group: THREE.Group; sig: WallSig }>
   >(new Map());
   const roomMapRef = useRef<
-    Map<string, { group: THREE.Group; sig: string }>
+    Map<string, { group: THREE.Group; sig: RoomSig }>
   >(new Map());
+  // Containment-run snapshot from the previous building-mode pass. Walls cut
+  // holes where runs cross them, so any run shape change forces wall rebuilds.
+  const lastContainmentRunsRef = useRef<RunSnapshot[]>([]);
   // (sheetId, w, h) signature so we know when to reframe and rebuild enclosure
   const lastFrameSigRef = useRef<string>('');
   const lastEnclosureSigRef = useRef<string>('');
@@ -2285,16 +2577,16 @@ export function Panel3D({
         const cat = categoryFor(sym);
         // Signature controls when the underlying geometry must be rebuilt.
         // Position/rotation/scale don't change geometry — applied directly.
-        const sig = [
-          isPanel ? cat : 'wf',
-          sym.symbolId,
-          sym.tag ?? '',
-          sym.attributes?.color ?? '',
-          sym.mirror ? '1' : '0',
-        ].join('|');
+        const sig: SymbolSig = {
+          cat: isPanel ? cat : 'wf',
+          symbolId: sym.symbolId,
+          tag: sym.tag ?? '',
+          color: sym.attributes?.color ?? '',
+          mirror: !!sym.mirror,
+        };
 
         let entry = symbolMap.get(id);
-        if (!entry || entry.sig !== sig) {
+        if (!entry || !symbolSigEqual(entry.sig, sig)) {
           if (entry) {
             symbolsGroup.remove(entry.group);
             disposeObject(entry.group);
@@ -2323,30 +2615,35 @@ export function Panel3D({
       symbolMap.delete(id);
     }
 
-    // Wires: same diff pattern. Geometry depends on point list, so the
-    // signature includes the JSON of points + style.
+    // Wires: same diff pattern, but with a typed signature. When only the
+    // point positions moved (same count/style), the tube geometry is
+    // refreshed in place instead of disposed and rebuilt.
     const seenWires = new Set<string>();
     if (sheet && isPanel) {
       for (const id of sheet.entityOrder) {
         const e = sheet.entities[id];
         if (!e || e.visible === false || e.kind !== 'wire') continue;
         const w = e as WireEntity;
-        const sig = [
-          JSON.stringify(w.points),
-          w.wireType ?? '',
-          w.color ?? '',
-          String(H),
-        ].join('|');
         let entry = wireMap.get(id);
-        if (!entry || entry.sig !== sig) {
+        let action: SigDiff = entry ? diffWireSig(entry.sig, w, H) : 'rebuild';
+        if (action === 'points-only' && entry) {
+          if (updateWireGeometryInPlace(entry.mesh, w, H)) {
+            entry.sig = makeWireSig(w, H);
+            action = 'same';
+          } else {
+            action = 'rebuild';
+          }
+        }
+        if (action === 'rebuild') {
           if (entry) {
             wiresGroup.remove(entry.mesh);
             disposeObject(entry.mesh);
+            wireMap.delete(id);
           }
           const mesh = buildWireMesh(w, H);
           if (!mesh) continue;
           wiresGroup.add(mesh);
-          entry = { mesh, sig };
+          entry = { mesh, sig: makeWireSig(w, H) };
           wireMap.set(id, entry);
         }
         seenWires.add(id);
@@ -2360,7 +2657,8 @@ export function Panel3D({
     }
 
     // Containment runs (trunking / basket / tray / conduit). Geometry is
-    // built per-segment, so any change to points/dims/type forces rebuild.
+    // built per-segment. A position-only drag re-poses the per-segment
+    // wraps in place; type/cross-section/count changes force a rebuild.
     const seenContainment = new Set<string>();
     if (sheet) {
       for (const id of sheet.entityOrder) {
@@ -2370,25 +2668,28 @@ export function Panel3D({
         const baseZ = isBuilding
           ? BUILDING_ELEVATION[c.containmentType] ?? 2200
           : 30;
-        const sig = [
-          c.containmentType,
-          JSON.stringify(c.points),
-          String(c.width ?? ''),
-          String(c.height ?? ''),
-          String(c.color ?? ''),
-          String(H),
-          String(baseZ),
-        ].join('|');
         let entry = containmentMap.get(id);
-        if (!entry || entry.sig !== sig) {
+        let action: SigDiff = entry
+          ? diffContainmentSig(entry.sig, c, H, baseZ)
+          : 'rebuild';
+        if (action === 'points-only' && entry) {
+          if (updateContainmentGroupInPlace(entry.group, c, H, baseZ)) {
+            entry.sig = makeContainmentSig(c, H, baseZ);
+            action = 'same';
+          } else {
+            action = 'rebuild';
+          }
+        }
+        if (action === 'rebuild') {
           if (entry) {
             containmentGroup.remove(entry.group);
             disposeObject(entry.group);
+            containmentMap.delete(id);
           }
           const grp = buildContainmentGroup(c, H, mats, baseZ);
           if (!grp) continue;
           containmentGroup.add(grp);
-          entry = { group: grp, sig };
+          entry = { group: grp, sig: makeContainmentSig(c, H, baseZ) };
           containmentMap.set(id, entry);
         }
         seenContainment.add(id);
@@ -2423,9 +2724,20 @@ export function Panel3D({
           });
         }
       }
-      const contRunSig = containmentRuns.map(r =>
-        `${r.containmentType}:${JSON.stringify(r.points)}:${r.width}:${r.height}:${r.baseZ}`
-      ).join(';;');
+      // Walls cut holes where containment runs cross them, so any run shape
+      // change must rebuild every wall (mirrors the old contRunSig string).
+      const runsSnapshot: RunSnapshot[] = containmentRuns.map((r) => ({
+        containmentType: r.containmentType,
+        width: r.width,
+        height: r.height,
+        baseZ: r.baseZ,
+        points: snapshotPoints(r.points),
+      }));
+      const runsChanged = !runSnapshotsEqual(
+        lastContainmentRunsRef.current,
+        runsSnapshot
+      );
+      lastContainmentRunsRef.current = runsSnapshot;
 
       const seenWalls = new Set<string>();
       if (sheet) {
@@ -2433,23 +2745,24 @@ export function Panel3D({
           const e = sheet.entities[id];
           if (!e || e.visible === false || e.kind !== 'wall') continue;
           const wEnt = e as WallEntity;
-          const sig = [
-            JSON.stringify(wEnt.points),
-            String(wEnt.thickness ?? ''),
-            String(wEnt.height ?? ''),
-            String(H),
-            contRunSig,
-          ].join('|');
           let entry = wallMap.get(id);
-          if (!entry || entry.sig !== sig) {
+          // Walls always rebuild on change: segment lengths and hole layout
+          // both depend on the point positions, so there is no safe
+          // points-only fast path.
+          if (
+            !entry ||
+            runsChanged ||
+            diffWallSig(entry.sig, wEnt, H) !== 'same'
+          ) {
             if (entry) {
               wallsGroup.remove(entry.group);
               disposeObject(entry.group);
+              wallMap.delete(id);
             }
             const grp = buildWallGroup(wEnt, H, mats, containmentRuns);
             if (!grp) continue;
             wallsGroup.add(grp);
-            entry = { group: grp, sig };
+            entry = { group: grp, sig: makeWallSig(wEnt, H) };
             wallMap.set(id, entry);
           }
           seenWalls.add(id);
@@ -2468,22 +2781,17 @@ export function Panel3D({
           const e = sheet.entities[id];
           if (!e || e.visible === false || e.kind !== 'room') continue;
           const rEnt = e as RoomEntity;
-          const sig = [
-            JSON.stringify(rEnt.a),
-            JSON.stringify(rEnt.b),
-            String(rEnt.floorColor ?? ''),
-            String(H),
-          ].join('|');
           let entry = roomMap.get(id);
-          if (!entry || entry.sig !== sig) {
+          if (!entry || !roomSigMatches(entry.sig, rEnt, H)) {
             if (entry) {
               roomsGroup.remove(entry.group);
               disposeObject(entry.group);
+              roomMap.delete(id);
             }
             const grp = buildRoomGroup(rEnt, H, mats);
             if (!grp) continue;
             roomsGroup.add(grp);
-            entry = { group: grp, sig };
+            entry = { group: grp, sig: makeRoomSig(rEnt, H) };
             roomMap.set(id, entry);
           }
           seenRooms.add(id);

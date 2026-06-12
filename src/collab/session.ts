@@ -51,7 +51,7 @@ export function startSession(opts: StartSessionOptions): SessionInfo {
   if (active) stopSession();
 
   const handle = connectCollab({ room: opts.room });
-  const binding = bindStoreToYjs(opts.store, handle.projectMap, handle.doc);
+  const binding = bindStoreToYjs(opts.store, handle.maps, handle.doc);
 
   const callbacks = new Set<(states: PresenceState[]) => void>();
   const fanout: PresenceState[] = [];

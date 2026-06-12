@@ -45,6 +45,10 @@ const shouldUseSiteViewer = (
 };
 
 export function Panel3DContainer({ width = 320, fillParent = false }: Props) {
+  // Deliberately a whole-project subscription: both child viewers take the
+  // full project as a prop, and SiteSceneViewer keys its scene rebuild off
+  // `project.modified` (bumped by every mutation). Narrowing here would skip
+  // rebuilds the viewers rely on.
   const project = useStore((s) => s.project);
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: width, h: 600 });

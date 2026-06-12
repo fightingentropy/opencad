@@ -8,14 +8,23 @@ import * as Y from 'yjs';
 import { WebrtcProvider } from 'y-webrtc';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import type { Awareness } from 'y-protocols/awareness';
+import { getCollabMaps, type CollabMaps } from './sync';
 
 // One Y.Doc per browser tab. We don't tear it down between sessions —
 // reconnecting to the same room simply reuses the existing doc.
 let doc: Y.Doc | null = null;
-let projectMap: Y.Map<unknown> | null = null;
+let maps: CollabMaps | null = null;
 let provider: WebrtcProvider | null = null;
 let persistence: IndexeddbPersistence | null = null;
 let currentRoom: string | null = null;
+
+// v2 wire/persistence namespace. The v1 schema stored the whole project
+// as one JSON blob (getMap('project'), IndexedDB `opencad-collab-*`);
+// v2 fans the project out per entity (see ./sync). Bumping the room and
+// IndexedDB prefixes keeps v1 docs and v1 peers from colliding with the
+// new layout — user-visible room codes stay unchanged.
+const ROOM_PREFIX = 'opencad-v2/';
+const IDB_PREFIX = 'opencad-collab-v2-';
 
 // Free public WebRTC signalling servers. These only relay connection
 // offers; the actual document sync is peer-to-peer. Replace with a
@@ -35,19 +44,19 @@ export interface ConnectOptions {
 
 export interface CollabHandle {
   doc: Y.Doc;
-  projectMap: Y.Map<unknown>;
+  maps: CollabMaps;
   awareness: Awareness;
   room: string;
   /** Disconnect WebRTC; the local Y.Doc and IndexedDB cache stay. */
   disconnect: () => void;
 }
 
-const ensureDoc = (): { doc: Y.Doc; projectMap: Y.Map<unknown> } => {
-  if (doc && projectMap) return { doc, projectMap };
+const ensureDoc = (): { doc: Y.Doc; maps: CollabMaps } => {
+  if (doc && maps) return { doc, maps };
   const d = new Y.Doc();
   doc = d;
-  projectMap = d.getMap<unknown>('project');
-  return { doc: d, projectMap };
+  maps = getCollabMaps(d);
+  return { doc: d, maps };
 };
 
 /**
@@ -56,7 +65,7 @@ const ensureDoc = (): { doc: Y.Doc; projectMap: Y.Map<unknown> } => {
  * provider and creates a new one.
  */
 export function connectCollab(opts: ConnectOptions): CollabHandle {
-  const { doc: d, projectMap: pm } = ensureDoc();
+  const { doc: d, maps: m } = ensureDoc();
 
   if (currentRoom !== opts.room) {
     if (provider) {
@@ -69,8 +78,8 @@ export function connectCollab(opts: ConnectOptions): CollabHandle {
     }
     // IndexedDB persistence — survives reload, replaces localStorage
     // for the duration of a collab session.
-    persistence = new IndexeddbPersistence(`opencad-collab-${opts.room}`, d);
-    provider = new WebrtcProvider(opts.room, d, {
+    persistence = new IndexeddbPersistence(`${IDB_PREFIX}${opts.room}`, d);
+    provider = new WebrtcProvider(`${ROOM_PREFIX}${opts.room}`, d, {
       signaling: opts.signaling ?? DEFAULT_SIGNALING,
     });
     currentRoom = opts.room;
@@ -80,7 +89,7 @@ export function connectCollab(opts: ConnectOptions): CollabHandle {
 
   return {
     doc: d,
-    projectMap: pm,
+    maps: m,
     awareness: provider.awareness,
     room: opts.room,
     disconnect: () => disconnectCollab(),
@@ -112,8 +121,8 @@ export function getYDoc(): Y.Doc {
   return ensureDoc().doc;
 }
 
-export function getYProjectMap(): Y.Map<unknown> {
-  return ensureDoc().projectMap;
+export function getYCollabMaps(): CollabMaps {
+  return ensureDoc().maps;
 }
 
 export function getYAwareness(): Awareness {

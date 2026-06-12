@@ -18,6 +18,13 @@ import { CollaborationModal } from './ui/CollaborationModal';
 import { PresenceLayer } from './ui/PresenceLayer';
 import { onActiveChange as onCollabActiveChange } from './collab/runtime';
 import { Panel3DContainer } from './three/Panel3DContainer';
+import { Toast } from './ui/Toast';
+import { CommandPalette } from './ui/CommandPalette';
+import { ShortcutsModal } from './ui/ShortcutsModal';
+import { FindEntityModal } from './ui/FindEntityModal';
+import { ErrorBoundary } from './ui/ErrorBoundary';
+import { dispatchShortcut, registerUiHandlers } from './lib/commands';
+import { notify } from './state/notifications';
 import { createSampleProject } from './sample';
 import { createWholeSiteSampleProject } from './sample-whole-site';
 import { loadStoredProject, saveStoredProject } from './io/persist';
@@ -38,6 +45,9 @@ export function App() {
   const [costOpen, setCostOpen] = useState(false);
   const [crossSectionEntityId, setCrossSectionEntityId] = useState<string | null>(null);
   const [collabOpen, setCollabOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [findEntityOpen, setFindEntityOpen] = useState(false);
   const [collabActive, setCollabActiveLocal] = useState(false);
   const [bootstrapped, setBootstrapped] = useState(false);
   const [panel3DWidth, setPanel3DWidth] = useState<number>(() => {
@@ -155,13 +165,15 @@ export function App() {
     if (hash.startsWith('#collab=')) setCollabOpen(true);
   }, [bootstrapped]);
 
-  // Global F-key shortcuts that don't fit in the canvas
+  // Shortcuts that must work even when the 2D canvas (and its richer key
+  // handler) is unmounted — F7/F9 snap toggles, ⌘K palette, the shortcuts
+  // modal, file open/save. Dispatched through the command registry; the
+  // registry de-dupes events the canvas handler already consumed.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-      if (e.key === 'F7') { e.preventDefault(); useStore.getState().setSnap({ grid: !useStore.getState().editor.snap.grid }); }
-      if (e.key === 'F9') { e.preventDefault(); useStore.getState().setSnap({ enabled: !useStore.getState().editor.snap.enabled }); }
+      dispatchShortcut(e, { globalOnly: true });
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -186,6 +198,54 @@ export function App() {
       window.removeEventListener('mouseup', onUp);
     };
   }, [resizing, panel3DWidth]);
+
+  // Used by the modal error boundary: when a dialog crashes, "Try to
+  // continue" must also unmount it, otherwise the retry re-renders the same
+  // broken tree and trips the boundary again immediately.
+  const closeAllModals = () => {
+    setBomOpen(false);
+    setAboutOpen(false);
+    setCableScheduleOpen(false);
+    setComplianceOpen(false);
+    setCatalogueOpen(false);
+    setCostOpen(false);
+    setCrossSectionEntityId(null);
+    setCollabOpen(false);
+    setShortcutsOpen(false);
+    setPaletteOpen(false);
+    setFindEntityOpen(false);
+  };
+
+  // Shared by the menu item and the `dialog.cross-section` command: requires
+  // a containment in the selection before the editor makes sense.
+  const openCrossSection = () => {
+    const editor = useStore.getState().editor;
+    const sel = Array.from(editor.selection);
+    const project = useStore.getState().project;
+    const sheet = project.sheets[project.activeSheetId];
+    const cont = sel.find((id) => sheet?.entities[id]?.kind === 'containment');
+    if (cont) setCrossSectionEntityId(cont);
+    else notify('warning', 'Select a containment entity first.');
+  };
+
+  // Hand the command registry its modal openers. The setters are stable, so
+  // registering once on mount is enough.
+  useEffect(() => {
+    registerUiHandlers({
+      openBom: () => setBomOpen(true),
+      openCableSchedule: () => setCableScheduleOpen(true),
+      openCompliance: () => setComplianceOpen(true),
+      openCatalogue: () => setCatalogueOpen(true),
+      openCost: () => setCostOpen(true),
+      openCrossSection,
+      openCollaboration: () => setCollabOpen(true),
+      openAbout: () => setAboutOpen(true),
+      openShortcuts: () => setShortcutsOpen(true),
+      openFindEntity: () => setFindEntityOpen(true),
+      toggleCommandPalette: () => setPaletteOpen((v) => !v),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const zoomBy = (factor: number) => {
     const v = useStore.getState().editor.viewport;
@@ -213,39 +273,42 @@ export function App() {
         onShowCompliance={() => setComplianceOpen(true)}
         onShowCatalogue={() => setCatalogueOpen(true)}
         onShowCost={() => setCostOpen(true)}
-        onShowCrossSection={() => {
-          const editor = useStore.getState().editor;
-          const sel = Array.from(editor.selection);
-          const project = useStore.getState().project;
-          const sheet = project.sheets[project.activeSheetId];
-          const cont = sel.find((id) => sheet?.entities[id]?.kind === 'containment');
-          if (cont) setCrossSectionEntityId(cont);
-          else alert('Select a containment entity first.');
-        }}
+        onShowCrossSection={openCrossSection}
         onShowCollaboration={() => setCollabOpen(true)}
       />
       <Ribbon />
-      <LeftPanel open={leftOpen} />
+      {/* Each major region mounts inside its own error boundary so a crash
+          in one (e.g. a malformed entity reaching a properties render)
+          leaves the others interactive. The panel boundaries reuse the
+          panels' own layout classes so the fallback occupies the crashed
+          region's grid slot (and drawer slot on mobile). */}
+      <ErrorBoundary label="Left panel" className={`left-panel${leftOpen ? ' open' : ''}`}>
+        <LeftPanel open={leftOpen} />
+      </ErrorBoundary>
       <div className="main">
-        <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
-          {viewMode !== '3d' && <CadCanvas />}
-          {/* Remote-cursor + selection overlay. Positioned absolutely
-              over the canvas; pointer-events: none so it never steals
-              clicks. Only renders when a session is active. */}
-          {collabActive && viewMode !== '3d' && <PresenceLayer />}
-          {viewMode === 'split' && !isMobile && (
-            <div
-              className="splitter"
-              onMouseDown={() => setResizing(true)}
-              title="Drag to resize 3D panel"
-            />
-          )}
-          {viewMode === 'split' && !isMobile && <Panel3DContainer width={panel3DWidth} />}
-          {viewMode === '3d' && <Panel3DContainer fillParent />}
-        </div>
-        <SiteNavigator />
+        <ErrorBoundary label="Drawing area" className="error-fallback-fill">
+          <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+            {viewMode !== '3d' && <CadCanvas />}
+            {/* Remote-cursor + selection overlay. Positioned absolutely
+                over the canvas; pointer-events: none so it never steals
+                clicks. Only renders when a session is active. */}
+            {collabActive && viewMode !== '3d' && <PresenceLayer />}
+            {viewMode === 'split' && !isMobile && (
+              <div
+                className="splitter"
+                onMouseDown={() => setResizing(true)}
+                title="Drag to resize 3D panel"
+              />
+            )}
+            {viewMode === 'split' && !isMobile && <Panel3DContainer width={panel3DWidth} />}
+            {viewMode === '3d' && <Panel3DContainer fillParent />}
+          </div>
+          <SiteNavigator />
+        </ErrorBoundary>
       </div>
-      <RightPanel open={rightOpen} />
+      <ErrorBoundary label="Properties panel" className={`right-panel${rightOpen ? ' open' : ''}`}>
+        <RightPanel open={rightOpen} />
+      </ErrorBoundary>
       <StatusBar />
 
       {/* Mobile-only floating buttons */}
@@ -273,19 +336,30 @@ export function App() {
         </>
       )}
 
-      {bomOpen && <BomModal onClose={() => setBomOpen(false)} />}
-      {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
-      {cableScheduleOpen && <CableScheduleModal onClose={() => setCableScheduleOpen(false)} />}
-      {complianceOpen && <ComplianceDashboard onClose={() => setComplianceOpen(false)} />}
-      {catalogueOpen && <CatalogueBrowser onClose={() => setCatalogueOpen(false)} />}
-      {costOpen && <CostEstimationModal onClose={() => setCostOpen(false)} />}
-      {crossSectionEntityId && (
-        <CrossSectionEditor
-          entityId={crossSectionEntityId}
-          onClose={() => setCrossSectionEntityId(null)}
-        />
-      )}
-      {collabOpen && <CollaborationModal onClose={() => setCollabOpen(false)} />}
+      {/* Modals share one boundary: a crashed dialog can't paint its own
+          backdrop, so the fallback becomes the overlay, and onReset closes
+          every modal so "Try to continue" doesn't re-trip on the same one. */}
+      <ErrorBoundary label="Dialog" className="error-fallback-overlay" onReset={closeAllModals}>
+        {bomOpen && <BomModal onClose={() => setBomOpen(false)} />}
+        {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
+        {cableScheduleOpen && <CableScheduleModal onClose={() => setCableScheduleOpen(false)} />}
+        {complianceOpen && <ComplianceDashboard onClose={() => setComplianceOpen(false)} />}
+        {catalogueOpen && <CatalogueBrowser onClose={() => setCatalogueOpen(false)} />}
+        {costOpen && <CostEstimationModal onClose={() => setCostOpen(false)} />}
+        {crossSectionEntityId && (
+          <CrossSectionEditor
+            entityId={crossSectionEntityId}
+            onClose={() => setCrossSectionEntityId(null)}
+          />
+        )}
+        {collabOpen && <CollaborationModal onClose={() => setCollabOpen(false)} />}
+        {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
+        {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
+        {findEntityOpen && <FindEntityModal onClose={() => setFindEntityOpen(false)} />}
+      </ErrorBoundary>
+
+      {/* Toast stack renders last so notifications sit above modals. */}
+      <Toast />
     </div>
   );
 }

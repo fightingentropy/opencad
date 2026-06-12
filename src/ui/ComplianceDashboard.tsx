@@ -1,17 +1,36 @@
 import React, { useMemo } from 'react';
 import { useStore } from '../state/store';
+import {
+  useCableSchedule,
+  usePenetrationSeals,
+  useProjectName,
+  useSheetOrder,
+  useSheets,
+  useStandardsProfile,
+} from '../state/selectors';
 import { runComplianceChecks } from '../calc';
 import type { ComplianceIssue } from '../calc';
 import { findSheetForEntity, fmtNum, fmtPct } from './whole-site-helpers';
 
 export function ComplianceDashboard({ onClose }: { onClose: () => void }) {
-  const project = useStore((s) => s.project);
+  // The checks are cross-sheet by nature — subscribe to the exact project
+  // fields runComplianceChecks consults rather than the whole project.
+  const sheets = useSheets();
+  const sheetOrder = useSheetOrder();
+  const cableSchedule = useCableSchedule();
+  const penetrationSeals = usePenetrationSeals();
+  const standardsProfile = useStandardsProfile();
+  const projectName = useProjectName();
   const setActiveSheet = useStore((s) => s.setActiveSheet);
   const setSelection = useStore((s) => s.setSelection);
 
-  const report = useMemo(() => runComplianceChecks(project), [project]);
+  const report = useMemo(
+    () => runComplianceChecks(useStore.getState().project),
+    [sheets, sheetOrder, cableSchedule, penetrationSeals, standardsProfile],
+  );
 
   const navigate = (issue: ComplianceIssue) => {
+    const project = useStore.getState().project;
     const sheetId = issue.sheetId ?? findSheetForEntity(project, issue.entityId)?.id;
     if (sheetId) setActiveSheet(sheetId);
     if (issue.entityId) setSelection([issue.entityId]);
@@ -68,7 +87,7 @@ export function ComplianceDashboard({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          Compliance Dashboard — {project.name}
+          Compliance Dashboard — {projectName}
           <span className="close" onClick={onClose} style={{ marginLeft: 'auto', cursor: 'pointer' }}>×</span>
         </div>
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 16, maxHeight: '70vh' }}>

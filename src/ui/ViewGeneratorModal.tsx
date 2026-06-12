@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useStore } from '../state/store';
+import { useBuildings } from '../state/selectors';
+import { notify } from '../state/notifications';
 import {
   generateCrossSection,
   generateElevationView,
@@ -48,7 +50,7 @@ function NumberField({
 }
 
 export function ViewGeneratorModal({ kind, onClose }: ViewGeneratorModalProps) {
-  const project = useStore((s) => s.project);
+  const buildingsMap = useBuildings();
   const addSheet = useStore((s) => s.addSheet);
   const addEntities = useStore((s) => s.addEntities);
   const setStatus = useStore((s) => s.setStatus);
@@ -74,7 +76,7 @@ export function ViewGeneratorModal({ kind, onClose }: ViewGeneratorModalProps) {
   const [depth, setDepth] = useState(2000);
 
   // Riser inputs
-  const buildings = Object.values(project.buildings ?? {});
+  const buildings = Object.values(buildingsMap ?? {});
   const [buildingId, setBuildingId] = useState<string>(buildings[0]?.id ?? '');
 
   // Isometric inputs
@@ -90,6 +92,9 @@ export function ViewGeneratorModal({ kind, onClose }: ViewGeneratorModalProps) {
   };
 
   const onGenerate = () => {
+    // Snapshot before addSheet — matches the previous closure-over-render
+    // value: generators receive the project as it was when the user clicked.
+    const project = useStore.getState().project;
     let entities: ReturnType<typeof generateCrossSection> = [];
     let newSheet;
 
@@ -123,7 +128,7 @@ export function ViewGeneratorModal({ kind, onClose }: ViewGeneratorModalProps) {
       });
     } else if (kind === 'riser') {
       if (!buildingId) {
-        alert('Select a building before generating a riser diagram.');
+        notify('warning', 'Select a building before generating a riser diagram.');
         return;
       }
       newSheet = createRiserDiagramSheet(name);

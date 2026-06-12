@@ -1,11 +1,12 @@
 import React from 'react';
 import { useStore } from '../state/store';
+import { useSystems } from '../state/selectors';
 import { setEditorPatch } from './whole-site-helpers';
 
 export function SystemFilter() {
-  const project = useStore((s) => s.project);
+  const systemsMap = useSystems();
   const systemFilter = useStore((s) => s.editor.systemFilter) ?? 'all';
-  const systems = Object.values(project.systems ?? {});
+  const systems = Object.values(systemsMap ?? {});
 
   return (
     <div className="filter-bar">

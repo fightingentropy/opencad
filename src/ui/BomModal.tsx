@@ -1,5 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../state/store';
+import {
+  useCableSchedule,
+  useCatalogues,
+  useProjectName,
+  useSheetOrder,
+  useSheets,
+  useStandardsProfile,
+  useSystems,
+} from '../state/selectors';
 import { generateBOM, bomToCSV } from '../io/bom';
 import {
   generateContainmentBOM,
@@ -34,20 +43,39 @@ const downloadCSV = (csv: string, filename: string): void => {
 };
 
 export function BomModal({ onClose }: { onClose: () => void }) {
-  const project = useStore((s) => s.project);
+  // Subscribe to the slices the generators below actually read (cross-sheet
+  // by nature, but still far narrower than the whole project). The full
+  // project handle is only passed through to the generators untracked.
+  const sheets = useSheets();
+  const sheetOrder = useSheetOrder();
+  const cableSchedule = useCableSchedule();
+  const systems = useSystems();
+  const catalogues = useCatalogues();
+  const standardsProfile = useStandardsProfile();
+  const projectName = useProjectName();
   const [tab, setTab] = useState<BomTab>('symbols');
 
   // Each tab dataset is memoised so switching tabs after generation is cheap
-  // and re-renders don't recompute everything from scratch.
-  const symbolRows = useMemo(() => generateBOM(project), [project]);
-  const containmentRows = useMemo(() => generateContainmentBOM(project), [project]);
-  const cableRows = useMemo(() => exportCableSchedule(project), [project]);
+  // and re-renders don't recompute everything from scratch. Deps mirror the
+  // project fields each generator consults.
+  const symbolRows = useMemo(
+    () => generateBOM(useStore.getState().project),
+    [sheets, sheetOrder],
+  );
+  const containmentRows = useMemo(
+    () => generateContainmentBOM(useStore.getState().project),
+    [sheets, sheetOrder, catalogues],
+  );
+  const cableRows = useMemo(
+    () => exportCableSchedule(useStore.getState().project),
+    [sheets, sheetOrder, cableSchedule, systems],
+  );
   const containmentScheduleRows = useMemo(
-    () => exportContainmentSchedule(project),
-    [project],
+    () => exportContainmentSchedule(useStore.getState().project),
+    [sheets, sheetOrder, cableSchedule, systems, standardsProfile],
   );
 
-  const safeName = project.name.replace(/\s+/g, '_');
+  const safeName = projectName.replace(/\s+/g, '_');
 
   const onExport = () => {
     if (tab === 'symbols') {
@@ -102,7 +130,7 @@ export function BomModal({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          Schedules &amp; BOM — {project.name}
+          Schedules &amp; BOM — {projectName}
           <span
             style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}
           >

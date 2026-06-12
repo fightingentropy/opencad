@@ -1,22 +1,21 @@
 import React, { useMemo, useState } from 'react';
 import { useStore } from '../state/store';
+import { useActiveSheetId, useMarkups } from '../state/selectors';
 import { nanoid } from 'nanoid';
 import type { MarkupItem } from '../models/revision';
 
 type FilterStatus = 'all' | 'open' | 'resolved';
 
 export function MarkupPanel() {
-  const project = useStore((s) => s.project);
   const setProject = useStore((s) => s.setProject);
   const setViewport = useStore((s) => s.setViewport);
-  const editor = useStore((s) => s.editor);
 
   const [filter, setFilter] = useState<FilterStatus>('open');
   const [replyFor, setReplyFor] = useState<string | null>(null);
   const [replyText, setReplyText] = useState('');
 
-  const markups = project.markups ?? {};
-  const sheetId = project.activeSheetId;
+  const markups = useMarkups() ?? {};
+  const sheetId = useActiveSheetId();
 
   const onSheet = useMemo(() => {
     return Object.values(markups).filter((m) => m.sheetId === sheetId);
@@ -30,14 +29,22 @@ export function MarkupPanel() {
     });
   }, [onSheet, filter]);
 
+  // Handlers spread the live project from getState() so the component only
+  // subscribes to the markups slice it renders.
   const upsert = (m: MarkupItem) => {
-    setProject({ ...project, markups: { ...markups, [m.id]: m }, modified: Date.now() });
+    const project = useStore.getState().project;
+    setProject({
+      ...project,
+      markups: { ...(project.markups ?? {}), [m.id]: m },
+      modified: Date.now(),
+    });
   };
 
   const onAdd = () => {
     const text = window.prompt('Comment text?');
     if (!text) return;
     const author = window.prompt('Your name?') ?? 'You';
+    const cursor = useStore.getState().editor.cursor;
     const m: MarkupItem = {
       id: nanoid(10),
       sheetId,
@@ -47,7 +54,7 @@ export function MarkupPanel() {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       status: 'open',
-      anchorPoint: { x: editor.cursor.x, y: editor.cursor.y },
+      anchorPoint: { x: cursor.x, y: cursor.y },
     };
     upsert(m);
   };
@@ -80,7 +87,8 @@ export function MarkupPanel() {
 
   const navigate = (m: MarkupItem) => {
     if (!m.anchorPoint) return;
-    setViewport({ ...editor.viewport, x: m.anchorPoint.x - 100, y: m.anchorPoint.y - 100 });
+    const viewport = useStore.getState().editor.viewport;
+    setViewport({ ...viewport, x: m.anchorPoint.x - 100, y: m.anchorPoint.y - 100 });
   };
 
   return (
