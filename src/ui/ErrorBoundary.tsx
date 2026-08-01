@@ -1,6 +1,6 @@
 import React from 'react';
 import { useStore } from '../state/store';
-import { loadStoredProject } from '../io/persist';
+import { loadStoredProjectAsync } from '../io/persist';
 import { exportProjectJSON } from '../io/project';
 import { notify } from '../state/notifications';
 
@@ -44,7 +44,7 @@ interface ErrorBoundaryState {
  *
  * - "Try to continue" re-renders the region as-is — enough for transient
  *   failures (a half-applied collab update, a one-off render glitch).
- * - "Restore last saved project" swaps in the localStorage autosave via the
+   * - "Restore last saved project" swaps in the IndexedDB autosave via the
  *   store's setProject, for when the in-memory project itself is corrupt.
  * - "Download backup" serialises the CURRENT in-memory project to a file so
  *   work since the last autosave can be rescued even while rendering is
@@ -70,8 +70,8 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
     this.setState({ error: null });
   };
 
-  private handleRestore = (): void => {
-    const stored = loadStoredProject();
+  private handleRestore = async (): Promise<void> => {
+    const stored = await loadStoredProjectAsync();
     if (!stored) {
       notify('warning', 'No autosaved project found in browser storage.');
       return;

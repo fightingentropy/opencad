@@ -10,6 +10,7 @@
 import type { Project, ContainmentEntity } from '../types';
 import type { Cable } from '../models/cable';
 import { dist } from '../lib/math';
+import { textExportMetadataPreamble } from './export-metadata';
 
 export interface CablePullCardSegment {
   containmentRef: string;
@@ -230,7 +231,11 @@ const cardToText = (card: CablePullCard): string => {
   return lines.join('\n');
 };
 
-export const cablePullCardsToText = (cards: CablePullCard[]): string => {
-  if (cards.length === 0) return 'No cables in schedule.\n';
-  return cards.map(cardToText).join('\n');
+export const cablePullCardsToText = (
+  cards: CablePullCard[],
+  project: Project,
+): string => {
+  const metadata = textExportMetadataPreamble(project, 'cable-pull-cards-text');
+  if (cards.length === 0) return `${metadata}\n\nNo cables in schedule.\n`;
+  return `${metadata}\n\n${cards.map(cardToText).join('\n')}`;
 };

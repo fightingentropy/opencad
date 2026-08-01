@@ -767,6 +767,9 @@ export interface Project {
   activeLayerId: LayerId;
   // unit system
   units: 'mm' | 'in';
+  // EPSG/URN/WKT identifier when georeferenced; otherwise exports state the
+  // explicit LOCAL-CARTESIAN-2D fallback.
+  coordinateReferenceSystem?: string;
   standard: 'IEEE' | 'IEC';
 
   // -------- Whole-site extensions (all optional, backward compat) --------

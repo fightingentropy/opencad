@@ -7,6 +7,7 @@ import type { Project, ContainmentEntity } from '../types';
 import type { Cable } from '../models/cable';
 import { dist } from '../lib/math';
 import { FILL_LIMITS } from '../models/standards';
+import { prependCSVExportMetadata } from './export-metadata';
 
 export interface ContainmentScheduleRow {
   ref: string;
@@ -145,6 +146,7 @@ export const exportContainmentSchedule = (
 
 export const containmentScheduleToCSV = (
   rows: ContainmentScheduleRow[],
+  project: Project,
 ): string => {
   const header = [
     'Ref',
@@ -180,5 +182,9 @@ export const containmentScheduleToCSV = (
       .map(csvEsc)
       .join(','),
   );
-  return [header, ...lines].join('\n');
+  return prependCSVExportMetadata(
+    [header, ...lines].join('\n'),
+    project,
+    'containment-schedule-csv',
+  );
 };

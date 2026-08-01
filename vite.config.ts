@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(import.meta.dirname, './src'),
     },
   },
   server: {
@@ -39,6 +39,8 @@ export default defineConfig({
             id.includes('node_modules/simple-peer')
           ) return 'collab';
           if (id.includes('/src/collab/yjs-doc') ||
+              id.includes('/src/collab/durable-provider') ||
+              id.includes('/src/collab/protocol') ||
               id.includes('/src/collab/sync') ||
               id.includes('/src/collab/presence') ||
               id.includes('/src/collab/session') ||

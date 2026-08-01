@@ -3,7 +3,10 @@
 // into Excel and round-trip via spreadsheet save-as-CSV.
 
 import type { Cable, CableId } from '../models/cable';
+import type { Project } from '../types';
 import type { BOMRow } from './bom';
+import { assertImportTextLimits, IMPORT_LIMITS, ImportLimitError } from './import-limits';
+import { prependCSVExportMetadata } from './export-metadata';
 
 const csvEscape = (v: unknown): string => {
   const s = String(v ?? '');
@@ -29,7 +32,7 @@ const CABLE_HEADERS = [
   'status', 'notes',
 ];
 
-export const cablesToCSV = (cables: Cable[]): string => {
+export const cablesToCSV = (cables: Cable[], project: Project): string => {
   const rows: unknown[][] = [CABLE_HEADERS];
   for (const c of cables) {
     rows.push([
@@ -43,7 +46,11 @@ export const cablesToCSV = (cables: Cable[]): string => {
       c.status ?? '', c.notes ?? '',
     ]);
   }
-  return rowsToCSV(rows);
+  return prependCSVExportMetadata(
+    rowsToCSV(rows),
+    project,
+    'cable-register-csv',
+  );
 };
 
 const parseCSVLine = (line: string): string[] => {
@@ -58,7 +65,11 @@ const parseCSVLine = (line: string): string[] => {
       else cur += ch;
     } else {
       if (ch === '"') inQuotes = true;
-      else if (ch === ',') { out.push(cur); cur = ''; }
+      else if (ch === ',') {
+        out.push(cur);
+        if (out.length > 128) throw new ImportLimitError('Cable CSV', 'more than 128 columns');
+        cur = '';
+      }
       else cur += ch;
     }
   }
@@ -74,7 +85,10 @@ export interface CableImportResult {
 const newId = (): CableId => `c-${Math.random().toString(36).slice(2, 10)}`;
 
 export const cablesFromCSV = (text: string): CableImportResult => {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  assertImportTextLimits(text, 'Cable CSV', IMPORT_LIMITS.cableCsv);
+  const lines = text
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0 && !line.trimStart().startsWith('#'));
   if (lines.length === 0) return { cables: [], errors: [] };
   const header = parseCSVLine(lines[0]).map((h) => h.trim());
   const idx = (name: string) => header.indexOf(name);
@@ -126,7 +140,7 @@ export { rowsToCSV };
 // estimate column on top of the legacy bom.ts schema (the existing
 // bomToCSV is preserved unchanged so callers that depend on its
 // columns keep working).
-export const bomToCSVExtended = (rows: BOMRow[]): string => {
+export const bomToCSVExtended = (rows: BOMRow[], project: Project): string => {
   const header = [
     'Tag',
     'Name',
@@ -154,6 +168,9 @@ export const bomToCSVExtended = (rows: BOMRow[]): string => {
       r.sheetNumbers.join('|'),
     ]);
   }
-  return rowsToCSV(out);
+  return prependCSVExportMetadata(
+    rowsToCSV(out),
+    project,
+    'extended-symbol-bom-csv',
+  );
 };
-

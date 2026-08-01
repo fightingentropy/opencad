@@ -19,6 +19,7 @@ import type { Cable, CableId } from '../models/cable';
 import { emptyCableSchedule } from '../models/cable';
 import type { SheetMeta } from '../models/revision';
 import { assembleDrawingNumber, nextSequenceNumber } from '../drawing/numbering';
+import { shouldRejectLocalProjectMutation } from './collaboration-guard';
 
 const newId = () => nanoid(10);
 
@@ -1213,6 +1214,25 @@ export const useStore = create<Store>((set, get) => ({
   },
   setAutoRoute: (on) => set({ autoRoute: on }),
 }));
+
+// Authenticated viewers may still pan, zoom and select, but any action that
+// would replace the project is synchronously rolled back. The collaboration
+// adapter marks verified remote updates so those remain applicable.
+let revertingViewerMutation = false;
+useStore.subscribe((state, previous) => {
+  if (
+    revertingViewerMutation
+    || state.project === previous.project
+    || !shouldRejectLocalProjectMutation()
+  ) return;
+  revertingViewerMutation = true;
+  try {
+    useStore.setState(previous, true);
+    useStore.getState().setStatus('Collaboration viewer: drawing edits are disabled');
+  } finally {
+    revertingViewerMutation = false;
+  }
+});
 
 // DEV-only guard for the structurally-shared history: every committed
 // project is deep-frozen so an in-place mutation throws immediately

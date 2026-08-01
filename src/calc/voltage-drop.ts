@@ -5,7 +5,9 @@ import {
   VDROP_LIMITS,
   VDROP_MV_A_M_PVC_SP,
   VDROP_MV_A_M_XLPE_3P,
+  createStandardsTrace,
   type StandardsCode,
+  type StandardsTrace,
 } from '../models/standards';
 import type { CableConstruction } from '../models/cable';
 
@@ -31,6 +33,7 @@ export interface VoltageDropResult {
   withinLimits: boolean;
   mvAm: number;
   limitPct: number;
+  standards: StandardsTrace;
 }
 
 const isXlpe = (c: CableConstruction): boolean => c.includes('XLPE');
@@ -67,11 +70,21 @@ export const computeVoltageDrop = (opts: VoltageDropOptions): VoltageDropResult 
   // Three-phase tables use the sqrt(3) line-to-line convention.
   const vdropV = (mvAm * opts.designCurrentA * opts.lengthM) / 1000;
   const vdropPct = opts.systemVoltageV > 0 ? (vdropV / opts.systemVoltageV) * 100 : 0;
+  const sourceTables = ['voltage-drop-limits'] as const;
+  const standards = opts.mvAmOverride === undefined
+    ? createStandardsTrace(code, [
+        ...sourceTables,
+        isXlpe(opts.construction) || opts.phasing === 'three'
+          ? 'voltage-drop-xlpe-three-phase-bs7671'
+          : 'voltage-drop-pvc-single-phase-bs7671',
+      ])
+    : createStandardsTrace(code, sourceTables);
   return {
     vdropV,
     vdropPct,
     withinLimits: vdropPct / 100 <= limitFraction,
     mvAm,
     limitPct: limitFraction * 100,
+    standards,
   };
 };

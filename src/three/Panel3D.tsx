@@ -1543,7 +1543,6 @@ function buildRoomGroup(
   r: RoomEntity,
   H: number,
   // mats unused for now — kept for signature parity with other builders.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   mats: MaterialBag
 ): THREE.Group | null {
   const xMin = Math.min(r.a.x, r.b.x);
@@ -1745,7 +1744,6 @@ function makeOrbitControls(
 // ---------- Disposal helpers -------------------------------------------------
 function disposeObject(obj: THREE.Object3D) {
   obj.traverse((child: THREE.Object3D) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const m = child as any;
     if (m.geometry && typeof m.geometry.dispose === 'function') {
       m.geometry.dispose();

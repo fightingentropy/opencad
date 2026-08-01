@@ -13,5 +13,8 @@ dist-ssr
 *.sw?
 .env
 .env.local
+.dev.vars
+.dev.vars.*
 tsconfig.tsbuildinfo
 visual-artifacts/
+.wrangler/

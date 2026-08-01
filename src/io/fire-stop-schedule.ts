@@ -8,6 +8,11 @@
 import type { Project, ContainmentEntity, WallEntity } from '../types';
 import type { PenetrationSeal, FireRating } from '../models/fire';
 import jsPDF from 'jspdf';
+import {
+  buildExportMetadata,
+  exportMetadataSummary,
+  prependCSVExportMetadata,
+} from './export-metadata';
 
 export interface FireStopRow {
   ref: string;
@@ -96,7 +101,10 @@ export const exportFireStopSchedule = (project: Project): FireStopRow[] => {
   return rows.sort((a, b) => a.ref.localeCompare(b.ref));
 };
 
-export const fireStopScheduleToCSV = (rows: FireStopRow[]): string => {
+export const fireStopScheduleToCSV = (
+  rows: FireStopRow[],
+  project: Project,
+): string => {
   const header = [
     'Ref',
     'Sheet',
@@ -133,7 +141,11 @@ export const fireStopScheduleToCSV = (rows: FireStopRow[]): string => {
       .map(csvEsc)
       .join(','),
   );
-  return [header, ...lines].join('\n');
+  return prependCSVExportMetadata(
+    [header, ...lines].join('\n'),
+    project,
+    'fire-stop-schedule-csv',
+  );
 };
 
 export const fireStopScheduleToPDF = async (
@@ -141,10 +153,18 @@ export const fireStopScheduleToPDF = async (
   project: Project,
 ): Promise<Blob> => {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
+  const metadata = buildExportMetadata(project, 'fire-stop-schedule-pdf');
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const marginX = 10;
   let y = 14;
+
+  doc.setProperties({
+    title: `Fire-Stop Schedule — ${project.name}`,
+    subject: exportMetadataSummary(metadata),
+    keywords: JSON.stringify(metadata),
+    creator: 'OpenCAD Electrical',
+  });
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
@@ -157,6 +177,11 @@ export const fireStopScheduleToPDF = async (
     marginX,
     y,
   );
+  y += 5;
+  doc.setFontSize(7);
+  doc.text(exportMetadataSummary(metadata), marginX, y, {
+    maxWidth: pageWidth - marginX * 2,
+  });
   y += 8;
 
   const headers = [

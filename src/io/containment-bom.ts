@@ -18,6 +18,7 @@ import type {
 } from '../types';
 import { dist } from '../lib/math';
 import { SUPPORT_SPANS_HORIZONTAL_MM } from '../models/standards';
+import { prependCSVExportMetadata } from './export-metadata';
 
 export interface ContainmentBOMRow {
   ref: string;
@@ -470,7 +471,10 @@ const csvEsc = (v: unknown): string => {
   return s;
 };
 
-export const containmentBOMToCSV = (rows: ContainmentBOMRow[]): string => {
+export const containmentBOMToCSV = (
+  rows: ContainmentBOMRow[],
+  project: Project,
+): string => {
   const header = [
     'Ref',
     'Kind',
@@ -505,5 +509,9 @@ export const containmentBOMToCSV = (rows: ContainmentBOMRow[]): string => {
       .map(csvEsc)
       .join(','),
   );
-  return [header, ...lines].join('\n');
+  return prependCSVExportMetadata(
+    [header, ...lines].join('\n'),
+    project,
+    'containment-bom-csv',
+  );
 };

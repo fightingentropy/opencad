@@ -3,6 +3,7 @@
 // into a CAFM/CMMS without needing a true .xlsx writer.
 
 import type { Project } from '../types';
+import { buildExportMetadata } from './export-metadata';
 
 const csv = (rows: unknown[][]): string =>
   rows.map((r) =>
@@ -17,6 +18,7 @@ const csv = (rows: unknown[][]): string =>
 
 export const exportCOBie = (project: Project): { sheets: Record<string, string[][]> } => {
   const sheets: Record<string, string[][]> = {};
+  const metadata = buildExportMetadata(project, 'cobie-csv-bundle');
 
   // Facility (one row per project)
   sheets.Facility = [
@@ -157,6 +159,24 @@ export const exportCOBie = (project: Project): { sheets: Record<string, string[]
     }
   }
   sheets.Type = typeRows;
+
+  // Keep the engineering context inside the bundle without overloading the
+  // standard COBie sheets with non-standard columns.
+  sheets.OpenCADMetadata = [
+    ['Name', 'Value'],
+    ['Schema', metadata.schema],
+    ['Artifact', metadata.artifact],
+    ['GeneratedAt', metadata.generatedAt],
+    ['ProjectId', metadata.projectId],
+    ['ProjectModifiedAt', metadata.projectModifiedAt],
+    ['Units', metadata.units],
+    ['CoordinateReferenceSystem', metadata.coordinateReferenceSystem],
+    [
+      'StandardsProfile',
+      `${metadata.standards.code}@${metadata.standards.profileVersion}`,
+    ],
+    ['StandardsDatasetHash', metadata.standards.datasetHash],
+  ];
 
   return { sheets };
 };

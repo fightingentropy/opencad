@@ -31,6 +31,7 @@
 import type * as Y from 'yjs';
 import type { StoreApi } from 'zustand';
 import type { Entity, EntityId, Project, Sheet, SheetId } from '../types';
+import { applyAuthenticatedCollaborationUpdate } from '../state/collaboration-guard';
 
 // ---- v2 doc schema ----
 // Top-level shared-type names. v1 stored a single blob under
@@ -110,7 +111,9 @@ export function bindStoreToYjs(
   store: StoreApi<StoreShape>,
   maps: CollabMaps,
   doc: Y.Doc,
+  options: { writeEnabled?: boolean } = {},
 ): BindHandle {
+  const writeEnabled = options.writeEnabled ?? true;
   // Re-entrancy flags: set while we're applying changes in either
   // direction. The corresponding listener bails when it sees the
   // flag, breaking the echo loop.
@@ -304,7 +307,7 @@ export function bindStoreToYjs(
     refreshMirrors();
     applyingRemote = true;
     try {
-      store.getState().setProject(next);
+      applyAuthenticatedCollaborationUpdate(() => store.getState().setProject(next));
     } finally {
       applyingRemote = false;
     }
@@ -318,17 +321,19 @@ export function bindStoreToYjs(
   // next peer to join sees the same starting point.
   if (typeof maps.meta.get(PROJECT_META_KEY) === 'string') {
     applyRemote();
-  } else {
+  } else if (writeEnabled) {
     pushLocal(store.getState().project);
   }
 
   // Subscribe to project mutations on the store. Whenever the identity
   // of `project` changes, diff per entity and push to the maps.
-  const unsubStore = store.subscribe((state, prevState) => {
-    if (state.project === prevState.project) return;
-    if (applyingRemote) return; // we caused this update
-    pushLocal(state.project);
-  });
+  const unsubStore = writeEnabled
+    ? store.subscribe((state, prevState) => {
+        if (state.project === prevState.project) return;
+        if (applyingRemote) return; // we caused this update
+        pushLocal(state.project);
+      })
+    : () => {};
 
   // A remote transaction can touch all three maps; each map fires its
   // own observer call but they share one Transaction object, so dedupe
