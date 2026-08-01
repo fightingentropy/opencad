@@ -79,6 +79,28 @@ describe('runComplianceChecks', () => {
     expect(vd[0].severity).toBe('error');
   });
 
+  it('reports failed BS 7671 overload coordination for a protective device', () => {
+    const cable = makeCable({
+      reference: 'P-1',
+      designCurrent: 32,
+      estimatedLength: 10,
+    });
+    cable.protectiveDeviceRating = 40;
+    cable.calculated = { ampacity: 35 };
+    const project = makeProject({ cables: [cable] });
+
+    const result = runComplianceChecks(project);
+    const issues = result.issues.filter((issue) => issue.kind === 'protective-device');
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({
+      entityId: cable.id,
+      severity: 'error',
+      measured: 40,
+      limit: 35,
+      unit: 'A',
+    });
+  });
+
   it('reports a segregation error when power and data share an unpartitioned tray', () => {
     const c = makeContainment({ containmentType: 'tray', width: 300 });
     const power = makeCable({ circuitType: 'power', route: [c.id], reference: 'PW-1' });

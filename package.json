@@ -9,14 +9,23 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "preview:dist": "vite preview",
-    "lint": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm run collab:types:check && npm run collab:typecheck && npm run lint && npm test && npm run collab:test && npm run build && npm run collab:dry-run",
     "visual:smoke": "node scripts/visual-smoke.mjs",
     "deploy": "wrangler pages deploy dist --project-name=opencad",
+    "collab:dev": "wrangler dev --config wrangler.collab.jsonc",
+    "collab:types": "wrangler types worker/worker-configuration.d.ts --config wrangler.collab.jsonc --include-runtime=false",
+    "collab:types:check": "wrangler types worker/worker-configuration.d.ts --config wrangler.collab.jsonc --include-runtime=false --check",
+    "collab:typecheck": "tsc --project worker/tsconfig.json --noEmit",
+    "collab:test": "vitest run --config vitest.collab.config.ts",
+    "collab:dry-run": "wrangler deploy --dry-run --config wrangler.collab.jsonc --outdir .wrangler/collab-dry-run",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "jspdf": "^2.5.1",
+    "jose": "^6.2.7",
+    "jspdf": "^4.2.1",
     "nanoid": "^5.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -27,12 +36,29 @@
     "zustand": "^4.5.0"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.20.1",
+    "@cloudflare/workers-types": "^5.20260801.1",
+    "@babel/core": "^8.0.1",
+    "@babel/eslint-parser": "^8.0.1",
+    "@babel/plugin-syntax-jsx": "^8.0.1",
+    "@babel/preset-react": "^8.0.1",
+    "@babel/preset-typescript": "^8.0.1",
+    "@eslint/js": "^10.0.1",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@types/three": "^0.160.0",
-    "@vitejs/plugin-react": "^4.3.0",
+    "@types/node": "^26.1.2",
+    "@vitejs/plugin-react": "^6.0.5",
+    "eslint": "^10.8.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "fake-indexeddb": "^6.2.5",
+    "globals": "^17.8.0",
     "typescript": "^7.0.2",
-    "vite": "^5.4.0",
-    "vitest": "^1.6.0"
+    "vite": "^8.2.0",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.118.0"
+  },
+  "overrides": {
+    "ws": "^8.21.0"
   }
 }

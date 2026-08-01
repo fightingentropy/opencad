@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Lint and build
+    name: Quality gates
     runs-on: ubuntu-latest
 
     steps:
@@ -18,17 +18,39 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck
-        run: npm run lint
+      - name: Dependency audit
+        run: npm audit --audit-level=high
 
-      - name: Test
-        run: npm test
+      - name: Full application and collaboration gate
+        run: npm run check
 
-      - name: Build
-        run: npm run build
+      - name: Visual smoke
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
+          VISUAL_OUT_DIR: visual-artifacts
+        run: |
+          npm run preview -- --host 127.0.0.1 > /tmp/opencad-preview.log 2>&1 &
+          preview_pid=$!
+          trap 'kill "$preview_pid"' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:4173/ > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:4173/ > /dev/null
+          npm run visual:smoke -- http://127.0.0.1:4173/
+
+      - name: Upload visual smoke artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-smoke
+          path: visual-artifacts/
+          if-no-files-found: ignore

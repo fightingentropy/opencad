@@ -2,7 +2,12 @@
 
 import type { ContainmentEntity, ContainmentType } from '../types';
 import type { Cable } from '../models/cable';
-import { FILL_LIMITS, type StandardsProfile } from '../models/standards';
+import {
+  FILL_LIMITS,
+  createStandardsTrace,
+  type StandardsProfile,
+  type StandardsTrace,
+} from '../models/standards';
 import { containmentInnerArea } from './fill';
 
 // Common standard sizes for each containment type.
@@ -78,6 +83,7 @@ export interface ContainmentSizingResult {
   occupied: number;
   fillPct: number;
   ok: boolean;
+  standards: StandardsTrace;
 }
 
 export const suggestContainmentSize = (
@@ -87,6 +93,7 @@ export const suggestContainmentSize = (
   fillTargetOverride?: number,
 ): ContainmentSizingResult => {
   const occupied = occupiedArea(cables);
+  const trace = createStandardsTrace(standards, ['fill-limits']);
   const target = Math.min(fillTargetOverride ?? 1, limitFor(type, standards));
   const candidates = STANDARD_SIZES[type] ?? STANDARD_SIZES.tray;
   for (const size of candidates) {
@@ -101,7 +108,7 @@ export const suggestContainmentSize = (
     if (inner <= 0) continue;
     const fillPct = (occupied / inner) * 100;
     if (fillPct / 100 <= target) {
-      return { width: size.width, height: size.height, innerArea: inner, occupied, fillPct, ok: true };
+      return { width: size.width, height: size.height, innerArea: inner, occupied, fillPct, ok: true, standards: trace };
     }
   }
   // None met the target — return the largest as a best effort
@@ -121,6 +128,7 @@ export const suggestContainmentSize = (
     occupied,
     fillPct: inner > 0 ? (occupied / inner) * 100 : 0,
     ok: false,
+    standards: trace,
   };
 };
 

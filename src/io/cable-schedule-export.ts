@@ -5,6 +5,11 @@
 import type { Project, ContainmentEntity } from '../types';
 import type { Cable } from '../models/cable';
 import jsPDF from 'jspdf';
+import {
+  buildExportMetadata,
+  exportMetadataSummary,
+  prependCSVExportMetadata,
+} from './export-metadata';
 
 export interface CableScheduleRow {
   ref: string;
@@ -97,7 +102,10 @@ export const exportCableSchedule = (
   return rows;
 };
 
-export const cableScheduleToCSV = (rows: CableScheduleRow[]): string => {
+export const cableScheduleToCSV = (
+  rows: CableScheduleRow[],
+  project: Project,
+): string => {
   const header = [
     'Ref',
     'From',
@@ -136,7 +144,11 @@ export const cableScheduleToCSV = (rows: CableScheduleRow[]): string => {
       .map(csvEsc)
       .join(','),
   );
-  return [header, ...lines].join('\n');
+  return prependCSVExportMetadata(
+    [header, ...lines].join('\n'),
+    project,
+    'cable-schedule-csv',
+  );
 };
 
 // Render the schedule as a landscape A3 PDF blob.
@@ -145,10 +157,18 @@ export const cableScheduleToPDF = async (
   project: Project,
 ): Promise<Blob> => {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
+  const metadata = buildExportMetadata(project, 'cable-schedule-pdf');
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const marginX = 10;
   let y = 12;
+
+  doc.setProperties({
+    title: `Cable Schedule — ${project.name}`,
+    subject: exportMetadataSummary(metadata),
+    keywords: JSON.stringify(metadata),
+    creator: 'OpenCAD Electrical',
+  });
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
@@ -162,6 +182,11 @@ export const cableScheduleToPDF = async (
     y,
   );
   y += 6;
+  doc.setFontSize(7);
+  doc.text(exportMetadataSummary(metadata), marginX, y, {
+    maxWidth: pageWidth - marginX * 2,
+  });
+  y += 7;
 
   const headers = [
     'Ref',

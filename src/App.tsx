@@ -27,7 +27,7 @@ import { dispatchShortcut, registerUiHandlers } from './lib/commands';
 import { notify } from './state/notifications';
 import { createSampleProject } from './sample';
 import { createWholeSiteSampleProject } from './sample-whole-site';
-import { loadStoredProject, saveStoredProject } from './io/persist';
+import { loadStoredProjectAsync, saveStoredProjectAsync } from './io/persist';
 import { fitViewportToSheet } from './lib/fit';
 
 const STORED_3D_WIDTH_KEY = 'opencad.panel3dWidth';
@@ -86,13 +86,15 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile]);
 
-  // Bootstrap: prefer the autosaved project from localStorage; fall back to
-  // the whole-site demo so a first-time visitor sees a fully-populated
-  // project. The simple sample remains as a safety net should the
-  // whole-site factory ever throw during construction.
+  // Bootstrap: prefer the atomic IndexedDB snapshot; fall back to a one-time
+  // localStorage migration and then the bundled whole-site demo so a
+  // first-time visitor sees a fully-populated project. The simple sample
+  // remains as a safety net should the whole-site factory ever throw.
   useEffect(() => {
-    if (!bootstrapped) {
-      const stored = loadStoredProject();
+    if (bootstrapped) return;
+    let cancelled = false;
+    void (async () => {
+      const stored = await loadStoredProjectAsync();
       let project = stored;
       if (!project) {
         try {
@@ -102,12 +104,16 @@ export function App() {
           project = createSampleProject();
         }
       }
+      if (cancelled) return;
       setProject(project);
       setBootstrapped(true);
-    }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [bootstrapped, setProject]);
 
-  // Autosave: persist the project to localStorage with a short debounce so
+  // Autosave: persist the project to IndexedDB with a short debounce so
   // every keystroke doesn't hit storage. Skip the very first render before
   // the bootstrap project is installed. If the browser refuses (quota), we
   // surface a status message so the user knows autosave is paused.
@@ -117,10 +123,11 @@ export function App() {
       if (s.project === prev.project) return;
       window.clearTimeout(saveTimerRef.current);
       saveTimerRef.current = window.setTimeout(() => {
-        const result = saveStoredProject(useStore.getState().project);
-        if (!result.ok && result.reason === 'quota') {
-          useStore.getState().setStatus('Autosave paused: browser storage full. Use File → Save to download a copy.');
-        }
+        void saveStoredProjectAsync(useStore.getState().project).then((result) => {
+          if (!result.ok && result.reason === 'quota') {
+            useStore.getState().setStatus('Autosave paused: browser storage full. Use File → Save to download a copy.');
+          }
+        });
       }, 400);
     });
     return () => {

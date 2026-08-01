@@ -1,11 +1,19 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const DEFAULT_CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const chromePath = process.env.CHROME_PATH || DEFAULT_CHROME;
+const chromePath = [
+  process.env.CHROME_PATH,
+  DEFAULT_CHROME,
+  '/usr/bin/google-chrome',
+  '/usr/bin/google-chrome-stable',
+  '/usr/bin/chromium',
+  '/usr/bin/chromium-browser',
+].find((candidate) => candidate && existsSync(candidate));
 const url = process.env.VISUAL_URL || process.argv[2] || 'http://127.0.0.1:5173/';
 const outDir = resolve(process.env.VISUAL_OUT_DIR || 'visual-artifacts');
 const width = Number(process.env.VISUAL_WIDTH || 1440);
@@ -148,6 +156,9 @@ async function waitForCanvas(client) {
 }
 
 async function main() {
+  if (!chromePath) {
+    throw new Error('Chrome/Chromium was not found. Set CHROME_PATH to run the visual smoke test.');
+  }
   const profileDir = await mkdtemp(join(tmpdir(), 'opencad-visual-'));
   await mkdir(outDir, { recursive: true });
 

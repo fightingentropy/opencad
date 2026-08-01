@@ -5,6 +5,9 @@ import {
   AMBIENT_FACTORS_XLPE,
   GROUPING_FACTORS_ENCLOSED,
   GROUPING_FACTORS_TRAY,
+  createStandardsTrace,
+  type StandardsCode,
+  type StandardsTrace,
 } from '../models/standards';
 
 export type InsulationType = 'PVC' | 'XLPE';
@@ -19,6 +22,7 @@ export interface DeratingOptions {
   insulationFactor?: number;
   // Optional installation method factor (Cc) — 0.9 for buried Method D, 1.0 otherwise.
   installationFactor?: number;
+  standardsCode?: StandardsCode;
 }
 
 export interface DeratingResult {
@@ -28,6 +32,7 @@ export interface DeratingResult {
   Cc: number;
   totalFactor: number;
   deratedCurrent: number;
+  standards: StandardsTrace;
 }
 
 const lookupNearest = (
@@ -74,7 +79,21 @@ export const computeDeratingFactors = (opts: DeratingOptions): DeratingResult =>
   const Ci = opts.insulationFactor ?? 1.0;
   const Cc = opts.installationFactor ?? installationFactor(opts.installationMethod);
   const totalFactor = Cg * Ca * Ci * Cc;
-  return { Cg, Ca, Ci, Cc, totalFactor, deratedCurrent: 0 };
+  const groupingTable = opts.installationMethod === 'tray' || opts.installationMethod === 'ladder'
+    ? 'grouping-tray-bs7671' as const
+    : 'grouping-enclosed-bs7671' as const;
+  const ambientTable = opts.insulation === 'XLPE'
+    ? 'ambient-xlpe-bs7671' as const
+    : 'ambient-pvc-bs7671' as const;
+  return {
+    Cg,
+    Ca,
+    Ci,
+    Cc,
+    totalFactor,
+    deratedCurrent: 0,
+    standards: createStandardsTrace(opts.standardsCode, [groupingTable, ambientTable]),
+  };
 };
 
 export const deratedAmpacity = (
