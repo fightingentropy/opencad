@@ -1,12 +1,17 @@
 import type { ContainmentEntity, FittingEntity, Project, SupportEntity } from '../types';
 import { emptyCableSchedule } from '../models/cable';
-import { DEFAULT_STANDARDS } from '../models/standards';
+import { normalizeStandardsProfile } from '../models/standards';
 import { loadDefaultCatalogues } from '../data/catalogues';
 import { pickSupportKind, trapezeChannelLength } from '../lib/support-placer';
 import { containmentTouchesPoint } from '../lib/fittings';
 import { dismissNotification, notify, useNotifications } from '../state/notifications';
 import { markSaved, markSaveError, markSaving } from '../state/save-status';
 import { projectStructureDefects, repairProjectStructure } from './project-validation';
+import {
+  clearIndexedDbProjects,
+  loadIndexedDbProjectSnapshots,
+  saveIndexedDbProjectSnapshot,
+} from './indexeddb-project-store';
 
 // Bump this whenever the bundled sample project changes meaningfully —
 // users with an autosave from a previous demo will skip it and load the
@@ -29,10 +34,10 @@ const LEGACY_KEYS = ['opencad.project.v7', 'opencad.project.v6', 'opencad.projec
 export function migrateProject(parsed: Project): Project {
   const next: Project = { ...parsed };
   if (!next.cableSchedule) next.cableSchedule = emptyCableSchedule();
-  if (!next.standardsProfile) next.standardsProfile = DEFAULT_STANDARDS.BS7671;
+  next.standardsProfile = normalizeStandardsProfile(next.standardsProfile);
   // Catalogues are large but bundled with the app — we always rehydrate
   // them so the Catalogue Browser populates after a reload (saved
-  // projects don't need to round-trip 366 products through localStorage).
+  // projects don't need to round-trip 366 products through browser storage).
   if (!next.catalogues || Object.keys(next.catalogues).length === 0) {
     next.catalogues = loadDefaultCatalogues();
   }
@@ -115,15 +120,7 @@ type StoredReadResult =
   | { status: 'absent' }
   | { status: 'damaged' };
 
-function readKey(key: string): StoredReadResult {
-  let raw: string | null = null;
-  try {
-    raw = localStorage.getItem(key);
-  } catch {
-    // Storage itself is unavailable (private mode, disabled) — there is no
-    // stored data to lose, so treat it like a first visit.
-    return { status: 'absent' };
-  }
+function readRaw(key: string, raw: string | null): StoredReadResult {
   if (!raw) return { status: 'absent' };
   try {
     const parsed = JSON.parse(raw);
@@ -142,6 +139,16 @@ function readKey(key: string): StoredReadResult {
   } catch {
     console.warn(`[opencad] stored project under "${key}" is not valid JSON`);
     return { status: 'damaged' };
+  }
+}
+
+function readKey(key: string): StoredReadResult {
+  try {
+    return readRaw(key, localStorage.getItem(key));
+  } catch {
+    // Storage itself is unavailable (private mode, disabled) — there is no
+    // stored data to lose, so treat it like a first visit.
+    return { status: 'absent' };
   }
 }
 
@@ -231,6 +238,40 @@ export function loadStoredProject(): Project | null {
   return null;
 }
 
+/**
+ * Primary single-player restore path. IndexedDB is checked first; the old
+ * localStorage slots are a one-time migration/fallback for existing users.
+ */
+export async function loadStoredProjectAsync(): Promise<Project | null> {
+  try {
+    const snapshots = await loadIndexedDbProjectSnapshots();
+    const current = readRaw('IndexedDB current snapshot', snapshots.current?.raw ?? null);
+    if (current.status === 'ok') return migrateProject(current.project);
+
+    const backup = readRaw('IndexedDB backup snapshot', snapshots.backup?.raw ?? null);
+    if (backup.status === 'ok') {
+      notify('warning', 'Restored project from IndexedDB backup snapshot', {
+        detail: 'The current snapshot was missing or damaged, so the previous atomic snapshot was loaded.',
+      });
+      return migrateProject(backup.project);
+    }
+  } catch (error) {
+    console.warn('[opencad] IndexedDB restore unavailable; checking compatibility storage', error);
+  }
+
+  const legacy = loadStoredProject();
+  if (!legacy) return null;
+  try {
+    const { catalogues: _omit, ...stripped } = legacy;
+    await saveIndexedDbProjectSnapshot(JSON.stringify(stripped), legacy.id, legacy.modified);
+    clearStoredProject();
+    notify('success', 'Migrated project autosave to IndexedDB', { id: 'autosave-idb-migration' });
+  } catch (error) {
+    console.warn('[opencad] localStorage autosave migration to IndexedDB failed', error);
+  }
+  return legacy;
+}
+
 export interface SaveResult {
   ok: boolean;
   reason?: 'quota' | 'unavailable' | 'unknown' | 'invalid';
@@ -240,6 +281,7 @@ export interface SaveResult {
 // Stable toast id so repeated failures replace the toast in place instead of
 // stacking — autosave fires every few hundred ms while the user works.
 const AUTOSAVE_TOAST_ID = 'autosave-failure';
+let indexedDbSaveQueue: Promise<void> = Promise.resolve();
 
 // Per-reason copy for the failure toast and the status-bar indicator. The
 // toast message tells the user what to do (File → Save downloads a copy);
@@ -298,8 +340,8 @@ export function saveStoredProject(p: Project): SaveResult {
   }
   // Strip the catalogues before serialising — they're 100KB+ of static
   // product data we re-load from the bundle on the next visit. Cuts the
-  // typical save from ~250KB to ~150KB and leaves more room before
-  // hitting the localStorage 5MB quota.
+  // typical save from ~250KB to ~150KB and leaves more room when this
+  // compatibility path is forced to use localStorage.
   const { catalogues: _omit, ...stripped } = p;
   let serialized = '';
   try {
@@ -334,6 +376,45 @@ export function saveStoredProject(p: Project): SaveResult {
   }
 }
 
+/** Save the project through one atomic IndexedDB transaction with journaling. */
+export async function saveStoredProjectAsync(p: Project): Promise<SaveResult> {
+  markSaving();
+  const defects = projectStructureDefects(p);
+  if (defects.length > 0) {
+    reportSaveFailure('invalid');
+    console.warn(`[opencad] autosave refused — project failed validation: ${defects.join('; ')}`);
+    return { ok: false, reason: 'invalid' };
+  }
+
+  const { catalogues: _omit, ...stripped } = p;
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(stripped);
+  } catch {
+    reportSaveFailure('unknown');
+    return { ok: false, reason: 'unknown' };
+  }
+
+  try {
+    const queuedSave = indexedDbSaveQueue.then(() =>
+      saveIndexedDbProjectSnapshot(serialized, p.id, p.modified),
+    );
+    // Keep later snapshots in call order even when a slow browser storage
+    // transaction is still running. The catch keeps one failed write from
+    // poisoning every future queue entry; the caller still observes failure.
+    indexedDbSaveQueue = queuedSave.catch(() => undefined);
+    await queuedSave;
+    markSaved();
+    if (useNotifications.getState().toasts.some((toast) => toast.id === AUTOSAVE_TOAST_ID)) {
+      dismissNotification(AUTOSAVE_TOAST_ID);
+    }
+    return { ok: true, bytes: new TextEncoder().encode(serialized).byteLength };
+  } catch (error) {
+    console.warn('[opencad] IndexedDB autosave failed; using compatibility storage', error);
+    return saveStoredProject(p);
+  }
+}
+
 export function clearStoredProject(): void {
   try {
     localStorage.removeItem(STORAGE_KEY);
@@ -341,5 +422,15 @@ export function clearStoredProject(): void {
     for (const key of LEGACY_KEYS) localStorage.removeItem(key);
   } catch {
     // ignore
+  }
+}
+
+export async function clearAllStoredProjects(): Promise<void> {
+  clearStoredProject();
+  try {
+    await indexedDbSaveQueue;
+    await clearIndexedDbProjects();
+  } catch {
+    // Best-effort for browsers where storage was disabled after startup.
   }
 }

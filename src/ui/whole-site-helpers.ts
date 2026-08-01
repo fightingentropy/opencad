@@ -7,8 +7,8 @@
 import type { Project, Entity, Sheet, ContainmentEntity } from '../types';
 import type { Cable } from '../models/cable';
 import {
-  AMPACITY_REF_C_PVC_COPPER,
-  AMPACITY_REF_C_XLPE_COPPER,
+  AMPACITY_REF_B_PVC_COPPER,
+  AMPACITY_REF_B_XLPE_COPPER,
   DEFAULT_STANDARDS,
 } from '../models/standards';
 import type { StandardsCode, StandardsProfile } from '../models/standards';
@@ -84,7 +84,7 @@ export const estimateVdrop = (
   };
 };
 
-// Quick ampacity check using BS 7671 Reference Method C base ampacity table
+// Quick ampacity check using the conservative BS 7671 Reference Method B seed table
 // combined with the derating factors engine (grouping based on cables on the
 // same containment when a project is supplied).
 export const estimateAmpacity = (
@@ -93,7 +93,7 @@ export const estimateAmpacity = (
 ): { iz: number; ib: number; ok: boolean } => {
   const ib = cable.designCurrent ?? 0;
   const isXlpe = cable.construction.startsWith('XLPE');
-  const baseTable = isXlpe ? AMPACITY_REF_C_XLPE_COPPER : AMPACITY_REF_C_PVC_COPPER;
+  const baseTable = isXlpe ? AMPACITY_REF_B_XLPE_COPPER : AMPACITY_REF_B_PVC_COPPER;
   const baseIz = baseTable[cable.csa] ?? 0;
   // Estimate group size: the largest count of cables sharing any containment
   // segment on this cable's route. Falls back to 1 when no project provided.

@@ -17,8 +17,8 @@ import {
   type InstallationMethod,
 } from '../calc';
 import {
-  AMPACITY_REF_C_PVC_COPPER,
-  AMPACITY_REF_C_XLPE_COPPER,
+  AMPACITY_REF_B_PVC_COPPER,
+  AMPACITY_REF_B_XLPE_COPPER,
   DEFAULT_STANDARDS,
 } from '../models/standards';
 import {
@@ -107,14 +107,12 @@ function ContainmentCalcs({ entity }: { entity: ContainmentEntity }) {
 
 const installationMethodFor = (cable: Cable): InstallationMethod => {
   // The wire might pass through any containment; default to tray which
-  // matches the BS 7671 Reference Method C ampacity table we use for Iz.
+  // matches the conservative BS 7671 Reference Method B seed table used for Iz.
   return 'tray';
 };
 
 function WireCalcs({ entity }: { entity: any }) {
   const cableSchedule = useCableSchedule();
-  const sheets = useSheets();
-  const standardsProfile = useStandardsProfile();
   const cable = entity.cableId ? cableSchedule?.cables[entity.cableId] : null;
 
   if (!cable) {
@@ -125,6 +123,14 @@ function WireCalcs({ entity }: { entity: any }) {
     );
   }
 
+  return <LinkedWireCalcs cable={cable} />;
+}
+
+function LinkedWireCalcs({ cable }: { cable: Cable }) {
+  const cableSchedule = useCableSchedule();
+  const sheets = useSheets();
+  const standardsProfile = useStandardsProfile();
+
   // estimateCableLength walks every sheet's entities, so the sheets map is
   // the exact recompute trigger; the full project is read untracked.
   const len = useMemo(
@@ -134,7 +140,7 @@ function WireCalcs({ entity }: { entity: any }) {
 
   const standardsCode = standardsProfile?.code ?? 'BS7671';
   const isXlpe = cable.construction.startsWith('XLPE');
-  const baseTable = isXlpe ? AMPACITY_REF_C_XLPE_COPPER : AMPACITY_REF_C_PVC_COPPER;
+  const baseTable = isXlpe ? AMPACITY_REF_B_XLPE_COPPER : AMPACITY_REF_B_PVC_COPPER;
   const baseAmp = baseTable[cable.csa] ?? 0;
 
   // Estimate group size from cables sharing route

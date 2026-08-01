@@ -22,6 +22,23 @@ export interface RuntimePresence {
   ts?: number;
 }
 
+export interface CollaborationRuntimeConfiguration {
+  authenticatedEndpoint: string | null;
+  anonymousBetaEnabled: boolean;
+}
+
+/**
+ * Anonymous WebRTC is opt-in only. A missing/invalid backend never silently
+ * falls back to the anonymous transport in a production build.
+ */
+export const collaborationRuntimeConfiguration = (): CollaborationRuntimeConfiguration => {
+  const authenticatedEndpoint = import.meta.env.VITE_COLLAB_BACKEND_URL?.trim() || null;
+  return {
+    authenticatedEndpoint,
+    anonymousBetaEnabled: import.meta.env.VITE_ENABLE_ANONYMOUS_COLLAB === 'true',
+  };
+};
+
 // Module-level state holding the loaded collab module. Once set, the
 // app uses these refs to publish presence and subscribe to remote
 // updates without re-importing the chunk.
@@ -44,6 +61,7 @@ export const onActiveChange = (cb: (active: boolean) => void): () => void => {
 };
 
 export const isActive = (): boolean => active;
+export const activeRoom = (): string | null => mod?.activeRoom() ?? null;
 
 /**
  * Lazy-load the collaboration chunk. The first call fetches the

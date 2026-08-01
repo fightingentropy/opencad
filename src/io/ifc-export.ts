@@ -20,6 +20,7 @@ import type {
   FittingEntity,
   WallEntity,
 } from '../types';
+import { buildExportMetadata } from './export-metadata';
 import type { Cable } from '../models/cable';
 
 interface IfcEmitter {
@@ -498,8 +499,11 @@ export const exportIFC = (project: Project): string => {
   }
 
   const ts = new Date().toISOString();
+  const metadata = buildExportMetadata(project, 'ifc4');
+  const metadataComment = `/* OPENCAD_EXPORT_METADATA ${JSON.stringify(metadata).replace(/\*\//g, '* /')} */`;
   const header = [
     'ISO-10303-21;',
+    metadataComment,
     'HEADER;',
     `FILE_DESCRIPTION(('ViewDefinition [CoordinationView]'),'2;1');`,
     `FILE_NAME('${project.name.replace(/'/g, "''")}.ifc','${ts}',('OpenCAD'),('OpenCAD Electrical'),'OpenCAD','OpenCAD Electrical 1.0','');`,

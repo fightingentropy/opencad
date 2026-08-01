@@ -2,7 +2,11 @@
 
 import type { ContainmentEntity, SupportEntity, Vec2 } from '../types';
 import type { Cable } from '../models/cable';
-import { SUPPORT_SPANS_HORIZONTAL_MM } from '../models/standards';
+import {
+  SUPPORT_SPANS_HORIZONTAL_MM,
+  createStandardsTrace,
+  type StandardsTrace,
+} from '../models/standards';
 
 const dist = (a: Vec2, b: Vec2): number => {
   const dx = a.x - b.x;
@@ -48,6 +52,13 @@ export const computeSupportSpacing = (containment: ContainmentEntity): number =>
   }
   return 1500;
 };
+
+export const computeSupportSpacingWithTrace = (
+  containment: ContainmentEntity,
+): { spacingMm: number; standards: StandardsTrace } => ({
+  spacingMm: computeSupportSpacing(containment),
+  standards: createStandardsTrace('BS7671', ['support-spans-opencad']),
+});
 
 // Place support points along a polyline at intervals ≤ maxSpan, with
 // extra supports within 300 mm of every direction change and endpoint.
@@ -164,6 +175,7 @@ export interface SupportLoadVerdict {
   totalLoadKg: number;
   capacityKg: number;
   spanM: number;
+  standards: StandardsTrace;
 }
 
 export const verifySupportLoad = (
@@ -177,7 +189,13 @@ export const verifySupportLoad = (
     cableLoadKgPerMetre(cables) + containmentSelfMassKgPerMetre(containment);
   const totalLoadKg = linealKg * spanM;
   const capacityKg = support.safeWorkingLoadKg ?? defaultSwl(support.supportKind);
-  return { ok: totalLoadKg <= capacityKg, totalLoadKg, capacityKg, spanM };
+  return {
+    ok: totalLoadKg <= capacityKg,
+    totalLoadKg,
+    capacityKg,
+    spanM,
+    standards: createStandardsTrace('BS7671', ['support-spans-opencad']),
+  };
 };
 
 const defaultSwl = (kind: SupportEntity['supportKind']): number => {

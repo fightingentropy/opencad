@@ -18,7 +18,27 @@ export function CrossSectionEditor({ entityId, onClose }: { entityId: string; on
   const standardsProfile = useStandardsProfile();
   const ent = sheet?.entities[entityId];
   if (!ent || ent.kind !== 'containment') return null;
-  const cont = ent as ContainmentEntity;
+  return (
+    <CrossSectionContent
+      cont={ent as ContainmentEntity}
+      cableSchedule={cableSchedule}
+      standardsProfile={standardsProfile}
+      onClose={onClose}
+    />
+  );
+}
+
+function CrossSectionContent({
+  cont,
+  cableSchedule,
+  standardsProfile,
+  onClose,
+}: {
+  cont: ContainmentEntity;
+  cableSchedule: ReturnType<typeof useCableSchedule>;
+  standardsProfile: ReturnType<typeof useStandardsProfile>;
+  onClose: () => void;
+}) {
   // cablesOnContainment only consults project.cableSchedule — the schedule
   // slice is the exact recompute trigger; the project is read untracked.
   const cables = useMemo(

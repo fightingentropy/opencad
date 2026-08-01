@@ -9,14 +9,26 @@ import { WebrtcProvider } from 'y-webrtc';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import type { Awareness } from 'y-protocols/awareness';
 import { getCollabMaps, type CollabMaps } from './sync';
+import { assertSecureCollaborationRoomCode } from './room-code';
+import { AuthenticatedDurableProvider } from './durable-provider';
+import { getLocalIdentity } from './presence';
+import type {
+  CollaborationIdentity,
+  CollaborationTransport,
+} from './protocol';
 
-// One Y.Doc per browser tab. We don't tear it down between sessions —
-// reconnecting to the same room simply reuses the existing doc.
+// One Y.Doc per room per browser tab. Reconnecting to the same room reuses
+// its document; switching rooms destroys it so state cannot bleed between
+// otherwise unrelated collaboration sessions.
 let doc: Y.Doc | null = null;
 let maps: CollabMaps | null = null;
-let provider: WebrtcProvider | null = null;
+let documentRoom: string | null = null;
+type CollaborationProvider = WebrtcProvider | AuthenticatedDurableProvider;
+
+let provider: CollaborationProvider | null = null;
 let persistence: IndexeddbPersistence | null = null;
 let currentRoom: string | null = null;
+let currentConnectionKey: string | null = null;
 
 // v2 wire/persistence namespace. The v1 schema stored the whole project
 // as one JSON blob (getMap('project'), IndexedDB `opencad-collab-*`);
@@ -35,11 +47,13 @@ const DEFAULT_SIGNALING = [
   'wss://y-webrtc-signaling-us.herokuapp.com',
 ];
 
+export type CollaborationConnection =
+  | { kind: 'authenticated'; endpoint: string }
+  | { kind: 'anonymous-beta'; signaling?: string[] };
+
 export interface ConnectOptions {
-  /** Room code — anyone with this code joins the session. */
   room: string;
-  /** Optional WebRTC signalling endpoints. */
-  signaling?: string[];
+  connection: CollaborationConnection;
 }
 
 export interface CollabHandle {
@@ -47,17 +61,25 @@ export interface CollabHandle {
   maps: CollabMaps;
   awareness: Awareness;
   room: string;
-  /** Disconnect WebRTC; the local Y.Doc and IndexedDB cache stay. */
+  transport: CollaborationTransport;
+  ready: Promise<CollaborationIdentity>;
   disconnect: () => void;
 }
 
-const ensureDoc = (): { doc: Y.Doc; maps: CollabMaps } => {
-  if (doc && maps) return { doc, maps };
+const ensureDoc = (documentKey: string): { doc: Y.Doc; maps: CollabMaps } => {
+  if (doc && maps && documentRoom === documentKey) return { doc, maps };
+  doc?.destroy();
   const d = new Y.Doc();
   doc = d;
   maps = getCollabMaps(d);
+  documentRoom = documentKey;
   return { doc: d, maps };
 };
+
+const connectionKey = (opts: ConnectOptions): string =>
+  opts.connection.kind === 'authenticated'
+    ? `authenticated:${opts.connection.endpoint}:${opts.room}`
+    : `anonymous-beta:${opts.room}`;
 
 /**
  * Connect to a collaboration room. Idempotent: calling with the same
@@ -65,9 +87,10 @@ const ensureDoc = (): { doc: Y.Doc; maps: CollabMaps } => {
  * provider and creates a new one.
  */
 export function connectCollab(opts: ConnectOptions): CollabHandle {
-  const { doc: d, maps: m } = ensureDoc();
+  assertSecureCollaborationRoomCode(opts.room);
+  const nextConnectionKey = connectionKey(opts);
 
-  if (currentRoom !== opts.room) {
+  if (currentConnectionKey !== nextConnectionKey) {
     if (provider) {
       provider.destroy();
       provider = null;
@@ -76,22 +99,36 @@ export function connectCollab(opts: ConnectOptions): CollabHandle {
       persistence.destroy();
       persistence = null;
     }
-    // IndexedDB persistence — survives reload, replaces localStorage
-    // for the duration of a collab session.
-    persistence = new IndexeddbPersistence(`${IDB_PREFIX}${opts.room}`, d);
-    provider = new WebrtcProvider(`${ROOM_PREFIX}${opts.room}`, d, {
-      signaling: opts.signaling ?? DEFAULT_SIGNALING,
-    });
+    const { doc: d } = ensureDoc(nextConnectionKey);
+    if (opts.connection.kind === 'authenticated') {
+      // The Durable Object is authoritative. Deliberately do not share an
+      // IndexedDB document cache between different signed-in users on the
+      // same browser profile.
+      provider = new AuthenticatedDurableProvider(opts.connection.endpoint, opts.room, d);
+    } else {
+      persistence = new IndexeddbPersistence(`${IDB_PREFIX}${opts.room}`, d);
+      provider = new WebrtcProvider(`${ROOM_PREFIX}${opts.room}`, d, {
+        signaling: opts.connection.signaling ?? DEFAULT_SIGNALING,
+      });
+    }
     currentRoom = opts.room;
+    currentConnectionKey = nextConnectionKey;
   }
 
-  if (!provider) throw new Error('WebRTC provider failed to initialise');
+  const { doc: d, maps: m } = ensureDoc(nextConnectionKey);
+
+  if (!provider) throw new Error('Collaboration provider failed to initialise');
+  const local = getLocalIdentity();
 
   return {
     doc: d,
     maps: m,
     awareness: provider.awareness,
     room: opts.room,
+    transport: opts.connection.kind,
+    ready: provider instanceof AuthenticatedDurableProvider
+      ? provider.ready
+      : Promise.resolve({ ...local, role: 'owner' }),
     disconnect: () => disconnectCollab(),
   };
 }
@@ -107,6 +144,7 @@ export function disconnectCollab(): void {
     persistence = null;
   }
   currentRoom = null;
+  currentConnectionKey = null;
 }
 
 export function isConnected(): boolean {
@@ -118,11 +156,13 @@ export function currentRoomCode(): string | null {
 }
 
 export function getYDoc(): Y.Doc {
-  return ensureDoc().doc;
+  if (!doc) throw new Error('Collaboration document unavailable — connect to a room first');
+  return doc;
 }
 
 export function getYCollabMaps(): CollabMaps {
-  return ensureDoc().maps;
+  if (!maps) throw new Error('Collaboration document unavailable — connect to a room first');
+  return maps;
 }
 
 export function getYAwareness(): Awareness {
@@ -132,6 +172,6 @@ export function getYAwareness(): Awareness {
   return provider.awareness;
 }
 
-export function getProvider(): WebrtcProvider | null {
+export function getProvider(): CollaborationProvider | null {
   return provider;
 }

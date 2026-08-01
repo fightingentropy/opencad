@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "opencad-collaboration",
+  "main": "worker/src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "COLLAB_ROOM",
+        "class_name": "CollaborationRoom"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["CollaborationRoom"]
+    }
+  ],
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "https://fightingentropy.cloudflareaccess.com",
+    "ACCESS_AUD": "ea7d51e81a3c224451e7c81b4c8c6a17882911c455c56259db178201fe740aea",
+    "ALLOWED_ORIGINS": "https://opencad.pages.dev"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.05
+    }
+  }
+}

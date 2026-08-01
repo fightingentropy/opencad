@@ -3,12 +3,13 @@
 
 import type { Project, ContainmentEntity, EntityId, SheetId, SupportEntity } from '../types';
 import type { Cable } from '../models/cable';
-import type { StandardsProfile } from '../models/standards';
-import { DEFAULT_STANDARDS } from '../models/standards';
+import type { StandardsProfile, StandardsTrace } from '../models/standards';
+import { DEFAULT_STANDARDS, createStandardsTrace } from '../models/standards';
 import { computeContainmentFill } from './fill';
 import { checkSegregation } from './segregation';
 import { polylineLength, computeSupportSpacing } from './supports';
 import { computeVoltageDrop } from './voltage-drop';
+import { checkProtectiveDeviceCoordination } from './protective-device';
 
 export type IssueSeverity = 'info' | 'warning' | 'error';
 export type IssueKind =
@@ -17,6 +18,7 @@ export type IssueKind =
   | 'support-spacing'
   | 'clearance'
   | 'voltage-drop'
+  | 'protective-device'
   | 'fire-stop'
   | 'cable-route';
 
@@ -45,6 +47,7 @@ export interface ComplianceReport {
   cableCount: number;
   averageFillPct: number;
   generatedAt: number;
+  standards: StandardsTrace;
 }
 
 const sheetForEntity = (project: Project, id: EntityId): SheetId | undefined => {
@@ -344,27 +347,57 @@ export const runComplianceChecks = (project: Project): ComplianceReport => {
 
   // Cable voltage drop checks
   for (const cable of cables) {
-    if (!cable.designCurrent || !cable.estimatedLength) continue;
-    const r = computeVoltageDrop({
-      construction: cable.construction,
-      csa: cable.csa,
-      lengthM: cable.estimatedLength,
-      designCurrentA: cable.designCurrent,
-      systemVoltageV: cable.voltage,
-      phasing: cable.cores >= 3 ? 'three' : 'single',
-      loadCategory: cable.circuitType === 'data' || cable.circuitType === 'comms' ? 'other' : 'other',
-      standardsCode: standards.code,
-    });
-    if (!r.withinLimits) {
-      issues.push({
-        entityId: cable.id,
-        kind: 'voltage-drop',
-        severity: 'error',
-        message: `Cable ${cable.reference} voltage drop ${r.vdropPct.toFixed(2)}% exceeds limit ${r.limitPct.toFixed(1)}%`,
-        measured: r.vdropPct,
-        limit: r.limitPct,
-        unit: '%',
+    if (cable.designCurrent && cable.estimatedLength) {
+      const r = computeVoltageDrop({
+        construction: cable.construction,
+        csa: cable.csa,
+        lengthM: cable.estimatedLength,
+        designCurrentA: cable.designCurrent,
+        systemVoltageV: cable.voltage,
+        phasing: cable.cores >= 3 ? 'three' : 'single',
+        loadCategory: cable.circuitType === 'data' || cable.circuitType === 'comms' ? 'other' : 'other',
+        standardsCode: standards.code,
       });
+      if (!r.withinLimits) {
+        issues.push({
+          entityId: cable.id,
+          kind: 'voltage-drop',
+          severity: 'error',
+          message: `Cable ${cable.reference} voltage drop ${r.vdropPct.toFixed(2)}% exceeds limit ${r.limitPct.toFixed(1)}%`,
+          measured: r.vdropPct,
+          limit: r.limitPct,
+          unit: '%',
+        });
+      }
+    }
+
+    // This implementation is intentionally limited to the BS relation. The
+    // other selectable profiles remain marked partial and must not silently
+    // reuse a UK overload-protection rule.
+    const cableAmpacity = cable.calculated?.ampacity ?? cable.calculated?.baseAmpacity;
+    if (
+      standards.code === 'BS7671' &&
+      cable.designCurrent !== undefined &&
+      cable.protectiveDeviceRating !== undefined &&
+      cableAmpacity !== undefined
+    ) {
+      const coordination = checkProtectiveDeviceCoordination({
+        designCurrentA: cable.designCurrent,
+        deviceRatingA: cable.protectiveDeviceRating,
+        cableAmpacityA: cableAmpacity,
+        standardsCode: standards.code,
+      });
+      if (!coordination.ok) {
+        issues.push({
+          entityId: cable.id,
+          kind: 'protective-device',
+          severity: 'error',
+          message: `Cable ${cable.reference} overload coordination fails Ib <= In <= Iz (${cable.designCurrent} A <= ${cable.protectiveDeviceRating} A <= ${cableAmpacity.toFixed(1)} A)`,
+          measured: cable.protectiveDeviceRating,
+          limit: cableAmpacity,
+          unit: 'A',
+        });
+      }
     }
   }
 
@@ -390,6 +423,7 @@ export const runComplianceChecks = (project: Project): ComplianceReport => {
     'support-spacing': 0,
     clearance: 0,
     'voltage-drop': 0,
+    'protective-device': 0,
     'fire-stop': 0,
     'cable-route': 0,
   };
@@ -406,5 +440,15 @@ export const runComplianceChecks = (project: Project): ComplianceReport => {
     cableCount: cables.length,
     averageFillPct: containmentsWithCables > 0 ? totalFill / containmentsWithCables : 0,
     generatedAt: Date.now(),
+    standards: createStandardsTrace(standards, [
+      'fill-limits',
+      'space-factor-trunking-bs7671',
+      'support-spans-opencad',
+      'segregation-bs7671',
+      'voltage-drop-limits',
+      'voltage-drop-pvc-single-phase-bs7671',
+      'voltage-drop-xlpe-three-phase-bs7671',
+      'overload-coordination-bs7671',
+    ]),
   };
 };

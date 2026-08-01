@@ -45,7 +45,7 @@ export function CostEstimationModal({ onClose }: { onClose: () => void }) {
   const labourItems = estimate.lineItems.filter((l) => l.category === 'labour');
 
   const onCsv = () => {
-    const csv = costEstimateToCSV(estimate);
+    const csv = costEstimateToCSV(estimate, useStore.getState().project);
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);

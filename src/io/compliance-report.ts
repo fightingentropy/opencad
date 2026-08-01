@@ -20,8 +20,11 @@ import {
   SUPPORT_SPANS_HORIZONTAL_MM,
   SEGREGATION_MIN_MM,
   VDROP_LIMITS,
+  createStandardsTrace,
+  type StandardsTrace,
 } from '../models/standards';
 import jsPDF from 'jspdf';
+import { buildExportMetadata, exportMetadataSummary, type ExportMetadata } from './export-metadata';
 
 export interface ComplianceLine {
   label: string;
@@ -42,6 +45,8 @@ export interface ComplianceReportData {
   voltageDrop: ComplianceLine;
   fireStops: ComplianceLine;
   notes: string[];
+  standards: StandardsTrace;
+  metadata: ExportMetadata;
 }
 
 const routeLengthMm = (c: ContainmentEntity): number => {
@@ -328,7 +333,14 @@ export const generateComplianceReport = (
   ).toFixed(3);
   const notes: string[] = [];
   const code = project.standardsProfile?.code ?? 'BS7671';
-  notes.push(`Standards profile: ${code}`);
+  const standards = createStandardsTrace(project.standardsProfile, [
+    'fill-limits',
+    'support-spans-opencad',
+    'segregation-bs7671',
+    'voltage-drop-limits',
+  ]);
+  const metadata = buildExportMetadata(project, 'compliance-report');
+  notes.push(`Standards profile: ${code} ${standards.profileVersion} (${standards.datasetHash})`);
   notes.push(
     'Compliance checks operate on entities present in the model — undocumented installations cannot be evaluated.',
   );
@@ -345,6 +357,8 @@ export const generateComplianceReport = (
     voltageDrop: evaluateVoltageDrop(project),
     fireStops: evaluateFireStops(project, containments, walls),
     notes,
+    standards,
+    metadata,
   };
 };
 
@@ -384,6 +398,7 @@ export const complianceReportToHTML = (data: ComplianceReportData): string => {
     .join('');
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Compliance Report — ${escHtml(data.projectName)}</title>
+<meta name="opencad-export-metadata" content="${escHtml(JSON.stringify(data.metadata))}">
 <style>
 body { font-family: -apple-system, sans-serif; color: #1a1a1a; padding: 24px; max-width: 900px; margin: 0 auto; }
 h1 { margin-bottom: 4px; }
@@ -399,6 +414,7 @@ h3 { margin-top: 18px; }
 <body>
 <h1>Compliance Report</h1>
 <div class="meta">${escHtml(data.projectName)} • Generated ${escHtml(data.generated)}</div>
+<div class="meta">${escHtml(exportMetadataSummary(data.metadata))}</div>
 <table>
   <tr><th>Total containment runs</th><td>${data.containmentCount}</td></tr>
   <tr><th>Total route length</th><td>${data.totalRouteKm.toFixed(3)} km</td></tr>
@@ -425,6 +441,13 @@ export const complianceReportToPDF = async (
   const marginX = 15;
   let y = 18;
 
+  doc.setProperties({
+    title: `Compliance Report — ${data.projectName}`,
+    subject: exportMetadataSummary(data.metadata),
+    keywords: JSON.stringify(data.metadata),
+    creator: 'OpenCAD Electrical',
+  });
+
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
   doc.text(`Compliance Report — ${data.projectName}`, marginX, y);
@@ -432,6 +455,9 @@ export const complianceReportToPDF = async (
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.text(`Generated ${data.generated}`, marginX, y);
+  y += 5;
+  doc.setFontSize(7);
+  doc.text(exportMetadataSummary(data.metadata), marginX, y, { maxWidth: pageWidth - marginX * 2 });
   y += 8;
 
   const tableHead = (cols: string[], widths: number[]) => {
