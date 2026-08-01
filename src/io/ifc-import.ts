@@ -12,6 +12,7 @@
 
 import type { Entity, WallEntity, RoomEntity, UnderlayEntity, Vec2 } from '../types';
 import { nanoid } from 'nanoid';
+import { assertImportTextLimits, IMPORT_LIMITS, ImportLimitError } from './import-limits';
 
 interface IfcRecord {
   id: number;
@@ -35,6 +36,12 @@ const parseRecords = (text: string): Map<number, IfcRecord> => {
     const id = parseInt(m[1], 10);
     const type = m[2].toUpperCase();
     out.set(id, { id, type, args: m[3] });
+    if (out.size > IMPORT_LIMITS.ifc.maxEntities) {
+      throw new ImportLimitError(
+        'IFC',
+        `more than ${IMPORT_LIMITS.ifc.maxEntities.toLocaleString()} STEP records`,
+      );
+    }
   }
   return out;
 };
@@ -302,6 +309,7 @@ const handleIfcSpace = (
 };
 
 export const importIFC = (text: string): ImportResult => {
+  assertImportTextLimits(text, 'IFC', IMPORT_LIMITS.ifc);
   const result: ImportResult = { entities: [], warnings: [] };
   if (!text || !text.includes('ISO-10303-21')) {
     result.warnings.push('IFC: not a STEP file (missing ISO-10303-21 tag).');

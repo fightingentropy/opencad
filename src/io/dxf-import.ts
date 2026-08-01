@@ -13,6 +13,11 @@
 
 import type { UnderlayEntity, Vec2, Bounds } from '../types';
 import { nanoid } from 'nanoid';
+import {
+  assertImportTextLimits,
+  IMPORT_LIMITS,
+  ImportLimitError,
+} from './import-limits';
 
 interface DxfPair {
   code: number;
@@ -74,6 +79,12 @@ const addLine = (
   b: Vec2,
   color?: string,
 ): void => {
+  if (state.vectors.length >= IMPORT_LIMITS.dxf.maxOutputItems) {
+    throw new ImportLimitError(
+      'DXF',
+      `more than ${IMPORT_LIMITS.dxf.maxOutputItems.toLocaleString()} output vectors`,
+    );
+  }
   const s = state.scale;
   const A = { x: a.x * s, y: a.y * s };
   const B = { x: b.x * s, y: b.y * s };
@@ -119,6 +130,17 @@ const collectEntities = (pairs: DxfPair[]): EntityFields[] => {
   const entities: EntityFields[] = [];
   let current: EntityFields | null = null;
 
+  const appendCurrent = (): void => {
+    if (!current) return;
+    if (entities.length >= IMPORT_LIMITS.dxf.maxEntities) {
+      throw new ImportLimitError(
+        'DXF',
+        `more than ${IMPORT_LIMITS.dxf.maxEntities.toLocaleString()} entities`,
+      );
+    }
+    entities.push(current);
+  };
+
   for (let i = 0; i < pairs.length; i++) {
     const p = pairs[i];
     if (p.code === 0) {
@@ -131,10 +153,10 @@ const collectEntities = (pairs: DxfPair[]): EntityFields[] => {
         }
       } else if (v === 'ENDSEC') {
         inEntities = false;
-        if (current) entities.push(current);
+        appendCurrent();
         current = null;
       } else if (inEntities) {
-        if (current) entities.push(current);
+        appendCurrent();
         current = { type: v, data: new Map() };
       }
       continue;
@@ -145,7 +167,7 @@ const collectEntities = (pairs: DxfPair[]): EntityFields[] => {
       current.data.set(p.code, list);
     }
   }
-  if (current) entities.push(current);
+  appendCurrent();
   return entities;
 };
 
@@ -293,6 +315,7 @@ const collapsePolylines = (entities: EntityFields[]): EntityFields[] => {
 };
 
 export const parseDXF = (text: string): UnderlayEntity => {
+  assertImportTextLimits(text, 'DXF', IMPORT_LIMITS.dxf);
   if (!text || text.length < 10) {
     throw new Error('parseDXF: empty or invalid DXF input');
   }

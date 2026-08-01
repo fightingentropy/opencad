@@ -2,10 +2,13 @@ import type { Project } from '../types';
 import { projectStructureDefects, repairProjectStructure } from './project-validation';
 import { migrateProject } from './persist';
 import { notify } from '../state/notifications';
+import { buildExportMetadata, type ExportMetadata } from './export-metadata';
+import { assertImportTextLimits, IMPORT_LIMITS } from './import-limits';
 
 export interface ProjectFile {
   format: 'opencad-electrical';
   version: 1;
+  metadata: ExportMetadata;
   project: Project;
 }
 
@@ -13,12 +16,14 @@ export const exportProjectJSON = (project: Project): string => {
   const file: ProjectFile = {
     format: 'opencad-electrical',
     version: 1,
+    metadata: buildExportMetadata(project, 'project-json'),
     project,
   };
   return JSON.stringify(file, null, 2);
 };
 
 export const importProjectJSON = (text: string): Project => {
+  assertImportTextLimits(text, 'OpenCAD project', IMPORT_LIMITS.project);
   const file = JSON.parse(text);
   if (!file || typeof file !== 'object' || file.format !== 'opencad-electrical') {
     throw new Error('Not an OpenCAD project file');

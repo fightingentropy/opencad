@@ -78,21 +78,22 @@ export function BomModal({ onClose }: { onClose: () => void }) {
   const safeName = projectName.replace(/\s+/g, '_');
 
   const onExport = () => {
+    const project = useStore.getState().project;
     if (tab === 'symbols') {
-      downloadCSV(bomToCSV(symbolRows), `${safeName}_BOM.csv`);
+      downloadCSV(bomToCSV(symbolRows, project), `${safeName}_BOM.csv`);
     } else if (tab === 'containment') {
       downloadCSV(
-        containmentBOMToCSV(containmentRows),
+        containmentBOMToCSV(containmentRows, project),
         `${safeName}_ContainmentBOM.csv`,
       );
     } else if (tab === 'cables') {
       downloadCSV(
-        cableScheduleToCSV(cableRows),
+        cableScheduleToCSV(cableRows, project),
         `${safeName}_CableSchedule.csv`,
       );
     } else if (tab === 'containment-schedule') {
       downloadCSV(
-        containmentScheduleToCSV(containmentScheduleRows),
+        containmentScheduleToCSV(containmentScheduleRows, project),
         `${safeName}_ContainmentSchedule.csv`,
       );
     }

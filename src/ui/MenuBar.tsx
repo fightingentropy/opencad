@@ -263,7 +263,7 @@ export function MenuBar({
       notify('warning', 'No cables in the cable schedule yet.');
       return;
     }
-    const csv = cablesToCSV(cables);
+    const csv = cablesToCSV(cables, project);
     downloadText(csv, `${safeProjectName()}_Cables.csv`, 'text/csv');
     setStatus(`Exported cable schedule (${cables.length} cables)`);
     notify('success', `Exported cable schedule (${cables.length} cables)`, {
@@ -298,12 +298,13 @@ export function MenuBar({
   };
 
   const onExportContainmentBOMCSV = () => {
-    const rows = generateContainmentBOM(useStore.getState().project);
+    const project = useStore.getState().project;
+    const rows = generateContainmentBOM(project);
     if (rows.length === 0) {
       notify('warning', 'No containment runs to bill.');
       return;
     }
-    const csv = containmentBOMToCSV(rows);
+    const csv = containmentBOMToCSV(rows, project);
     downloadText(csv, `${safeProjectName()}_ContainmentBOM.csv`, 'text/csv');
     setStatus(`Exported containment BOM (${rows.length} rows)`);
     notify('success', `Exported containment BOM (${rows.length} rows)`, {
@@ -336,8 +337,9 @@ export function MenuBar({
         id: 'export-cost-estimate',
         timeoutMs: null,
       });
-      const est = generateCostEstimate(useStore.getState().project);
-      const csv = costEstimateToCSV(est);
+      const project = useStore.getState().project;
+      const est = generateCostEstimate(project);
+      const csv = costEstimateToCSV(est, project);
       downloadText(csv, `${safeProjectName()}_CostEstimate.csv`, 'text/csv');
       setStatus(
         `Exported cost estimate (${est.currency} ${est.grandTotal.toFixed(2)})`,

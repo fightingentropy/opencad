@@ -1,7 +1,7 @@
 import type { Project } from '../types';
 
 // Structural validation shared by every path that installs a whole project:
-// File → Open (io/project.ts) and the localStorage autosave (io/persist.ts).
+// File → Open (io/project.ts) and the IndexedDB autosave (io/persist.ts).
 // The checks are deliberately shallow — containers exist and every id in an
 // order array resolves — because that is exactly the depth the render and
 // migration code dereferences without guarding (e.g. `layers[id].visible` in

@@ -6,6 +6,11 @@
 import type { Project } from '../types';
 import { generateContainmentBOM } from './containment-bom';
 import type { ContainmentBOMRow } from './containment-bom';
+import {
+  buildExportMetadata,
+  exportMetadataSummary,
+  prependCSVExportMetadata,
+} from './export-metadata';
 
 export interface CostEstimateOptions {
   hourlyRate?: number; // GBP/hour
@@ -230,7 +235,10 @@ export const generateCostEstimate = (
   };
 };
 
-export const costEstimateToCSV = (est: CostEstimate): string => {
+export const costEstimateToCSV = (
+  est: CostEstimate,
+  project: Project,
+): string => {
   const header = [
     'Category',
     'Description',
@@ -259,10 +267,15 @@ export const costEstimateToCSV = (est: CostEstimate): string => {
     `,Contingency,,,,${est.contingency.toFixed(2)}`,
     `,Grand total (${est.currency}),,,,${est.grandTotal.toFixed(2)}`,
   ];
-  return [header, ...lines, '', ...totals].join('\n');
+  return prependCSVExportMetadata(
+    [header, ...lines, '', ...totals].join('\n'),
+    project,
+    'cost-estimate-csv',
+  );
 };
 
 export const costEstimateToHTML = (est: CostEstimate, project: Project): string => {
+  const metadata = buildExportMetadata(project, 'cost-estimate-html');
   const fmt = (n: number) => `${est.currency} ${n.toFixed(2)}`;
   const grouped: Record<string, CostLineItem[]> = {
     material: [],
@@ -291,6 +304,7 @@ export const costEstimateToHTML = (est: CostEstimate, project: Project): string 
   };
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Cost estimate — ${escHtml(project.name)}</title>
+<meta name="opencad:export-metadata" content="${escHtml(JSON.stringify(metadata))}">
 <style>
 body { font-family: -apple-system, sans-serif; padding: 24px; max-width: 960px; margin: 0 auto; color: #1a1a1a; }
 h1 { margin-bottom: 4px; }
@@ -305,6 +319,7 @@ th { background: #f4f6fa; }
 <body>
 <h1>Cost Estimate</h1>
 <div class="meta">${escHtml(project.name)} • Generated ${escHtml(est.generated)} • Currency ${escHtml(est.currency)}</div>
+<div class="meta">${escHtml(exportMetadataSummary(metadata))}</div>
 ${renderGroup('Materials', 'material')}
 ${renderGroup('Labour', 'labour')}
 <h3>Summary</h3>

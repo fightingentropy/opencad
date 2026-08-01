@@ -1,0 +1,77 @@
+{
+  "fixtureVersion": 1,
+  "authorship": "Expected outputs were manually transcribed and reviewed independently of the implementation; this file must never be generated from calculator output.",
+  "profile": "BS 7671:2018+A2:2022",
+  "source": {
+    "publisher": "IET / BSI",
+    "url": "https://electrical.theiet.org/guidance-and-codes-of-practice/publications-by-category/bs-7671-and-guidance/",
+    "locators": [
+      "Appendix 4 Table 4D1A, Reference Method B, two loaded conductors",
+      "Appendix 4 Tables 4B1 and 4C1",
+      "Appendix 4 Table 4D2B",
+      "Regulation 433.1.1"
+    ]
+  },
+  "cableSizing": {
+    "input": {
+      "designCurrentA": 20,
+      "ambientC": 30,
+      "numCircuits": 1,
+      "installationMethod": "enclosed",
+      "construction": "PVC/PVC"
+    },
+    "expected": {
+      "csa": 2.5,
+      "baseAmpacity": 24,
+      "ampacity": 24,
+      "ok": true
+    }
+  },
+  "derating": {
+    "input": {
+      "baseAmpacityA": 100,
+      "numCircuits": 4,
+      "ambientC": 40,
+      "installationMethod": "enclosed",
+      "insulation": "PVC"
+    },
+    "expected": {
+      "Cg": 0.65,
+      "Ca": 0.87,
+      "totalFactor": 0.5655,
+      "deratedCurrent": 56.55
+    }
+  },
+  "voltageDrop": {
+    "input": {
+      "construction": "PVC/PVC",
+      "csa": 2.5,
+      "lengthM": 30,
+      "designCurrentA": 16,
+      "systemVoltageV": 230,
+      "phasing": "single",
+      "loadCategory": "other"
+    },
+    "expected": {
+      "mvAm": 18,
+      "vdropV": 8.64,
+      "vdropPct": 3.756521739130435,
+      "withinLimits": true
+    }
+  },
+  "protectiveDevice": {
+    "input": {
+      "designCurrentA": 20,
+      "deviceRatingA": 25,
+      "cableAmpacityA": 32,
+      "conventionalOperatingCurrentA": 36.25
+    },
+    "expected": {
+      "loadProtected": true,
+      "cableProtected": true,
+      "thermalProtected": true,
+      "ok": true,
+      "thermalLimit": 46.4
+    }
+  }
+}

@@ -4,7 +4,11 @@
 
 import type { ContainmentEntity } from '../types';
 import type { Cable, CableCircuitType } from '../models/cable';
-import { SEGREGATION_MIN_MM } from '../models/standards';
+import {
+  SEGREGATION_MIN_MM,
+  createStandardsTrace,
+  type StandardsTrace,
+} from '../models/standards';
 
 export type Severity = 'warning' | 'error';
 
@@ -30,6 +34,7 @@ export interface SegregationResult {
   // Whether multi-compartment trunking can satisfy the segregation
   hasPartition: boolean;
   violations: SegregationViolation[];
+  standards: StandardsTrace;
 }
 
 const isPower = (t: CableCircuitType): boolean => t === 'power' || t === 'control';
@@ -105,6 +110,7 @@ export const checkSegregation = (
     categoriesPresent: cats,
     hasPartition,
     violations,
+    standards: createStandardsTrace('BS7671', ['segregation-bs7671']),
   };
 };
 
@@ -139,6 +145,7 @@ export interface PairSeparationResult {
   required: number;
   category1: string;
   category2: string;
+  standards: StandardsTrace;
 }
 
 export const checkContainmentPairSeparation = (
@@ -156,5 +163,6 @@ export const checkContainmentPairSeparation = (
     required,
     category1: cat1,
     category2: cat2,
+    standards: createStandardsTrace('BS7671', ['segregation-bs7671']),
   };
 };

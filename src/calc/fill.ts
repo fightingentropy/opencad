@@ -5,8 +5,10 @@ import type { Cable } from '../models/cable';
 import {
   FILL_LIMITS,
   SPACE_FACTOR_TRUNKING_BS7671,
+  createStandardsTrace,
   type StandardsCode,
   type StandardsProfile,
+  type StandardsTrace,
 } from '../models/standards';
 
 export type FillStatus = 'ok' | 'warning' | 'over';
@@ -18,6 +20,7 @@ export interface FillResult {
   occupiedAreaMm2: number;
   cableCount: number;
   limit: number;
+  standards: StandardsTrace;
 }
 
 const DEFAULT_WALL_THICKNESS_MM = 1.5;
@@ -89,11 +92,6 @@ export const fillStatus = (
 ): FillStatus => {
   const limit = limitFor(standards.code, containmentKind, 1);
   const overPct = limit * 100;
-  if (containmentKind === 'trunking' || containmentKind === 'duct' || containmentKind === 'busbar') {
-    if (pct > 45) return 'over';
-    if (pct >= 35) return 'warning';
-    return 'ok';
-  }
   if (pct > overPct) return 'over';
   if (pct >= overPct - 10) return 'warning';
   return 'ok';
@@ -120,5 +118,8 @@ export const computeContainmentFill = (
     occupiedAreaMm2,
     cableCount: cables.length,
     limit,
+    standards: createStandardsTrace(standards, useBs7671Trunking
+      ? ['fill-limits', 'space-factor-trunking-bs7671']
+      : ['fill-limits']),
   };
 };

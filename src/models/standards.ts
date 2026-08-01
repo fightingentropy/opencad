@@ -3,38 +3,136 @@
 
 export type StandardsCode = 'BS7671' | 'NEC' | 'IEC' | 'AS-NZS';
 
+export type StandardsUnitSystem = 'SI' | 'US-customary' | 'mixed';
+export type StandardsImplementationStatus = 'reference-snapshot' | 'partial';
+
 export interface StandardsProfile {
   code: StandardsCode;
-  // Edition / amendment string for display in reports
+  // Edition / amendment string for display in reports.
   edition: string;
   amendments: string[];
+  jurisdiction: string;
+  documentId: string;
+  effectiveDate: string;
+  sourceUrl: string;
+  unitSystem: StandardsUnitSystem;
+  // OpenCAD-owned version and digest of the canonical lookup dataset. These
+  // are deliberately separate from the publisher's document identifier: we
+  // cannot fingerprint a licensed standards publication we do not ship.
+  profileVersion: string;
+  datasetHash: `sha256:${string}`;
+  implementationStatus: StandardsImplementationStatus;
   // Default region for catalogue / pricing
   region?: 'UK' | 'EU' | 'US' | 'CA' | 'AU' | 'NZ' | 'ME' | 'APAC' | 'OTHER';
+}
+
+export type StandardsTableId =
+  | 'fill-limits'
+  | 'voltage-drop-limits'
+  | 'space-factor-trunking-bs7671'
+  | 'cable-factor-conduit-bs7671'
+  | 'conduit-factor-bs7671'
+  | 'grouping-enclosed-bs7671'
+  | 'grouping-tray-bs7671'
+  | 'ambient-xlpe-bs7671'
+  | 'ambient-pvc-bs7671'
+  | 'ampacity-ref-b-pvc-bs7671'
+  | 'ampacity-ref-b-xlpe-bs7671'
+  | 'voltage-drop-pvc-single-phase-bs7671'
+  | 'voltage-drop-xlpe-three-phase-bs7671'
+  | 'overload-coordination-bs7671'
+  | 'support-spans-opencad'
+  | 'segregation-bs7671';
+
+export interface StandardsSourceTrace {
+  profileCode: StandardsCode;
+  jurisdiction: string;
+  documentId: string;
+  edition: string;
+  amendments: string[];
+  effectiveDate: string;
+  tableOrSection: string;
+  sourceUrl: string;
+  sourceHash: `sha256:${string}`;
+  unitSystem: StandardsUnitSystem;
+  profileVersion: string;
+}
+
+export interface StandardsTrace {
+  code: StandardsCode;
+  jurisdiction: string;
+  documentId: string;
+  edition: string;
+  amendments: string[];
+  effectiveDate: string;
+  unitSystem: StandardsUnitSystem;
+  profileVersion: string;
+  datasetHash: `sha256:${string}`;
+  implementationStatus: StandardsImplementationStatus;
+  sources: StandardsSourceTrace[];
+}
+
+export interface StandardsLookupRow<T = unknown> {
+  key: string;
+  value: T;
+  provenance: StandardsSourceTrace;
 }
 
 export const DEFAULT_STANDARDS: Record<StandardsCode, StandardsProfile> = {
   BS7671: {
     code: 'BS7671',
     edition: '18th Edition',
-    amendments: ['Amendment 2 (2022)'],
+    amendments: ['Amendment 2 (2022)', 'Corrigendum (May 2023)'],
+    jurisdiction: 'United Kingdom',
+    documentId: 'BS 7671:2018+A2:2022',
+    effectiveDate: '2022-09-28',
+    sourceUrl: 'https://electrical.theiet.org/guidance-and-codes-of-practice/publications-by-category/bs-7671-and-guidance/',
+    unitSystem: 'SI',
+    profileVersion: 'bs7671-a2.2',
+    datasetHash: 'sha256:a620d8397d00d1718e200e3d9a0ac993c9445f8006dd5ea540fdeaf24c2b3d0e',
+    implementationStatus: 'reference-snapshot',
     region: 'UK',
   },
   NEC: {
     code: 'NEC',
     edition: 'NFPA 70 (2023)',
     amendments: [],
+    jurisdiction: 'United States (adoption varies by authority)',
+    documentId: 'NFPA 70, 2023 edition',
+    effectiveDate: 'jurisdiction-dependent',
+    sourceUrl: 'https://www.nfpa.org/codes-and-standards/nfpa-70-standard-development/70',
+    unitSystem: 'US-customary',
+    profileVersion: 'nec-2023.1',
+    datasetHash: 'sha256:4d271542f5a12289ffb768a539bf7c345b7c291b27f0556151993aa2eb6889ce',
+    implementationStatus: 'partial',
     region: 'US',
   },
   IEC: {
     code: 'IEC',
-    edition: 'IEC 60364',
-    amendments: [],
+    edition: 'IEC 60364-1:2025 / IEC 60364-5-52:2009+A1:2024',
+    amendments: ['IEC 60364-5-52 Amendment 1 (2024)'],
+    jurisdiction: 'International (local adoption varies)',
+    documentId: 'IEC 60364 series',
+    effectiveDate: 'jurisdiction-dependent',
+    sourceUrl: 'https://webstore.iec.ch/en/publication/63699',
+    unitSystem: 'SI',
+    profileVersion: 'iec60364-2025.1',
+    datasetHash: 'sha256:f51a1472af10b256e1e45af86ad4eed94f2a961268545128fb38c07dff1e0a39',
+    implementationStatus: 'partial',
     region: 'EU',
   },
   'AS-NZS': {
     code: 'AS-NZS',
     edition: 'AS/NZS 3000:2018',
-    amendments: [],
+    amendments: ['Amendment 1 (2020)', 'Amendment 2 (2021)', 'Amendment 3 (2023)'],
+    jurisdiction: 'Australia and New Zealand',
+    documentId: 'AS/NZS 3000:2018',
+    effectiveDate: 'jurisdiction-dependent',
+    sourceUrl: 'https://store.standards.org.au/product/as-nzs-3000-2018',
+    unitSystem: 'SI',
+    profileVersion: 'as-nzs-3000-2018-a3.1',
+    datasetHash: 'sha256:41bb8566b472e98408fabb467764d123c1d7343149c44d87f21adcbc3b5fd2ea',
+    implementationStatus: 'partial',
     region: 'AU',
   },
 };
@@ -215,14 +313,15 @@ export const AMBIENT_FACTORS_PVC: Record<number, number> = {
   60: 0.50,
 };
 
-// Reference (un-derated) ampacity tables — BS 7671 Reference Method C
-// (single circuit, clipped direct or on a perforated tray),
-// XLPE/PVC twin-and-earth, copper conductors. Values in amperes.
+// Reference (un-derated) ampacity seed tables — BS 7671 Reference Method B
+// (single-core copper conductors in conduit on a wall / trunking). Values in
+// amperes for two loaded conductors. Using these values for another cable
+// construction or installation method requires independent verification.
 //
 // These let the calc engine give a "first cut" sizing without a full
 // installation method matrix. A more complete implementation would
 // include all reference methods (A through G) per Appendix 4.
-export const AMPACITY_REF_C_PVC_COPPER: Record<number, number> = {
+export const AMPACITY_REF_B_PVC_COPPER: Record<number, number> = {
   1.0: 13.5,
   1.5: 17.5,
   2.5: 24,
@@ -242,7 +341,7 @@ export const AMPACITY_REF_C_PVC_COPPER: Record<number, number> = {
   300.0: 477,
 };
 
-export const AMPACITY_REF_C_XLPE_COPPER: Record<number, number> = {
+export const AMPACITY_REF_B_XLPE_COPPER: Record<number, number> = {
   1.0: 17,
   1.5: 22,
   2.5: 30,
@@ -325,4 +424,170 @@ export const SEGREGATION_MIN_MM: Record<string, Record<string, number>> = {
   power: { data: 50, comms: 50, 'fire-alarm': 0, emergency: 0, instrumentation: 50 },
   data: { power: 50, comms: 0, 'fire-alarm': 25, emergency: 25, instrumentation: 25 },
   'fire-alarm': { power: 0, data: 25, emergency: 0, comms: 25, instrumentation: 25 },
+};
+
+interface TableReference {
+  profileCode?: StandardsCode;
+  tableOrSection: string;
+  documentId?: string;
+  edition?: string;
+  sourceUrl?: string;
+}
+
+const TABLE_REFERENCES: Record<StandardsTableId, TableReference> = {
+  'fill-limits': { tableOrSection: 'Containment fill limits (profile-specific)' },
+  'voltage-drop-limits': { tableOrSection: 'Voltage-drop design limits (profile-specific)' },
+  'space-factor-trunking-bs7671': { profileCode: 'BS7671', tableOrSection: 'Appendix 12, Table 12A' },
+  'cable-factor-conduit-bs7671': { profileCode: 'BS7671', tableOrSection: 'Appendix 12, Table 12C' },
+  'conduit-factor-bs7671': { profileCode: 'BS7671', tableOrSection: 'Appendix 12, Table 12B' },
+  'grouping-enclosed-bs7671': { profileCode: 'BS7671', tableOrSection: 'Appendix 4, Table 4C1' },
+  'grouping-tray-bs7671': { profileCode: 'BS7671', tableOrSection: 'Appendix 4, Table 4C3' },
+  'ambient-xlpe-bs7671': { profileCode: 'BS7671', tableOrSection: 'Appendix 4, Table 4B1 (90 C thermosetting)' },
+  'ambient-pvc-bs7671': { profileCode: 'BS7671', tableOrSection: 'Appendix 4, Table 4B1 (70 C thermoplastic)' },
+  'ampacity-ref-b-pvc-bs7671': { profileCode: 'BS7671', tableOrSection: 'Appendix 4, Table 4D1A, reference method B, two loaded conductors (PVC copper seed values)' },
+  'ampacity-ref-b-xlpe-bs7671': { profileCode: 'BS7671', tableOrSection: 'Appendix 4, Table 4E1A, reference method B, two loaded conductors (XLPE copper seed values)' },
+  'voltage-drop-pvc-single-phase-bs7671': { profileCode: 'BS7671', tableOrSection: 'Appendix 4, Table 4D2B seed values' },
+  'voltage-drop-xlpe-three-phase-bs7671': { profileCode: 'BS7671', tableOrSection: 'Appendix 4, Table 4E2B seed values' },
+  'overload-coordination-bs7671': { profileCode: 'BS7671', tableOrSection: 'Regulation 433.1.1 (Ib <= In <= Iz; I2 <= 1.45 Iz)' },
+  'support-spans-opencad': {
+    profileCode: 'BS7671',
+    tableOrSection: 'OpenCAD conservative seed spans; verify against the selected manufacturer load/span table',
+    documentId: 'OpenCAD support-span engineering policy',
+    edition: '1',
+    sourceUrl: 'https://webstore.iec.ch/en/publication/31963',
+  },
+  'segregation-bs7671': { profileCode: 'BS7671', tableOrSection: 'Section 528 / IET Guidance Note 1 seed distances' },
+};
+
+/**
+ * Canonical payload covered by a profile's dataset hash. A failing hash test
+ * forces a deliberate profile-version/hash update whenever a lookup changes.
+ */
+export const standardsDatasetSnapshot = (code: StandardsCode): string => {
+  const profile = DEFAULT_STANDARDS[code];
+  const common = {
+    code: profile.code,
+    documentId: profile.documentId,
+    edition: profile.edition,
+    amendments: profile.amendments,
+    effectiveDate: profile.effectiveDate,
+    profileVersion: profile.profileVersion,
+    fillLimits: FILL_LIMITS[code],
+    voltageDropLimits: VDROP_LIMITS[code],
+  };
+  if (code !== 'BS7671') return JSON.stringify(common);
+  return JSON.stringify({
+    ...common,
+    spaceFactorTrunking: SPACE_FACTOR_TRUNKING_BS7671,
+    cableFactorConduit: CABLE_FACTOR_CONDUIT_BS7671,
+    conduitFactor: CONDUIT_FACTOR_BS7671,
+    groupingEnclosed: GROUPING_FACTORS_ENCLOSED,
+    groupingTray: GROUPING_FACTORS_TRAY,
+    ambientXlpe: AMBIENT_FACTORS_XLPE,
+    ambientPvc: AMBIENT_FACTORS_PVC,
+    ampacityRefBPvcCopper: AMPACITY_REF_B_PVC_COPPER,
+    ampacityRefBXlpeCopper: AMPACITY_REF_B_XLPE_COPPER,
+    voltageDropPvcSinglePhase: VDROP_MV_A_M_PVC_SP,
+    voltageDropXlpeThreePhase: VDROP_MV_A_M_XLPE_3P,
+    overloadCoordination: { Ib_le_In: true, In_le_Iz: true, I2_le_1_45_Iz: true },
+    supportSpans: SUPPORT_SPANS_HORIZONTAL_MM,
+    segregation: SEGREGATION_MIN_MM,
+  });
+};
+
+export const normalizeStandardsProfile = (
+  profile?: Partial<StandardsProfile> | null,
+): StandardsProfile => {
+  const code = profile?.code && profile.code in DEFAULT_STANDARDS
+    ? profile.code
+    : 'BS7671';
+  const canonical = DEFAULT_STANDARDS[code];
+  // Canonical provenance always wins over stale persisted display fields;
+  // region remains project-selectable.
+  return { ...canonical, region: profile?.region ?? canonical.region };
+};
+
+const sourceTraceFor = (
+  tableId: StandardsTableId,
+  requestedCode: StandardsCode,
+): StandardsSourceTrace => {
+  const ref = TABLE_REFERENCES[tableId];
+  const profile = DEFAULT_STANDARDS[ref.profileCode ?? requestedCode];
+  return {
+    profileCode: profile.code,
+    jurisdiction: profile.jurisdiction,
+    documentId: ref.documentId ?? profile.documentId,
+    edition: ref.edition ?? profile.edition,
+    amendments: [...profile.amendments],
+    effectiveDate: profile.effectiveDate,
+    tableOrSection: ref.tableOrSection,
+    sourceUrl: ref.sourceUrl ?? profile.sourceUrl,
+    sourceHash: profile.datasetHash,
+    unitSystem: profile.unitSystem,
+    profileVersion: profile.profileVersion,
+  };
+};
+
+export const createStandardsTrace = (
+  profileOrCode: StandardsProfile | StandardsCode | undefined,
+  tableIds: readonly StandardsTableId[] = [],
+): StandardsTrace => {
+  const requested = typeof profileOrCode === 'string'
+    ? DEFAULT_STANDARDS[profileOrCode]
+    : normalizeStandardsProfile(profileOrCode);
+  return {
+    code: requested.code,
+    jurisdiction: requested.jurisdiction,
+    documentId: requested.documentId,
+    edition: requested.edition,
+    amendments: [...requested.amendments],
+    effectiveDate: requested.effectiveDate,
+    unitSystem: requested.unitSystem,
+    profileVersion: requested.profileVersion,
+    datasetHash: requested.datasetHash,
+    implementationStatus: requested.implementationStatus,
+    sources: tableIds.map((tableId) => sourceTraceFor(tableId, requested.code)),
+  };
+};
+
+const flatRows = (
+  tableId: StandardsTableId,
+  values: Record<string | number, unknown>,
+  code: StandardsCode,
+): StandardsLookupRow[] => {
+  const provenance = sourceTraceFor(tableId, code);
+  return Object.entries(values).map(([key, value]) => ({ key, value, provenance }));
+};
+
+const nestedRows = (
+  tableId: StandardsTableId,
+  values: Record<string, Record<string | number, unknown>>,
+  code: StandardsCode,
+): StandardsLookupRow[] => Object.entries(values).flatMap(([group, entries]) =>
+  flatRows(tableId, entries, code).map((row) => ({ ...row, key: `${group}.${row.key}` })),
+);
+
+/** Every lookup value with its complete, exportable provenance. */
+export const standardsLookupRows = (
+  tableId: StandardsTableId,
+  code: StandardsCode = 'BS7671',
+): StandardsLookupRow[] => {
+  switch (tableId) {
+    case 'fill-limits': return flatRows(tableId, FILL_LIMITS[code] as unknown as Record<string, unknown>, code);
+    case 'voltage-drop-limits': return flatRows(tableId, VDROP_LIMITS[code] as unknown as Record<string, unknown>, code);
+    case 'space-factor-trunking-bs7671': return flatRows(tableId, SPACE_FACTOR_TRUNKING_BS7671, code);
+    case 'cable-factor-conduit-bs7671': return flatRows(tableId, CABLE_FACTOR_CONDUIT_BS7671, code);
+    case 'conduit-factor-bs7671': return flatRows(tableId, CONDUIT_FACTOR_BS7671, code);
+    case 'grouping-enclosed-bs7671': return flatRows(tableId, GROUPING_FACTORS_ENCLOSED, code);
+    case 'grouping-tray-bs7671': return flatRows(tableId, GROUPING_FACTORS_TRAY, code);
+    case 'ambient-xlpe-bs7671': return flatRows(tableId, AMBIENT_FACTORS_XLPE, code);
+    case 'ambient-pvc-bs7671': return flatRows(tableId, AMBIENT_FACTORS_PVC, code);
+    case 'ampacity-ref-b-pvc-bs7671': return flatRows(tableId, AMPACITY_REF_B_PVC_COPPER, code);
+    case 'ampacity-ref-b-xlpe-bs7671': return flatRows(tableId, AMPACITY_REF_B_XLPE_COPPER, code);
+    case 'voltage-drop-pvc-single-phase-bs7671': return flatRows(tableId, VDROP_MV_A_M_PVC_SP, code);
+    case 'voltage-drop-xlpe-three-phase-bs7671': return flatRows(tableId, VDROP_MV_A_M_XLPE_3P, code);
+    case 'overload-coordination-bs7671': return flatRows(tableId, { Ib_le_In: true, In_le_Iz: true, I2_le_1_45_Iz: true }, code);
+    case 'support-spans-opencad': return nestedRows(tableId, SUPPORT_SPANS_HORIZONTAL_MM as unknown as Record<string, Record<string, unknown>>, code);
+    case 'segregation-bs7671': return nestedRows(tableId, SEGREGATION_MIN_MM, code);
+  }
 };

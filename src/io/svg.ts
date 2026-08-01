@@ -1,6 +1,7 @@
 import type { Project, Entity, Sheet, Layer, SymbolEntity } from '../types';
 import { getSymbol, renderSymbolPreview } from '../symbols';
 import { transformSymbolPoint } from '../lib/hittest';
+import { buildExportMetadata } from './export-metadata';
 
 export const exportSheetSVG = (project: Project): string => {
   const sheet = project.sheets[project.activeSheetId];
@@ -11,6 +12,7 @@ export const exportSheetSVG = (project: Project): string => {
 
   const parts: string[] = [];
   parts.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}mm" height="${h}mm" viewBox="0 0 ${w} ${h}" style="background:#0a0e14">`);
+  parts.push(`<metadata id="opencad-export-metadata">${escapeXml(JSON.stringify(buildExportMetadata(project, 'sheet-svg')))}</metadata>`);
   parts.push(`<g transform="${xform}">`);
 
   for (const id of sheet.entityOrder) {

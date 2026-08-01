@@ -1,6 +1,7 @@
 import type { Project } from '../types';
 import jsPDF from 'jspdf';
 import { exportSheetSVG } from './svg';
+import { buildExportMetadata, exportMetadataSummary } from './export-metadata';
 
 /**
  * Render an SVG string onto an offscreen canvas and return the PNG data URL.
@@ -56,11 +57,13 @@ export const exportSheetPDF = async (project: Project): Promise<void> => {
     unit: 'mm',
     format: [sheet.width, sheet.height],
   });
+  const metadata = buildExportMetadata(project, 'sheet-pdf');
 
   // Metadata
   doc.setProperties({
     title: `${project.name} — ${sheet.name}`,
-    subject: `Sheet ${sheet.number}`,
+    subject: `Sheet ${sheet.number}; ${exportMetadataSummary(metadata)}`,
+    keywords: JSON.stringify(metadata),
     creator: 'OpenCAD Electrical',
   });
 

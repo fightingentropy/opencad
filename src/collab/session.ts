@@ -12,11 +12,14 @@ import {
   setLocalPresence,
   subscribeRemotePresence,
   clearLocalPresence,
-  getLocalIdentity,
   type PresenceState,
 } from './presence';
 import type { StoreApi } from 'zustand';
 import type { Project, EntityId, Vec2 } from '../types';
+import { assertSecureCollaborationRoomCode } from './room-code';
+import { canWrite, type CollaborationIdentity } from './protocol';
+import type { CollaborationConnection } from './yjs-doc';
+import { setCollaborationReadOnly } from '../state/collaboration-guard';
 
 interface StoreShape {
   project: Project;
@@ -29,6 +32,7 @@ interface ActiveSession {
   unsubPresence: () => void;
   remoteCallbacks: Set<(states: PresenceState[]) => void>;
   lastRemoteStates: PresenceState[];
+  identity: CollaborationIdentity;
 }
 
 let active: ActiveSession | null = null;
@@ -36,22 +40,40 @@ let active: ActiveSession | null = null;
 export interface StartSessionOptions {
   room: string;
   store: StoreApi<StoreShape>;
+  connection: CollaborationConnection;
 }
 
 export interface SessionInfo {
   room: string;
-  identity: ReturnType<typeof getLocalIdentity>;
+  identity: CollaborationIdentity;
+  readOnly: boolean;
+  transport: CollabHandle['transport'];
 }
 
 /** Start (or rejoin) a collaboration session. Idempotent per room. */
-export function startSession(opts: StartSessionOptions): SessionInfo {
-  if (active && active.handle.room === opts.room) {
-    return { room: opts.room, identity: getLocalIdentity() };
+export async function startSession(opts: StartSessionOptions): Promise<SessionInfo> {
+  assertSecureCollaborationRoomCode(opts.room);
+  if (active && active.handle.room === opts.room && active.handle.transport === opts.connection.kind) {
+    return {
+      room: opts.room,
+      identity: active.identity,
+      readOnly: !canWrite(active.identity.role),
+      transport: active.handle.transport,
+    };
   }
   if (active) stopSession();
 
-  const handle = connectCollab({ room: opts.room });
-  const binding = bindStoreToYjs(opts.store, handle.maps, handle.doc);
+  const handle = connectCollab({ room: opts.room, connection: opts.connection });
+  let identity: CollaborationIdentity;
+  try {
+    identity = await handle.ready;
+  } catch (error) {
+    handle.disconnect();
+    throw error;
+  }
+  const writeEnabled = canWrite(identity.role);
+  setCollaborationReadOnly(!writeEnabled);
+  const binding = bindStoreToYjs(opts.store, handle.maps, handle.doc, { writeEnabled });
 
   const callbacks = new Set<(states: PresenceState[]) => void>();
   const fanout: PresenceState[] = [];
@@ -64,7 +86,6 @@ export function startSession(opts: StartSessionOptions): SessionInfo {
 
   // Seed the awareness channel with the local identity so peers see
   // us straight away even if the cursor hasn't moved yet.
-  const id = getLocalIdentity();
   setLocalPresence(handle.awareness, {
     sheetId: opts.store.getState().project.activeSheetId,
     cursor: { x: 0, y: 0 },
@@ -77,13 +98,20 @@ export function startSession(opts: StartSessionOptions): SessionInfo {
     unsubPresence,
     remoteCallbacks: callbacks,
     lastRemoteStates: [],
+    identity,
   };
 
-  return { room: opts.room, identity: id };
+  return {
+    room: opts.room,
+    identity,
+    readOnly: !writeEnabled,
+    transport: handle.transport,
+  };
 }
 
 /** Stop the active session. Safe to call when nothing is active. */
 export function stopSession(): void {
+  setCollaborationReadOnly(false);
   if (!active) return;
   try {
     clearLocalPresence(active.handle.awareness);
@@ -138,3 +166,6 @@ export function peerCount(): number {
   // The awareness map includes the local client, so subtract 1.
   return Math.max(0, active.handle.awareness.getStates().size - 1);
 }
+
+/** The authenticated session identity/role, or null while disconnected. */
+export const activeIdentity = (): CollaborationIdentity | null => active?.identity ?? null;

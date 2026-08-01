@@ -1,5 +1,6 @@
 import type { Project, SymbolEntity } from '../types';
 import { getSymbol } from '../symbols';
+import { prependCSVExportMetadata } from './export-metadata';
 
 export interface BOMRow {
   tag: string;
@@ -52,13 +53,17 @@ export const generateBOM = (project: Project): BOMRow[] => {
   return Array.from(map.values()).sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name));
 };
 
-export const bomToCSV = (rows: BOMRow[]): string => {
+export const bomToCSV = (rows: BOMRow[], project: Project): string => {
   const header = 'Tag,Name,Description,Manufacturer,Part Number,Rating,Qty,Category,Sheets';
   const lines = rows.map((r) =>
     [r.tag, r.name, r.description, r.manufacturer, r.partNumber, r.rating, r.quantity, r.category, r.sheetNumbers.join('|')]
       .map(csvEsc).join(',')
   );
-  return [header, ...lines].join('\n');
+  return prependCSVExportMetadata(
+    [header, ...lines].join('\n'),
+    project,
+    'symbol-bom-csv',
+  );
 };
 
 const csvEsc = (v: any): string => {

@@ -4,10 +4,18 @@ import {
   loadCollab,
   isCollabLoaded,
   isActive as isCollabActive,
+  activeRoom as activeCollaborationRoom,
   _setActive as setCollabActive,
+  collaborationRuntimeConfiguration,
 } from '../collab/runtime';
+import {
+  assertSecureCollaborationRoomCode,
+  collaborationRoomCodeFromHash,
+  generateCollaborationRoomCode,
+} from '../collab/room-code';
 
 type Status = 'idle' | 'loading' | 'connected' | 'error';
+type CollaborationMode = 'authenticated' | 'anonymous-beta';
 
 // Tracks the most recent presence snapshot and peer count so the
 // modal can render "Connected to N peers" without re-importing the
@@ -18,20 +26,30 @@ interface ConnectedInfo {
 }
 
 export function CollaborationModal({ onClose }: { onClose: () => void }) {
-  const projectId = useStore((s) => s.project.id);
   const projectName = useStore((s) => s.project.name);
+  const config = collaborationRuntimeConfiguration();
+  const available = Boolean(config.authenticatedEndpoint) || config.anonymousBetaEnabled;
 
   const [room, setRoom] = useState<string>(() =>
-    // Already-connected sessions keep their room; fresh modals seed
-    // from the project ID so the obvious default works in one click.
-    isCollabActive() ? readCurrentRoom() ?? projectId : projectId,
+    activeCollaborationRoom()
+      ?? collaborationRoomCodeFromHash(typeof window === 'undefined' ? '' : window.location.hash)
+      ?? generateCollaborationRoomCode(),
   );
   const [status, setStatus] = useState<Status>(
     isCollabActive() ? 'connected' : 'idle',
   );
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<ConnectedInfo | null>(null);
-  const [identity, setIdentity] = useState<{ name: string; color: string } | null>(null);
+  const [mode, setMode] = useState<CollaborationMode>(
+    config.authenticatedEndpoint ? 'authenticated' : 'anonymous-beta',
+  );
+  const [identity, setIdentity] = useState<{
+    name: string;
+    color: string;
+    role: 'owner' | 'editor' | 'viewer';
+    email?: string;
+  } | null>(null);
+  const [readOnly, setReadOnly] = useState(false);
 
   // If we're already connected when the modal opens, hydrate the
   // peer list so the user sees who's present without having to
@@ -42,8 +60,11 @@ export function CollaborationModal({ onClose }: { onClose: () => void }) {
     void (async () => {
       const mod = await loadCollab();
       if (cancelled) return;
-      const id = mod.getLocalIdentity();
-      setIdentity({ name: id.name, color: id.color });
+      const id = mod.activeIdentity();
+      if (id) {
+        setIdentity(id);
+        setReadOnly(id.role === 'viewer');
+      }
       const room = mod.activeRoom();
       if (room) {
         const unsub = mod.onRemotePresence((states) => {
@@ -66,14 +87,29 @@ export function CollaborationModal({ onClose }: { onClose: () => void }) {
       setError('Room code is required');
       return;
     }
+    try {
+      assertSecureCollaborationRoomCode(trimmed);
+    } catch (validationError) {
+      setError((validationError as Error).message);
+      return;
+    }
     setStatus('loading');
     setError(null);
     try {
       const mod = await loadCollab();
       const store = useStore as unknown as Parameters<typeof mod.startSession>[0]['store'];
-      const session = mod.startSession({ room: trimmed, store });
+      const connection = mode === 'authenticated'
+        ? config.authenticatedEndpoint
+          ? { kind: 'authenticated' as const, endpoint: config.authenticatedEndpoint }
+          : null
+        : config.anonymousBetaEnabled
+          ? { kind: 'anonymous-beta' as const }
+          : null;
+      if (!connection) throw new Error('This collaboration transport is not enabled in this build');
+      const session = await mod.startSession({ room: trimmed, store, connection });
       setCollabActive(true);
-      setIdentity({ name: session.identity.name, color: session.identity.color });
+      setIdentity(session.identity);
+      setReadOnly(session.readOnly);
       mod.onRemotePresence((states) => {
         setInfo({
           room: trimmed,
@@ -95,6 +131,8 @@ export function CollaborationModal({ onClose }: { onClose: () => void }) {
     setCollabActive(false);
     setStatus('idle');
     setInfo(null);
+    setIdentity(null);
+    setReadOnly(false);
     useStore.getState().setStatus('Collab: disconnected');
   };
 
@@ -132,34 +170,72 @@ export function CollaborationModal({ onClose }: { onClose: () => void }) {
         </div>
         <div className="modal-body">
           <p style={{ marginBottom: 12, color: 'var(--text-dim)', fontSize: 13, lineHeight: 1.5 }}>
-            Live cursors and shared editing for <strong>{projectName}</strong>. Anyone with
-            the room code below can join and edit. Connection is peer-to-peer — no
-            account or backend required.
+            Live cursors and shared editing for <strong>{projectName}</strong>.{' '}
+            {mode === 'authenticated'
+              ? 'Cloudflare Access authenticates every connection and the room enforces owner, editor and viewer roles.'
+              : 'Anonymous beta mode is peer-to-peer; anyone with the room link can read and edit.'}
           </p>
+
+          {!available && (
+            <div style={{ marginBottom: 12, padding: 10, border: '1px solid var(--border)', borderRadius: 4, fontSize: 12 }}>
+              Collaboration is disabled in this build. Configure an authenticated backend,
+              or explicitly enable the anonymous beta for local evaluation.
+            </div>
+          )}
+
+          {config.authenticatedEndpoint && config.anonymousBetaEnabled && status !== 'connected' && (
+            <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+              <button
+                className={mode === 'authenticated' ? 'btn-primary' : 'btn-ghost'}
+                disabled={status === 'loading'}
+                onClick={() => setMode('authenticated')}
+              >
+                Authenticated
+              </button>
+              <button
+                className={mode === 'anonymous-beta' ? 'btn-primary' : 'btn-ghost'}
+                disabled={status === 'loading'}
+                onClick={() => setMode('anonymous-beta')}
+              >
+                Anonymous beta
+              </button>
+            </div>
+          )}
 
           <label
             style={{ display: 'block', fontSize: 11, textTransform: 'uppercase', color: 'var(--text-mute)', marginBottom: 4, letterSpacing: 0.5 }}
           >
             Room code
           </label>
-          <input
-            type="text"
-            value={room}
-            disabled={status === 'connected' || status === 'loading'}
-            onChange={(e) => setRoom(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '8px 10px',
-              fontSize: 14,
-              fontFamily: 'monospace',
-              background: 'var(--bg-2)',
-              border: '1px solid var(--border)',
-              borderRadius: 4,
-              color: 'var(--text)',
-              marginBottom: 12,
-            }}
-            placeholder="my-shared-project"
-          />
+          <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+            <input
+              type="text"
+              value={room}
+              disabled={status === 'connected' || status === 'loading'}
+              onChange={(e) => setRoom(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '8px 10px',
+                fontSize: 14,
+                fontFamily: 'monospace',
+                background: 'var(--bg-2)',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                color: 'var(--text)',
+              }}
+              placeholder="oc_…"
+            />
+            <button
+              className="btn-ghost"
+              disabled={status === 'connected' || status === 'loading'}
+              onClick={() => {
+                setRoom(generateCollaborationRoomCode());
+                setError(null);
+              }}
+            >
+              New
+            </button>
+          </div>
 
           {status === 'connected' && (
             <div
@@ -219,6 +295,13 @@ export function CollaborationModal({ onClose }: { onClose: () => void }) {
               />
               <span style={{ color: 'var(--text-dim)' }}>You are</span>
               <strong>{identity.name}</strong>
+              <span style={{ color: 'var(--text-mute)' }}>({identity.role})</span>
+            </div>
+          )}
+
+          {status === 'connected' && readOnly && (
+            <div style={{ marginBottom: 12, padding: 8, border: '1px solid var(--border)', borderRadius: 4, fontSize: 12 }}>
+              This is a read-only viewer session. The server rejects document updates from this role.
             </div>
           )}
 
@@ -288,10 +371,19 @@ export function CollaborationModal({ onClose }: { onClose: () => void }) {
               lineHeight: 1.5,
             }}
           >
-            <strong style={{ color: 'var(--text)' }}>MVP notice:</strong> no
-            authentication, no permissions. Anyone with the room code can join and
-            edit. Concurrent edits resolve at the project level (last writer wins);
-            fine-grained CRDT merging is planned.
+            {mode === 'authenticated' ? (
+              <>
+                <strong style={{ color: 'var(--text)' }}>Authenticated mode:</strong>{' '}
+                Cloudflare Access identity is verified again by the Worker. Room state is
+                persisted by a per-room Durable Object; viewers cannot write.
+              </>
+            ) : (
+              <>
+                <strong style={{ color: 'var(--text)' }}>Anonymous beta:</strong> no
+                authentication or role enforcement. Anyone with the room link can read
+                and edit. Do not use this mode for sensitive projects.
+              </>
+            )}
           </div>
         </div>
         <div className="modal-footer">
@@ -312,7 +404,7 @@ export function CollaborationModal({ onClose }: { onClose: () => void }) {
               <button
                 className="btn-primary"
                 onClick={onJoin}
-                disabled={status === 'loading'}
+                disabled={status === 'loading' || !available}
               >
                 {status === 'loading' ? 'Connecting…' : 'Join / Start session'}
               </button>
@@ -322,17 +414,4 @@ export function CollaborationModal({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
-}
-
-// Read the active room without forcing the collab chunk to load.
-// Returns null if the chunk hasn't been imported yet.
-function readCurrentRoom(): string | null {
-  if (!isCollabLoaded()) return null;
-  // Once loaded, the import() promise has already resolved; getModule
-  // grabs the cached module synchronously through the dynamic import
-  // cache (Vite/ESM caches resolved modules).
-  // We can't call activeRoom() synchronously here, so we accept the
-  // loose null return for the "first render before useEffect" path —
-  // the useEffect below will hydrate the room shortly after.
-  return null;
 }

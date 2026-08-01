@@ -1,22 +1,62 @@
-// Sanity-snapshot the canonical BS 7671 / NEC reference tables. These
-// values come straight out of the standards — accidental edits could
-// produce silently-wrong calculations elsewhere in the engine.
+// Sanity-snapshot the canonical standards seed tables. Accidental edits can
+// produce silently wrong calculations; source locators and profile hashes
+// make every deliberate change reviewable.
 
 import { describe, it, expect } from 'vitest';
 import {
+  DEFAULT_STANDARDS,
   FILL_LIMITS,
   GROUPING_FACTORS_ENCLOSED,
   GROUPING_FACTORS_TRAY,
   AMBIENT_FACTORS_PVC,
   AMBIENT_FACTORS_XLPE,
-  AMPACITY_REF_C_PVC_COPPER,
-  AMPACITY_REF_C_XLPE_COPPER,
+  AMPACITY_REF_B_PVC_COPPER,
+  AMPACITY_REF_B_XLPE_COPPER,
   VDROP_MV_A_M_PVC_SP,
   VDROP_MV_A_M_XLPE_3P,
   SUPPORT_SPANS_HORIZONTAL_MM,
   SEGREGATION_MIN_MM,
   VDROP_LIMITS,
+  createStandardsTrace,
+  standardsDatasetSnapshot,
+  standardsLookupRows,
 } from '../standards';
+
+describe('standards provenance', () => {
+  it('locks each profile version to a deterministic canonical dataset hash', async () => {
+    for (const profile of Object.values(DEFAULT_STANDARDS)) {
+      const bytes = await crypto.subtle.digest(
+        'SHA-256',
+        new TextEncoder().encode(standardsDatasetSnapshot(profile.code)),
+      );
+      const digest = Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('');
+      expect(profile.datasetHash).toBe(`sha256:${digest}`);
+    }
+  });
+
+  it('carries full provenance on every lookup row', () => {
+    const rows = standardsLookupRows('ampacity-ref-b-pvc-bs7671');
+    expect(rows.length).toBeGreaterThan(10);
+    for (const row of rows) {
+      expect(row.key).not.toBe('');
+      expect(row.provenance).toMatchObject({
+        profileCode: 'BS7671',
+        documentId: 'BS 7671:2018+A2:2022',
+        tableOrSection: expect.stringContaining('Appendix 4'),
+        profileVersion: DEFAULT_STANDARDS.BS7671.profileVersion,
+        sourceHash: DEFAULT_STANDARDS.BS7671.datasetHash,
+        unitSystem: 'SI',
+      });
+    }
+  });
+
+  it('reports the selected profile and the actual BS table source separately', () => {
+    const trace = createStandardsTrace('NEC', ['voltage-drop-pvc-single-phase-bs7671']);
+    expect(trace.code).toBe('NEC');
+    expect(trace.sources[0].profileCode).toBe('BS7671');
+    expect(trace.sources[0].tableOrSection).toContain('4D2B');
+  });
+});
 
 describe('FILL_LIMITS', () => {
   it('BS 7671 trunking = 0.45, conduit = 0.40', () => {
@@ -68,16 +108,16 @@ describe('ambient correction tables', () => {
   });
 });
 
-describe('reference ampacities (Method C, copper)', () => {
+describe('reference ampacity seed values (Method B, copper)', () => {
   it('PVC 2.5mm² = 24A, 16mm² = 76A', () => {
-    expect(AMPACITY_REF_C_PVC_COPPER[2.5]).toBe(24);
-    expect(AMPACITY_REF_C_PVC_COPPER[16]).toBe(76);
+    expect(AMPACITY_REF_B_PVC_COPPER[2.5]).toBe(24);
+    expect(AMPACITY_REF_B_PVC_COPPER[16]).toBe(76);
   });
 
   it('XLPE 2.5mm² = 30A, 16mm² = 94A, 50mm² = 180A', () => {
-    expect(AMPACITY_REF_C_XLPE_COPPER[2.5]).toBe(30);
-    expect(AMPACITY_REF_C_XLPE_COPPER[16]).toBe(94);
-    expect(AMPACITY_REF_C_XLPE_COPPER[50]).toBe(180);
+    expect(AMPACITY_REF_B_XLPE_COPPER[2.5]).toBe(30);
+    expect(AMPACITY_REF_B_XLPE_COPPER[16]).toBe(94);
+    expect(AMPACITY_REF_B_XLPE_COPPER[50]).toBe(180);
   });
 });
 

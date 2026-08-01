@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { useStore } from '../state/store';
 import { useActiveSheet } from '../state/selectors';
 import { nanoid } from 'nanoid';
@@ -12,7 +12,7 @@ export function RevisionHistoryPanel() {
   if (!sheet) return null;
 
   const meta: SheetMeta = sheet.meta ?? {};
-  const revisions = useMemo(() => meta.revisions ?? [], [meta.revisions]);
+  const revisions = meta.revisions ?? [];
   const editable = !meta.status || REVISION_STATUSES[meta.status].editable;
 
   // Spread the live project from getState() so the panel only subscribes to
