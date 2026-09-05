@@ -5,6 +5,7 @@ import { MenuBar } from './ui/MenuBar';
 import { Ribbon } from './ui/Ribbon';
 import { LeftPanel } from './ui/LeftPanel';
 import { RightPanel } from './ui/RightPanel';
+import { InstallationPanel, InstallationBrowser } from './ui/InstallationPanel';
 import { StatusBar } from './ui/StatusBar';
 import { SiteNavigator } from './ui/SiteNavigator';
 import { BomModal } from './ui/BomModal';
@@ -37,6 +38,8 @@ export function App() {
   const setProject = useStore((s) => s.setProject);
   const viewMode = useStore((s) => s.editor.viewMode);
   const setViewMode = useStore((s) => s.setViewMode);
+  const [inspectorMode, setInspectorMode] = useState<'installation' | 'design'>('installation');
+  const [explorerMode, setExplorerMode] = useState<'model' | 'draw'>('model');
   const [bomOpen, setBomOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [cableScheduleOpen, setCableScheduleOpen] = useState(false);
@@ -272,7 +275,7 @@ export function App() {
   };
 
   return (
-    <div className="app" style={resizing ? { cursor: 'col-resize', userSelect: 'none' } : undefined}>
+    <div className={`app${viewMode === '3d' ? ' installation-mode' : ''}`} style={resizing ? { cursor: 'col-resize', userSelect: 'none' } : undefined}>
       <MenuBar
         onShowBom={() => setBomOpen(true)}
         onShowAbout={() => setAboutOpen(true)}
@@ -290,7 +293,10 @@ export function App() {
           panels' own layout classes so the fallback occupies the crashed
           region's grid slot (and drawer slot on mobile). */}
       <ErrorBoundary label="Left panel" className={`left-panel${leftOpen ? ' open' : ''}`}>
-        <LeftPanel open={leftOpen} />
+        <div className={`left-panel${leftOpen ? ' open' : ''}`}>
+        {viewMode === '3d' && <div className="workspace-switch"><button className={explorerMode === 'model' ? 'active' : ''} onClick={() => setExplorerMode('model')}>Model explorer</button><button className={explorerMode === 'draw' ? 'active' : ''} onClick={() => setExplorerMode('draw')}>Drawing tools</button></div>}
+        {viewMode === '3d' && explorerMode === 'model' ? <InstallationBrowser /> : <LeftPanel open={leftOpen} />}
+        </div>
       </ErrorBoundary>
       <div className="main">
         <ErrorBoundary label="Drawing area" className="error-fallback-fill">
@@ -310,11 +316,14 @@ export function App() {
             {viewMode === 'split' && !isMobile && <Panel3DContainer width={panel3DWidth} />}
             {viewMode === '3d' && <Panel3DContainer fillParent />}
           </div>
-          <SiteNavigator />
+          {viewMode === '3d' ? <details className="installation-hierarchy"><summary>Sheets, floors & zones</summary><SiteNavigator /></details> : <SiteNavigator />}
         </ErrorBoundary>
       </div>
       <ErrorBoundary label="Properties panel" className={`right-panel${rightOpen ? ' open' : ''}`}>
-        <RightPanel open={rightOpen} />
+        <div className={`right-panel${rightOpen ? ' open' : ''}`}>
+        <div className="workspace-switch"><button className={inspectorMode === 'installation' ? 'active' : ''} onClick={() => setInspectorMode('installation')}>Installation</button><button className={inspectorMode === 'design' ? 'active' : ''} onClick={() => setInspectorMode('design')}>Design & engineering</button></div>
+        {inspectorMode === 'installation' ? <InstallationPanel /> : <RightPanel open={rightOpen} />}
+        </div>
       </ErrorBoundary>
       <StatusBar />
 

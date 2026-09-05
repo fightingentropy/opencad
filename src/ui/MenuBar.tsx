@@ -188,8 +188,8 @@ export function MenuBar({
       setStatus('Select one or more containments to re-run auto-features');
       return;
     }
-    regenerateAutoFeaturesForContainments(selectedContainmentIds);
-    setStatus(`Auto-features regenerated for ${selectedContainmentIds.length} containment${selectedContainmentIds.length === 1 ? '' : 's'}`);
+    const regeneration = regenerateAutoFeaturesForContainments(selectedContainmentIds);
+    setStatus(`Auto-features regenerated for ${regeneration.containmentCount} containment${regeneration.containmentCount === 1 ? '' : 's'}${regeneration.retainedCount ? ` · ${regeneration.retainedCount} recorded parts retained for review` : ''}`);
   };
 
   const onStraightenAndSpaceContainments = () => {
@@ -212,10 +212,10 @@ export function MenuBar({
       return;
     }
     state.setProjectPatch({ sheets: result.project.sheets });
-    regenerateAutoFeaturesForContainments(result.changedIds);
+    const regeneration = regenerateAutoFeaturesForContainments(result.changedIds);
     useStore.getState().setSelection(result.changedIds);
     setStatus(
-      `Straightened ${result.changedIds.length} containments at ${result.elevation.toFixed(0)}mm FFL with ${result.clearanceMm}mm side gap`,
+      `Straightened ${result.changedIds.length} containments at ${result.elevation.toFixed(0)}mm FFL with ${result.clearanceMm}mm side gap${regeneration.retainedCount ? ` · ${regeneration.retainedCount} recorded parts retained for review` : ''}`,
     );
   };
 

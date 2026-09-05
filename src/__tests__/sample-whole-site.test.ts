@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createWholeSiteSampleProject } from '../sample-whole-site';
 import type { ContainmentEntity, Project, Sheet } from '../types';
+import { installationActivities, installationRecordDefects, installationStatus } from '../models/installation';
+import { createEmptyProject } from '../state/store';
+import { migrateProject } from '../io/persist';
 
 const containmentsOn = (sheet: Sheet): ContainmentEntity[] => (
   sheet.entityOrder
@@ -126,5 +129,88 @@ describe('whole-site sample containment layout', () => {
     expect(faceGap(lighting!, bms!)).toBeGreaterThanOrEqual(250);
     expect(supportFaceGap(data!, power!)).toBeGreaterThanOrEqual(100);
     expect(supportFaceGap(power!, lighting!)).toBeGreaterThanOrEqual(100);
+  });
+});
+
+describe('whole-site demonstration installation', () => {
+  it('clearly labels fictional progress and limits dated activity to useful parent parts', () => {
+    const project = createWholeSiteSampleProject();
+    expect(project.description).toMatch(/demonstration.*fictional/i);
+    const rows = installationActivities(project);
+    const comments = rows.filter((row) => row.kind === 'comment');
+    expect(comments).toHaveLength(5);
+    expect(comments.every((row) => row.kind === 'comment' && row.text.startsWith('Demonstration:'))).toBe(true);
+    expect(rows.every((row) => row.author === 'Demo team')).toBe(true);
+    expect(new Set(comments.map((row) => new Date(row.createdAt).toISOString().slice(0, 10))).size).toBe(5);
+    for (const sheet of Object.values(project.sheets)) {
+      for (const entity of Object.values(sheet.entities)) {
+        if (!entity.installation) continue;
+        expect(installationRecordDefects(entity.installation)).toEqual([]);
+        expect(entity.installation.activities.filter((activity) => activity.kind === 'status').length).toBeLessThanOrEqual(1);
+        if (entity.kind === 'support' || entity.kind === 'fitting') expect(entity.installation.activities).toEqual([]);
+      }
+    }
+  });
+
+  it('shows installed ground floor services, partial office work and planned upper floors', () => {
+    const project = createWholeSiteSampleProject();
+    const levels = corporateSheets(project).map((sheet) => Object.values(sheet.entities)
+      .filter((entity) => entity.kind === 'equipment' || entity.kind === 'containment'));
+    const completedRatio = (entities: typeof levels[number]) =>
+      entities.filter((entity) => installationStatus(entity) === 'completed').length / entities.length;
+    expect(completedRatio(levels[0])).toBeGreaterThan(0.6);
+    expect(completedRatio(levels[1])).toBeGreaterThan(0);
+    expect(completedRatio(levels[1])).toBeLessThan(completedRatio(levels[0]));
+    expect(levels[1].some((entity) => installationStatus(entity) === 'in-progress')).toBe(true);
+    expect(levels[2].some((entity) => installationStatus(entity) === 'in-progress')).toBe(true);
+    expect(levels[2].some((entity) => installationStatus(entity) === 'planned')).toBe(true);
+    expect(levels[3].every((entity) => installationStatus(entity) === 'planned')).toBe(true);
+    expect(levels[4].every((entity) => installationStatus(entity) === 'planned')).toBe(true);
+  });
+
+  it('keeps accessories aligned with parent routes and duplicate riser markers consistent', () => {
+    const project = createWholeSiteSampleProject();
+    const risers = new Map<string, string>();
+    for (const sheet of corporateSheets(project)) {
+      for (const entity of Object.values(sheet.entities)) {
+        if (entity.kind === 'fitting') {
+          expect(installationStatus(entity)).toBe(installationStatus(sheet.entities[entity.containmentId]));
+        }
+        if (entity.kind === 'support' && entity.supportingContainmentIds.length === 1) {
+          expect(installationStatus(entity)).toBe(installationStatus(sheet.entities[entity.supportingContainmentIds[0]]));
+        }
+        if (entity.kind === 'riser') {
+          const key = `${entity.fromFloorId}:${entity.toFloorId}:${entity.systemId}`;
+          const status = installationStatus(entity);
+          if (risers.has(key)) expect(status).toBe(risers.get(key));
+          else risers.set(key, status);
+        }
+      }
+    }
+    expect(risers.size).toBe(16);
+  });
+
+  it('uses realistic equipment heights and elevations for boards, racks and circuit endpoints', () => {
+    const project = createWholeSiteSampleProject();
+    const equipment = corporateSheets(project).flatMap((sheet) => Object.values(sheet.entities))
+      .filter((entity) => entity.kind === 'equipment');
+    expect(equipment.find((entity) => entity.tag === 'MSB-01')).toMatchObject({ ratedCurrent: 800, ratedVoltage: 400, height: 2100 });
+    expect(equipment.find((entity) => entity.tag === 'DB-LG')).toMatchObject({ ratedCurrent: 250, height: 1200, elevation: 600 });
+    expect(equipment.find((entity) => entity.tag === 'IDF-LG')).toMatchObject({ height: 1400 });
+    expect(equipment.find((entity) => entity.tag === 'LT-LG-01')).toMatchObject({ height: 60, elevation: 2900 });
+    expect(equipment.find((entity) => entity.tag === 'SK-LG-RING')).toMatchObject({ height: 150, elevation: 300 });
+  });
+
+  it('does not seed installation records into an existing project during migration', () => {
+    const project = createEmptyProject();
+    const sheet = project.sheets[project.activeSheetId];
+    sheet.entities.existing = {
+      id: 'existing', kind: 'line', layerId: project.activeLayerId, visible: true, locked: false,
+      a: { x: 0, y: 0 }, b: { x: 100, y: 100 },
+    };
+    sheet.entityOrder = ['existing'];
+    const migrated = migrateProject(project);
+    expect(migrated.sheets[sheet.id].entities.existing.installation).toBeUndefined();
+    expect(installationActivities(migrated)).toEqual([]);
   });
 });

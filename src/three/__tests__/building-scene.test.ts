@@ -215,7 +215,7 @@ describe('buildBuildingScene', () => {
     }
   });
 
-  it('hides vertical hanger rods for auto-generated route supports', () => {
+  it('renders generated hanger rods outside their loaded containment', () => {
     const containment: ContainmentEntity = {
       id: 'containment-1',
       kind: 'containment',
@@ -261,8 +261,14 @@ describe('buildBuildingScene', () => {
       if (obj.userData.supportPart === 'support-channel') channels.push(obj);
     });
 
-    expect(rods).toHaveLength(0);
+    expect(rods).toHaveLength(2);
     expect(channels.length).toBeGreaterThan(0);
+    const trayBounds = new THREE.Box3().setFromObject(group.getObjectByName(`containment:${containment.id}`)!);
+    for (const rod of rods) {
+      const bounds = new THREE.Box3().setFromObject(rod);
+      expect(bounds.max.y < trayBounds.min.y || bounds.min.y > trayBounds.max.y).toBe(true);
+      expect(bounds.max.z).toBeGreaterThan(trayBounds.max.z);
+    }
   });
 
   it('renders legacy auto wall brackets as centred trapeze hangers', () => {
@@ -317,8 +323,11 @@ describe('buildBuildingScene', () => {
 
     expect(Math.abs(supportCenter.x - containmentCenter.x)).toBeLessThan(25);
     expect(Math.abs(supportCenter.y - containmentCenter.y)).toBeLessThan(25);
-    expect(supportSize.y).toBeGreaterThanOrEqual(containmentSize.y + 110);
-    expect(supportSize.y).toBeLessThanOrEqual(containmentSize.y + 130);
+    // The channel remains compact. Ceiling anchor plates extend beyond the
+    // rods, so the complete assembly has a wider envelope than the channel.
+    const channelSize = new THREE.Box3().setFromObject(supportObj!.getObjectByName('slotted-strut-channel')!).getSize(new THREE.Vector3());
+    expect(channelSize.y).toBeCloseTo(320);
+    expect(supportSize.y).toBeLessThanOrEqual(channelSize.y + 66);
   });
 
   it('keeps fittings aligned with their flipped containment instead of double-translating them', () => {
@@ -690,7 +699,7 @@ describe('buildBuildingScene', () => {
     expect(group.getObjectByName(`support:${support.id}`)).toBeUndefined();
   });
 
-  it('does not render conduit route aids or old auto saddle clips in 3D', () => {
+  it('renders elevated conduit while excluding obsolete automatic saddle clips', () => {
     const conduit: ContainmentEntity = {
       id: 'conduit-1',
       kind: 'containment',
@@ -721,11 +730,17 @@ describe('buildBuildingScene', () => {
     const { project, sheet } = makeProject([conduit, support]);
     const { group } = buildBuildingScene(project, { flipY: sheet.height });
 
-    expect(group.getObjectByName(`containment:${conduit.id}`)).toBeUndefined();
+    const object = group.getObjectByName(`containment:${conduit.id}`)!;
+    expect(object.getObjectByName('conduit-outer-wall')).toBeDefined();
+    expect(object.getObjectByName('conduit-inner-wall')).toBeDefined();
+    group.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(object);
+    expect(bounds.min.z).toBeCloseTo(1800);
+    expect(bounds.max.z).toBeCloseTo(1832);
     expect(group.getObjectByName(`support:${support.id}`)).toBeUndefined();
   });
 
-  it('does not render auto fittings for conduit route aids', () => {
+  it('renders elevated conduit without duplicating obsolete automatic fittings', () => {
     const wall: WallEntity = {
       id: 'wall-1',
       kind: 'wall',
@@ -769,7 +784,7 @@ describe('buildBuildingScene', () => {
     const { project } = makeProject([wall, conduit, fitting]);
     const { group } = buildBuildingScene(project);
 
-    expect(group.getObjectByName(`containment:${conduit.id}`)).toBeUndefined();
+    expect(group.getObjectByName(`containment:${conduit.id}`)?.getObjectByName('conduit-outer-wall')).toBeDefined();
     expect(group.getObjectByName(`fitting:${fitting.id}`)).toBeUndefined();
   });
 
@@ -903,7 +918,7 @@ describe('buildBuildingScene', () => {
     expect(group.getObjectByName(`support:${support.id}`)).toBeUndefined();
   });
 
-  it('keeps small conduit control routes out of the exposed 3D tray layer', () => {
+  it('renders explicitly elevated control conduit as correctly sized tubes', () => {
     const project = createWholeSiteSampleProject();
     const conduitRoutes = Object.values(project.sheets)
       .flatMap((sheet) => sheet.entityOrder.map((id) => sheet.entities[id]))
@@ -922,7 +937,14 @@ describe('buildBuildingScene', () => {
     const { group } = buildBuildingScene(project);
 
     for (const conduit of conduitRoutes) {
-      expect(group.getObjectByName(`containment:${conduit.id}`)).toBeUndefined();
+      const object = group.getObjectByName(`containment:${conduit.id}`);
+      // The active building/floor scope can exclude routes from other floors.
+      if (!object) continue;
+      expect(object.getObjectByName('conduit-outer-wall')).toBeDefined();
+      expect(Number.isFinite(conduit.elevation)).toBe(true);
+      object.updateWorldMatrix(true, true);
+      const height = new THREE.Box3().setFromObject(object).getSize(new THREE.Vector3()).z;
+      expect(height).toBeLessThanOrEqual((conduit.width ?? 100) + 4.01);
     }
   });
 
@@ -934,15 +956,28 @@ describe('buildBuildingScene', () => {
     const supports: THREE.Object3D[] = [];
     const rods: THREE.Object3D[] = [];
     const channels: THREE.Object3D[] = [];
-    group.traverse((obj) => {
+    const containmentMeshes: THREE.Object3D[] = [];
+    group.traverseVisible((obj) => {
       if (obj.name.startsWith('support:')) supports.push(obj);
       if (obj.userData.supportPart === 'hanger-rod') rods.push(obj);
       if (obj.userData.supportPart === 'support-channel') channels.push(obj);
+      if (obj.name.startsWith('containment:')) containmentMeshes.push(obj);
     });
 
     expect(supports.length).toBeGreaterThan(0);
     expect(channels.length).toBeGreaterThan(0);
-    expect(rods).toHaveLength(0);
+    expect(rods.length).toBeGreaterThan(0);
+    const entities = Object.values(project.sheets).flatMap((sheet) => Object.values(sheet.entities));
+    for (const rod of rods) {
+      const bounds = new THREE.Box3().setFromObject(rod);
+      const center = bounds.getCenter(new THREE.Vector3());
+      const ray = new THREE.Raycaster(new THREE.Vector3(center.x, center.y, bounds.min.z + 55), new THREE.Vector3(0, 0, 1), 0, Math.max(0, bounds.max.z - bounds.min.z - 55));
+      const intersections = ray.intersectObjects(containmentMeshes, true);
+      const source = entities.find((entity) => entity.id === rod.userData.entityId) as SupportEntity | undefined;
+      const parent = entities.find((entity) => entity.id === source?.supportingContainmentIds?.[0]) as ContainmentEntity | undefined;
+      const hitLabels = intersections.map((hit) => (entities.find((entity) => entity.id === hit.object.userData.entityId) as ContainmentEntity | undefined)?.label);
+      expect(intersections, `rod for ${parent?.label} at ${center.x},${center.y} crosses ${hitLabels.join(', ')}`).toHaveLength(0);
+    }
   });
 
   it('renders corporate corridor trunking and baskets as straight parallel lanes', () => {

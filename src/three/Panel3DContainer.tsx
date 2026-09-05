@@ -8,6 +8,8 @@ import React, {
 } from 'react';
 import { Panel3D, type DoorMode, type ViewPreset } from './Panel3D';
 import { useStore } from '../state/store';
+import type { PanelAppearance } from './PanelInstallationAppearance';
+import { installationEntityLabel } from '../models/installation';
 
 // Lazy-import the whole-site viewer so projects that only use the panel
 // viewer don't pay the BuildingScene bundle cost up-front.
@@ -53,6 +55,7 @@ export function Panel3DContainer({ width = 320, fillParent = false }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: width, h: 600 });
   const [doorMode, setDoorMode] = useState<DoorMode>('open');
+  const [appearance, setAppearance] = useState<PanelAppearance>('progress');
   const [view, setView] = useState<{ preset: ViewPreset; key: number }>({
     preset: 'iso',
     key: 0,
@@ -110,11 +113,39 @@ export function Panel3DContainer({ width = 320, fillParent = false }: Props) {
             doorMode={doorMode}
             viewKey={view.key}
             viewPreset={view.preset}
+            appearance={appearance}
+            onSelectEntity={(entityId, sheetId, additive) => {
+              const state = useStore.getState();
+              if (!entityId) {
+                if (!additive) state.clearSelection();
+                return;
+              }
+              const entity = state.project.sheets[sheetId]?.entities[entityId];
+              if (!entity) return;
+              if (state.project.activeSheetId !== sheetId) state.setActiveSheet(sheetId);
+              if (additive) state.toggleInSelection(entityId);
+              else state.setSelection([entityId]);
+              state.setStatus(`Selected ${installationEntityLabel(entity)} in 3D`);
+            }}
           />
           <div className="canvas-3d-overlay">
-            3D Panel View • drag to orbit • scroll to zoom
+            3D Panel View • click a part to inspect • drag to orbit • scroll to zoom
           </div>
           <div className="canvas-3d-controls">
+            <div className="group" role="group" aria-label="Installation appearance">
+              {(['progress', 'materials'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={appearance === mode ? 'active' : ''}
+                  aria-pressed={appearance === mode}
+                  onClick={() => setAppearance(mode)}
+                  title={mode === 'progress' ? 'Completed parts in full color; unfinished parts grayed out' : 'Show original material colors'}
+                >
+                  {mode === 'progress' ? 'Progress' : 'Materials'}
+                </button>
+              ))}
+            </div>
             <div className="group" role="group" aria-label="View presets">
               {PRESETS.map((p) => (
                 <button

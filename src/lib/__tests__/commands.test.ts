@@ -179,6 +179,15 @@ describe('registry integrity', () => {
 });
 
 describe('dispatchShortcut', () => {
+  it('supports undo and redo from the global 3D workspace dispatcher', () => {
+    const before = useStore.getState().project.name;
+    useStore.getState().setProjectPatch({ name: 'Installation update' });
+    expect(dispatchShortcut(evt('z', { meta: true }), { globalOnly: true })).toBe(true);
+    expect(useStore.getState().project.name).toBe(before);
+    expect(dispatchShortcut(evt('Z', { meta: true, shift: true }), { globalOnly: true })).toBe(true);
+    expect(useStore.getState().project.name).toBe('Installation update');
+    useStore.getState().undo();
+  });
   beforeEach(() => clearRecentlyUsed());
 
   it('runs the matching command against the store', () => {

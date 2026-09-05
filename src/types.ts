@@ -18,6 +18,7 @@ import type { StandardsProfile } from './models/standards';
 import type { Catalogue, MaterialSpec } from './models/catalogue';
 import type { SheetMeta, MarkupItem, ConstructionPhase } from './models/revision';
 import type { PenetrationSeal, FireCompartment, ITPItem, FireRating } from './models/fire';
+import type { InstallationRecord } from './models/installation';
 
 export type Vec2 = { x: number; y: number };
 export type Vec3 = { x: number; y: number; z: number };
@@ -78,6 +79,8 @@ export interface BaseEntity {
   phase?: ConstructionPhase;
   // Construction status — overrides lifecycle when as-built differs
   asBuiltStatus?: 'as-designed' | 'modified' | 'added' | 'removed';
+  /** Persisted site progress, comments and completion history for this part. */
+  installation?: InstallationRecord;
 }
 
 export interface LineEntity extends BaseEntity {
