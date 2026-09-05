@@ -220,6 +220,7 @@ const commands: CommandDef[] = [
   // ---- Edit ---------------------------------------------------------------
   {
     id: 'edit.undo',
+    globalKey: true,
     title: 'Undo',
     category: 'Edit',
     shortcut: { display: `${MOD}Z`, matches: modKey('z') },
@@ -227,6 +228,7 @@ const commands: CommandDef[] = [
   },
   {
     id: 'edit.redo',
+    globalKey: true,
     title: 'Redo',
     category: 'Edit',
     shortcut: { display: `${MOD}${SHIFT}Z`, matches: modKey('z', true) },

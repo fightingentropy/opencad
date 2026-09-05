@@ -1,4 +1,5 @@
 import type { Project } from '../types';
+import { installationRecordDefects } from '../models/installation';
 
 // Structural validation shared by every path that installs a whole project:
 // File → Open (io/project.ts) and the IndexedDB autosave (io/persist.ts).
@@ -9,6 +10,8 @@ import type { Project } from '../types';
 // Per-entity field validation is left to the canvas, which already tolerates
 // odd entities; a missing `sheets` record, by contrast, takes down the whole
 // app and lets autosave overwrite the last good copy with the wreckage.
+// Installation records are also checked: their dates, status and bounded
+// activity lists are consumed by the inspector and project timeline.
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -38,6 +41,14 @@ export function projectStructureDefects(value: unknown): string[] {
         continue;
       }
       if (!isRecord(sheet.entities)) defects.push(`sheet "${sheetId}" has no entities record`);
+      else {
+        for (const [entityId, entity] of Object.entries(sheet.entities)) {
+          if (!isRecord(entity) || entity.installation === undefined) continue;
+          for (const defect of installationRecordDefects(entity.installation)) {
+            defects.push(`entity "${entityId}" on sheet "${sheetId}": ${defect}`);
+          }
+        }
+      }
       if (!isStringArray(sheet.entityOrder)) defects.push(`sheet "${sheetId}" has no entity order`);
     }
   }

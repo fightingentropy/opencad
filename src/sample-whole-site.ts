@@ -51,6 +51,7 @@ import type {
 } from './models/site';
 import type { PenetrationSeal, ITPItem } from './models/fire';
 import type { SheetMeta } from './models/revision';
+import { installationStatus, type InstallationStatus } from './models/installation';
 import { assembleDrawingNumber } from './drawing/numbering';
 
 const newId = (): string => nanoid(10);
@@ -671,7 +672,7 @@ const addOccupiedEquipmentAndBranches = (
     addEquipment(sheet, equipmentList, layers.panel, 'MSB-01', 'Main LV switchboard — 800 A TP+N', 'switchboard',
       { x: 4400, y: 2200 }, { w: 3600, h: 900 }, systems.powerDistribution, { current: 800, voltage: 400, ip: 'IP30' }, { height: 2100 });
     addEquipment(sheet, equipmentList, layers.panel, 'FAP-01', 'Addressable fire alarm panel — 8 loop', 'fire-alarm-panel',
-      { x: 16800, y: 8200 }, { w: 800, h: 300 }, systems.fireAlarm, { ip: 'IP30' });
+      { x: 16800, y: 8200 }, { w: 800, h: 300 }, systems.fireAlarm, { voltage: 230, ip: 'IP30' }, { height: 850, elevation: 900 });
     addEquipment(sheet, equipmentList, layers.panel, 'CR-01', 'Main communications rack room core switch (42U)', 'comms-rack',
       { x: 9500, y: 2100 }, { w: 1100, h: 1100 }, systems.data, { ip: 'IP20' }, { height: 2200 });
     addEquipment(sheet, equipmentList, layers.panel, 'UPS-01', '60 kVA UPS with bypass panel', 'ups',
@@ -683,23 +684,23 @@ const addOccupiedEquipmentAndBranches = (
   }
 
   addEquipment(sheet, equipmentList, layers.panel, dbTag, `${labelPrefix} distribution board — 250 A`, 'distribution-board',
-    { x: 14900, y: 8200 }, { w: 1200, h: 450 }, systems.powerDistribution, { current: 250, voltage: 400, ip: 'IP30' });
+    { x: 14900, y: 8200 }, { w: 1200, h: 450 }, systems.powerDistribution, { current: 250, voltage: 400, ip: 'IP30' }, { height: 1200, elevation: 600 });
   addEquipment(sheet, equipmentList, layers.panel, idfTag, `${labelPrefix} floor IDF cabinet (24U)`, 'comms-rack',
-    { x: 19800, y: 8200 }, { w: 1000, h: 1000 }, systems.data, { ip: 'IP20' });
+    { x: 19800, y: 8200 }, { w: 1000, h: 1000 }, systems.data, { voltage: 230, ip: 'IP20' }, { height: 1400 });
   addEquipment(sheet, equipmentList, layers.panel, lightingTag, `${labelPrefix} lighting circuit endpoint`, 'other',
-    { x: 7600, y: 17600 }, { w: 220, h: 220 }, systems.lighting, { ip: 'IP20' });
+    { x: 7600, y: 17600 }, { w: 220, h: 220 }, systems.lighting, { voltage: 230, ip: 'IP20' }, { height: 60, elevation: 2900 });
   addEquipment(sheet, equipmentList, layers.panel, socketTag, `${labelPrefix} ring-final socket circuit endpoint`, 'other',
-    { x: 30500, y: 17600 }, { w: 220, h: 220 }, systems.powerDistribution, { ip: 'IP20' });
+    { x: 30500, y: 17600 }, { w: 220, h: 220 }, systems.powerDistribution, { current: 32, voltage: 230, ip: 'IP20' }, { height: 150, elevation: 300 });
   addEquipment(sheet, equipmentList, layers.panel, fireTag, `${labelPrefix} fire alarm loop endpoint`, 'other',
-    { x: 9500, y: 10800 }, { w: 220, h: 220 }, systems.fireAlarm, { ip: 'IP30' });
+    { x: 9500, y: 10800 }, { w: 220, h: 220 }, systems.fireAlarm, { voltage: 24, ip: 'IP30' }, { height: 60, elevation: 2900 });
   addEquipment(sheet, equipmentList, layers.panel, emergencyTag, `${labelPrefix} emergency lighting endpoint`, 'other',
-    { x: 28500, y: 12650 }, { w: 220, h: 220 }, systems.emergencyLighting, { ip: 'IP20' });
+    { x: 28500, y: 12650 }, { w: 220, h: 220 }, systems.emergencyLighting, { voltage: 230, ip: 'IP20' }, { height: 80, elevation: 2850 });
 
   if (level === '2') {
     addEquipment(sheet, equipmentList, layers.panel, 'SEC-L02-ACS', 'Level 2 access-control door controller', 'control-panel',
-      { x: 24600, y: 10200 }, { w: 700, h: 450 }, systems.security, { ip: 'IP20' });
+      { x: 24600, y: 10200 }, { w: 700, h: 450 }, systems.security, { voltage: 230, ip: 'IP20' }, { height: 700, elevation: 850 });
     addEquipment(sheet, equipmentList, layers.panel, 'BMS-L02-VAV', 'Level 2 VAV controller panel', 'control-panel',
-      { x: 12200, y: 10200 }, { w: 700, h: 450 }, systems.bms, { ip: 'IP20' });
+      { x: 12200, y: 10200 }, { w: 700, h: 450 }, systems.bms, { voltage: 230, ip: 'IP20' }, { height: 700, elevation: 850 });
   }
 
   if (level === '3') {
@@ -776,7 +777,7 @@ const addRoofEquipmentAndContainment = (
   systems: Record<string, SystemId>,
 ): void => {
   addEquipment(sheet, equipmentList, layers.panel, 'DB-RF', 'Roof plant distribution board — 250 A', 'distribution-board',
-    { x: 17000, y: 9000 }, { w: 1200, h: 450 }, systems.powerDistribution, { current: 250, voltage: 400, ip: 'IP55' });
+    { x: 17000, y: 9000 }, { w: 1200, h: 450 }, systems.powerDistribution, { current: 250, voltage: 400, ip: 'IP55' }, { height: 1400, elevation: 300 });
   addEquipment(sheet, equipmentList, layers.panel, 'AHU-RF-01', 'Air-handling unit north — 42 A', 'air-handling-unit',
     { x: 5600, y: 16500 }, { w: 4200, h: 2400 }, systems.powerDistribution, { current: 42, voltage: 400, ip: 'IP55' }, { height: 2200 });
   addEquipment(sheet, equipmentList, layers.panel, 'AHU-RF-02', 'Air-handling unit east — 38 A', 'air-handling-unit',
@@ -788,7 +789,7 @@ const addRoofEquipmentAndContainment = (
   addEquipment(sheet, equipmentList, layers.panel, 'BMS-RF-IO', 'Roof plant BMS I/O panel', 'control-panel',
     { x: 19000, y: 8500 }, { w: 900, h: 650 }, systems.bms, { ip: 'IP55' });
   addEquipment(sheet, equipmentList, layers.panel, 'FA-RF-01', 'Roof plant fire alarm interface', 'other',
-    { x: 11000, y: 11100 }, { w: 250, h: 250 }, systems.fireAlarm, { ip: 'IP55' });
+    { x: 11000, y: 11100 }, { w: 250, h: 250 }, systems.fireAlarm, { voltage: 24, ip: 'IP55' }, { height: 300, elevation: 1200 });
 
   const roofXs = [2400, 6600, 7800, POWER_RISER_X, LIFE_SAFETY_RISER_X, CONTROLS_RISER_X, DATA_RISER_X, 24500, 28500, 30500, 33600];
   addRun(sheet, containmentList, layers.containment, 'ladder', routePoints(POWER_Y, roofXs), 600, 100,
@@ -877,10 +878,107 @@ const buildCorporateFloor = (opts: CorporateFloorOpts): FloorBuildResult => {
 
 // ---------- Project assembly --------------------------------------------
 
+/**
+ * Fictional installation starting point for the new demo only. This is never
+ * called by project migration, import or autosave. Generated accessories share
+ * their route's progress without flooding the activity feed with duplicate rows.
+ */
+const addDemonstrationInstallation = (project: Project): void => {
+  const start = Date.UTC(2026, 7, 31, 8);
+  const day = 24 * 60 * 60 * 1000;
+  const author = 'Demo team';
+  const statusFor = (level: number, systemId?: string): InstallationStatus => {
+    const system = systemId ? project.systems?.[systemId]?.kind : undefined;
+    if (level === 0) return system === 'bms' ? 'planned' : system === 'security' ? 'in-progress' : 'completed';
+    if (level === 1) {
+      if (system === 'power-distribution' || system === 'data') return 'completed';
+      if (system === 'lighting' || system === 'fire-alarm' || system === 'emergency-lighting') return 'in-progress';
+    }
+    if (level === 2 && (system === 'power-distribution' || system === 'data')) return 'in-progress';
+    return 'planned';
+  };
+  const seed = (entity: Entity, status: InstallationStatus, date: number, addEvent: boolean): void => {
+    entity.installation = {
+      status,
+      updatedAt: date,
+      ...(status === 'completed' ? { completedAt: date } : {}),
+      activities: addEvent && status !== 'planned' ? [{
+        id: `demo-status-${entity.id}`,
+        kind: 'status',
+        previousStatus: 'planned',
+        status,
+        createdAt: date,
+        author,
+      }] : [],
+    };
+  };
+
+  for (const sheet of Object.values(project.sheets)) {
+    const level = sheet.floorId ? project.floors?.[sheet.floorId]?.level ?? 0 : 0;
+    for (const entity of Object.values(sheet.entities)) {
+      if (entity.kind === 'equipment' || entity.kind === 'containment') {
+        seed(entity, statusFor(level, entity.systemId), start + level * day, true);
+      } else if (entity.kind === 'riser') {
+        // A riser is represented on both end floors. Both markers describe
+        // the same installation; show its timeline event only on the lower floor.
+        const upperLevel = entity.toFloorId ? project.floors?.[entity.toFloorId]?.level ?? level : level;
+        const system = entity.systemId ? project.systems?.[entity.systemId]?.kind : undefined;
+        const status = upperLevel === 3 && system === 'power-distribution'
+          ? 'in-progress' : statusFor(upperLevel, entity.systemId);
+        seed(entity, status, start + upperLevel * day, sheet.floorId === entity.fromFloorId);
+      }
+    }
+    for (const entity of Object.values(sheet.entities)) {
+      const parentIds = entity.kind === 'fitting' ? [entity.containmentId]
+        : entity.kind === 'support' ? entity.supportingContainmentIds : [];
+      if (parentIds.length === 0) continue;
+      const parents = parentIds.map((id) => sheet.entities[id]).filter(Boolean);
+      // A shared support must already be installed if any route it carries is complete.
+      const statuses = parents.map(installationStatus);
+      const status = statuses.includes('completed') ? 'completed'
+        : statuses.includes('in-progress') ? 'in-progress' : 'planned';
+      seed(entity, status, start + level * day, false);
+    }
+  }
+
+  const notes = [
+    {
+      tag: 'MSB-01', date: Date.UTC(2026, 8, 1, 10, 45),
+      text: 'Demonstration: switchboard positioned and busbar connected. Final electrical testing remains on the inspection plan.',
+    },
+    {
+      tag: 'SEC-CP-01', date: Date.UTC(2026, 8, 2, 14, 10),
+      text: 'Demonstration: security containment installed in the east corridor. Head-end terminations are still in progress.',
+    },
+    {
+      tag: 'DB-L01', date: Date.UTC(2026, 8, 3, 11, 30),
+      text: 'Demonstration: distribution board installed and circuit identifiers applied. Keep access clear for inspection.',
+    },
+    {
+      tag: 'DB-L02', date: Date.UTC(2026, 8, 4, 9, 20),
+      text: 'Demonstration: first-fix containment is underway. Confirm the final cable entry arrangement before terminating the board.',
+    },
+    {
+      tag: 'DB-RF', date: Date.UTC(2026, 8, 5, 8),
+      text: 'Demonstration: roof installation is planned. Coordinate lifting access and weatherproof cable entries with the plant contractor.',
+    },
+  ];
+  for (const note of notes) {
+    for (const sheet of Object.values(project.sheets)) {
+      const entity = Object.values(sheet.entities).find((candidate) => candidate.kind === 'equipment' && candidate.tag === note.tag);
+      if (!entity?.installation) continue;
+      entity.installation.updatedAt = note.date;
+      entity.installation.activities.push({
+        id: `demo-note-${entity.id}`, kind: 'comment', createdAt: note.date, author, text: note.text,
+      });
+    }
+  }
+};
+
 export const createWholeSiteSampleProject = (): Project => {
   const project = createEmptyProject();
   project.name = 'Corporate HQ Containment Model';
-  project.description = 'Implementation-grade multi-floor corporate office model with coordinated electrical containment, risers and roof plant.';
+  project.description = 'Demonstration model: a five-level corporate office with coordinated electrical containment, boards, risers and roof plant. Installation progress, dates and Demo team notes are fictional examples.';
   project.client = 'Apex Corporate Estates';
   project.engineer = 'OpenCAD Demo';
   project.projectNumber = 'HQ-2026-001';
@@ -1465,6 +1563,7 @@ export const createWholeSiteSampleProject = (): Project => {
   project.fireCompartments = {};
   project.markups = {};
   project.catalogues = loadDefaultCatalogues();
+  addDemonstrationInstallation(project);
 
   return project;
 };

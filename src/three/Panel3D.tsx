@@ -21,6 +21,7 @@ import type {
 // id isn't registered, so we just call it directly. The previous dynamic
 // import dance prevented Vite from putting the library in its own chunk.
 import { getSymbol as _getSymbolImpl } from '../symbols';
+import { pickPanelEntity, preparePanelEntityAppearance, type ApplyPanelAppearance, type PanelAppearance } from './PanelInstallationAppearance';
 
 // Cheap structural-comparison helpers for the diff/update loop (replaces
 // the old JSON.stringify-based entity signatures).
@@ -2148,6 +2149,8 @@ export interface Panel3DProps {
   // the same after the user has orbited.
   viewKey?: number;
   viewPreset?: ViewPreset;
+  appearance?: PanelAppearance;
+  onSelectEntity?: (entityId: string | null, sheetId: string, additive: boolean) => void;
 }
 
 export function Panel3D({
@@ -2157,9 +2160,14 @@ export function Panel3D({
   doorMode = 'open',
   viewKey = 0,
   viewPreset = 'iso',
+  appearance = 'progress',
+  onSelectEntity,
 }: Panel3DProps): JSX.Element {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
+  const selectionCallbackRef = useRef(onSelectEntity);
+  selectionCallbackRef.current = onSelectEntity;
+  const renderedSheetRef = useRef('');
 
   // Persistent three.js refs across renders/effects
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -2179,13 +2187,13 @@ export function Panel3D({
   const wiresGroupRef = useRef<THREE.Group | null>(null);
   const containmentGroupRef = useRef<THREE.Group | null>(null);
   const symbolMapRef = useRef<
-    Map<string, { group: THREE.Group; sig: SymbolSig }>
+    Map<string, { group: THREE.Group; sig: SymbolSig; applyAppearance: ApplyPanelAppearance }>
   >(new Map());
-  const wireMapRef = useRef<Map<string, { mesh: THREE.Mesh; sig: WireSig }>>(
+  const wireMapRef = useRef<Map<string, { mesh: THREE.Mesh; sig: WireSig; applyAppearance: ApplyPanelAppearance }>>(
     new Map()
   );
   const containmentMapRef = useRef<
-    Map<string, { group: THREE.Group; sig: ContainmentSig }>
+    Map<string, { group: THREE.Group; sig: ContainmentSig; applyAppearance: ApplyPanelAppearance }>
   >(new Map());
   // Walls + rooms: only populated in building mode, but we keep refs at the
   // top level so cleanup mirrors the other diff maps.
@@ -2402,6 +2410,31 @@ export function Panel3D({
       new THREE.Vector3(400, 250, 0)
     );
 
+    let pointerDown: { x: number; y: number; pointerId: number } | null = null;
+    const handlePointerDown = (event: PointerEvent): void => {
+      if (event.button === 0) pointerDown = { x: event.clientX, y: event.clientY, pointerId: event.pointerId };
+    };
+    const handlePointerUp = (event: PointerEvent): void => {
+      const down = pointerDown;
+      pointerDown = null;
+      if (!down || event.pointerId !== down.pointerId || event.button !== 0) return;
+      if (Math.hypot(event.clientX - down.x, event.clientY - down.y) > 5) return;
+      const root = contentRootRef.current;
+      if (!root || !selectionCallbackRef.current || !renderedSheetRef.current) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const pointer = new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1);
+      const raycaster = new THREE.Raycaster();
+      camera.updateMatrixWorld(true);
+      raycaster.setFromCamera(pointer, camera);
+      selectionCallbackRef.current(pickPanelEntity(root, raycaster), renderedSheetRef.current, event.shiftKey || event.metaKey || event.ctrlKey);
+    };
+    const cancelPointer = (): void => { pointerDown = null; };
+    renderer.domElement.addEventListener('pointerdown', handlePointerDown);
+    renderer.domElement.addEventListener('pointerup', handlePointerUp);
+    renderer.domElement.addEventListener('pointercancel', cancelPointer);
+    renderer.domElement.addEventListener('pointerleave', cancelPointer);
+
     // Animation loop
     const animate = () => {
       animationRef.current = requestAnimationFrame(animate);
@@ -2427,6 +2460,10 @@ export function Panel3D({
       }
       orbitRef.current?.dispose();
       orbitRef.current = null;
+      renderer.domElement.removeEventListener('pointerdown', handlePointerDown);
+      renderer.domElement.removeEventListener('pointerup', handlePointerUp);
+      renderer.domElement.removeEventListener('pointercancel', cancelPointer);
+      renderer.domElement.removeEventListener('pointerleave', cancelPointer);
       resizeObsRef.current?.disconnect();
       resizeObsRef.current = null;
 
@@ -2507,6 +2544,8 @@ export function Panel3D({
     const roomMap = roomMapRef.current;
 
     const { sheet, isPanel } = pickSheetForViewer(project);
+    renderedSheetRef.current = sheet?.id ?? '';
+    const sharedMaterials = new Set(Object.values(mats).filter((value): value is THREE.Material => value instanceof THREE.Material));
     const W = sheet?.width || 600;
     const H = sheet?.height || 400;
     // 'site' (multi-building) is rendered the same way as 'building' for now
@@ -2593,7 +2632,7 @@ export function Panel3D({
             ? buildComponentForCategory(cat, mats, sym)
             : buildWireframePlaceholder(mats);
           symbolsGroup.add(g);
-          entry = { group: g, sig };
+          entry = { group: g, sig, applyAppearance: preparePanelEntityAppearance(g, id, sharedMaterials) };
           symbolMap.set(id, entry);
         }
 
@@ -2603,6 +2642,7 @@ export function Panel3D({
         const s = sym.scale && sym.scale !== 1 ? sym.scale : 1;
         g.scale.setScalar(s);
         if (sym.mirror) g.scale.x *= -1;
+        entry.applyAppearance(sym, appearance);
         seenSymbols.add(id);
       }
     }
@@ -2641,9 +2681,10 @@ export function Panel3D({
           const mesh = buildWireMesh(w, H);
           if (!mesh) continue;
           wiresGroup.add(mesh);
-          entry = { mesh, sig: makeWireSig(w, H) };
+          entry = { mesh, sig: makeWireSig(w, H), applyAppearance: preparePanelEntityAppearance(mesh, id, sharedMaterials) };
           wireMap.set(id, entry);
         }
+        entry?.applyAppearance(w, appearance);
         seenWires.add(id);
       }
     }
@@ -2687,9 +2728,10 @@ export function Panel3D({
           const grp = buildContainmentGroup(c, H, mats, baseZ);
           if (!grp) continue;
           containmentGroup.add(grp);
-          entry = { group: grp, sig: makeContainmentSig(c, H, baseZ) };
+          entry = { group: grp, sig: makeContainmentSig(c, H, baseZ), applyAppearance: preparePanelEntityAppearance(grp, id, sharedMaterials) };
           containmentMap.set(id, entry);
         }
+        entry?.applyAppearance(c, appearance);
         seenContainment.add(id);
       }
     }
@@ -2828,7 +2870,7 @@ export function Panel3D({
       lastFrameSigRef.current = frameSig;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project]);
+  }, [project, appearance]);
 
   // ---- React to door-mode prop without rebuilding the scene ------------
   useEffect(() => {

@@ -35,6 +35,9 @@ import {
   type MeasurementRow,
 } from './measurements';
 import { useStore } from '../state/store';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { entitySceneRoots, sceneEntities, type InstallationAppearance, type InstallationFilter } from './InstallationAppearance';
+import { installationEntityLabel } from '../models/installation';
 
 interface Props {
   project: Project;
@@ -125,8 +128,11 @@ const frameObject = (
 ): void => {
   const sphere = objectBoundingSphere(obj);
   const fovRad = (camera.fov * Math.PI) / 180;
-  const fitDist = (sphere.radius / Math.sin(fovRad / 2)) * 0.85;
-  const dir = new THREE.Vector3(-0.6, -0.6, 0.55).normalize();
+  const limitingFov = 2 * Math.atan(Math.tan(fovRad / 2) * Math.min(1, camera.aspect));
+  const fitDist = (sphere.radius / Math.sin(limitingFov / 2)) * 1.12;
+  const dir = obj.name.startsWith('equipment:')
+    ? new THREE.Vector3(0.6, -1, 0.4).normalize()
+    : new THREE.Vector3(-0.6, -0.6, 0.55).normalize();
   controls.target.copy(sphere.center);
   camera.position.copy(sphere.center).addScaledVector(dir, fitDist);
   camera.near = Math.max(1, fitDist / 1000);
@@ -421,11 +427,21 @@ export function SiteSceneViewer({ project, width, height }: Props) {
   // Toolbar state (visible to the React UI). The actual scene is mutated
   // imperatively via SceneControls — these refs/state are just the latest
   // user-driven settings so a rebuild can re-apply them.
-  const [viewScope, setViewScope] = useState<ViewScope>('site');
+  const [viewScope, setViewScope] = useState<ViewScope>('floor');
   const singleFloor = viewScope === 'floor';
   const [floorId, setFloorId] = useState<FloorId | ''>(project.activeFloorId ?? '');
   const [systemId, setSystemId] = useState<SystemId | ''>('');
-  const [wallOpacity, setWallOpacity] = useState(0.45);
+  const [wallOpacity, setWallOpacity] = useState(0.22);
+  const [appearance, setAppearance] = useState<InstallationAppearance>('progress');
+  const [installationFilter, setInstallationFilter] = useState<InstallationFilter>('all');
+  const [panelsOpen, setPanelsOpen] = useState(false);
+  const [coversOpen, setCoversOpen] = useState(false);
+  const [showCables, setShowCables] = useState(true);
+  const [showSupports, setShowSupports] = useState(true);
+  const [showLabels, setShowLabels] = useState(false);
+  const [showFirestops, setShowFirestops] = useState(true);
+  const [floorSeparation, setFloorSeparation] = useState(0);
+  const [isolatedId, setIsolatedId] = useState<string | null>(null);
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null);
   const projectRef = useRef(project);
   const floorIdRef = useRef<FloorId | ''>(floorId);
@@ -448,25 +464,28 @@ export function SiteSceneViewer({ project, width, height }: Props) {
 
   // Signature triggering a scene rebuild. We don't deep-compare the whole
   // project; instead we hash the parts that actually drive geometry.
-  const projectSig = useMemo(() => {
-    const modified = project.modified ?? 0;
-    const sites = project.sites ? Object.keys(project.sites).join(',') : '';
-    const buildings = project.buildings ? Object.keys(project.buildings).join(',') : '';
-    const floors = project.floors
-      ? Object.values(project.floors).map((f) => `${f.id}:${f.ffl}:${f.sheetIds.join(',')}`).join('|')
-      : '';
-    let sheetEntities = 0;
-    for (const sid of project.sheetOrder) {
-      const s = project.sheets[sid];
-      if (!s) continue;
-      sheetEntities += s.entityOrder.length;
-    }
-    return `${project.id}#${modified}#${sites}#${buildings}#${floors}#${sheetEntities}`;
-  }, [project]);
+  const projectSig = useMemo(() => JSON.stringify({
+    id: project.id, sites: project.sites, buildings: project.buildings,
+    floors: project.floors, systems: project.systems, cableSchedule: project.cableSchedule, penetrationSeals: project.penetrationSeals,
+    sheets: project.sheetOrder.map((id) => {
+      const sheet = project.sheets[id];
+      if (!sheet) return null;
+      return { ...sheet, entities: Object.fromEntries(Object.entries(sheet.entities).map(([id, entity]) => {
+        const { installation: _installation, ...geometry } = entity;
+        return [id, geometry];
+      })) };
+    }),
+  }), [project]);
+
+  const entityObject = (entityId: string): THREE.Object3D | null => {
+    const root = sceneGroupRef.current;
+    return root ? entitySceneRoots(root).find((obj) => obj.userData.entityId === entityId && !obj.userData.excludedFrom3D) ?? null : null;
+  };
 
   const activeSceneObject = (): THREE.Object3D | null => {
     const group = sceneGroupRef.current;
     if (!group) return null;
+    if (isolatedId) return entityObject(isolatedId) ?? group;
     if (singleFloor && floorId) {
       return group.getObjectByName(`floor:${floorId}`) ?? group;
     }
@@ -497,7 +516,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
 
     const keep = new Set<string>();
     for (const entityId of selectedIdsRef.current) {
-      const target = group.getObjectByName(`containment:${entityId}`);
+      const target = entityObject(entityId);
       if (!target || !isVisibleWithin(target, group)) continue;
       keep.add(entityId);
 
@@ -535,8 +554,8 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     const initialH = mount.clientHeight || height || 600;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xc4cdd4);
-    scene.fog = new THREE.Fog(0xc4cdd4, 30000, 200000);
+    scene.background = new THREE.Color(0xd4dde1);
+    scene.fog = new THREE.Fog(0xd4dde1, 90000, 240000);
     sceneRef.current = scene;
 
     // Camera with z-up so vertical riser lengths read correctly.
@@ -572,6 +591,12 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    const environmentGenerator = new THREE.PMREMGenerator(renderer);
+    const roomEnvironment = new RoomEnvironment();
+    const environment = environmentGenerator.fromScene(roomEnvironment, 0.04);
+    scene.environment = environment.texture;
+    roomEnvironment.dispose();
+    environmentGenerator.dispose();
     rendererRef.current = renderer;
     mount.appendChild(renderer.domElement);
     renderer.domElement.style.display = 'block';
@@ -793,6 +818,24 @@ export function SiteSceneViewer({ project, width, height }: Props) {
         }
       | null = null;
 
+    const pickInstallation = (event: PointerEvent): { entityId: string } | null => {
+      const root = activePickRoot();
+      if (!root) return null;
+      const rect = renderer.domElement.getBoundingClientRect();
+      raycaster.setFromCamera(new THREE.Vector2(
+        ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        -((event.clientY - rect.top) / rect.height) * 2 + 1,
+      ), camera);
+      const entities = sceneEntities(projectRef.current);
+      for (const hit of raycaster.intersectObjects(root.children, true)) {
+        if (!isVisibleWithin(hit.object, root)) continue;
+        const id = entityIdFromObject(hit.object);
+        const entity = id ? entities.get(id) : null;
+        if (id && entity && ['equipment', 'containment', 'fitting', 'support', 'riser', 'penetration', 'fire-barrier'].includes(entity.kind)) return { entityId: id };
+      }
+      return pickContainment(event);
+    };
+
     const handlePointerDown = (event: PointerEvent): void => {
       if (event.button !== 0) return;
       pointerDown = { x: event.clientX, y: event.clientY };
@@ -805,7 +848,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       pointerDown = null;
       if (dx * dx + dy * dy > 25) return;
 
-      const picked = pickContainment(event);
+      const picked = pickInstallation(event);
       const state = useStore.getState();
       if (!picked) {
         if (!event.shiftKey && !event.metaKey && !event.ctrlKey) {
@@ -827,8 +870,8 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       } else {
         state.setSelection([picked.entityId]);
       }
-      const containment = findContainment(currentProject, picked.entityId);
-      state.setStatus(`Selected ${containment?.label || picked.entityId} in 3D`);
+      const entity = sceneEntities(currentProject).get(picked.entityId);
+      state.setStatus(`Selected ${entity ? installationEntityLabel(entity) : picked.entityId} in 3D`);
       selectedIdsRef.current = new Set(useStore.getState().editor.selection);
       syncSelectionHelpers();
       event.preventDefault();
@@ -918,6 +961,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
         scene.remove(sceneGroupRef.current);
         sceneGroupRef.current = null;
       }
+      environment.dispose();
       renderer.dispose();
       if (renderer.domElement.parentElement === mount) {
         mount.removeChild(renderer.domElement);
@@ -950,7 +994,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isTypingTarget(e.target)) return;
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || isTypingTarget(e.target)) return;
       const direction = WALK_KEYS[e.key];
       if (!direction) return;
       e.preventDefault();
@@ -959,6 +1003,16 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
+
+  useEffect(() => {
+    setIsolatedId(null);
+    setSystemId('');
+    setInstallationFilter('all');
+    setFloorId(project.activeFloorId ?? Object.keys(project.floors ?? {})[0] ?? '');
+    setViewScope('floor');
+    // Saved camera filters belong to the previous model, not a newly opened project.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.id]);
 
   // ---------- Rebuild scene group when project changes --------------------
   useEffect(() => {
@@ -993,13 +1047,21 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     if (systemId) controls.filterSystem(systemId);
     else controls.filterSystem(null);
     controls.setTransparency('walls', wallOpacity);
+    controls.setInstallation(project, appearance, installationFilter);
+    controls.setPanelsOpen(panelsOpen);
+    controls.setCoversOpen(coversOpen);
+    controls.setLayerVisible('cables', showCables);
+    controls.setLayerVisible('supports', showSupports);
+    controls.setLayerVisible('labels', showLabels);
+    controls.setLayerVisible('firestops', showFirestops);
+    controls.setExploded(singleFloor ? 0 : floorSeparation);
+    controls.isolateEntity(isolatedId);
 
     // Frame on first build / explicit reset only — preserves user pose
     // when sheets get edited but the project structure stays the same.
-    if (resetTick > 0 || !framedOnceRef.current) {
+    if (!framedOnceRef.current) {
       const frameTarget = activeSceneObject() ?? group;
-      if (singleFloor && floorId) placeWalkCamera(camera, orbit, frameTarget);
-      else frameObject(camera, orbit, frameTarget);
+      frameObject(camera, orbit, frameTarget);
       framedOnceRef.current = true;
     }
     refreshWalkBounds();
@@ -1019,8 +1081,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     const camera = cameraRef.current;
     const orbit = orbitRef.current;
     if (obj && camera && orbit) {
-      if (singleFloor && floorId) placeWalkCamera(camera, orbit, obj);
-      else frameObject(camera, orbit, obj);
+      frameObject(camera, orbit, obj);
     }
   }, [singleFloor, floorId]);
 
@@ -1037,6 +1098,55 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     if (!c) return;
     c.setTransparency('walls', wallOpacity);
   }, [wallOpacity]);
+
+  useEffect(() => {
+    const controls = sceneControlsRef.current;
+    if (!controls) return;
+    controls.setInstallation(project, appearance, installationFilter);
+    controls.setPanelsOpen(panelsOpen);
+    controls.setCoversOpen(coversOpen);
+    controls.setLayerVisible('cables', showCables);
+    controls.setLayerVisible('supports', showSupports);
+    controls.setLayerVisible('labels', showLabels);
+    controls.setLayerVisible('firestops', showFirestops);
+    controls.setExploded(singleFloor ? 0 : floorSeparation);
+    controls.isolateEntity(isolatedId);
+    syncSelectionHelpers();
+  }, [project, appearance, installationFilter, panelsOpen, coversOpen, showCables, showSupports, showLabels, showFirestops, floorSeparation, singleFloor, isolatedId]);
+
+  useEffect(() => {
+    const onFocus = (event: Event) => {
+      const { entityId, isolate } = (event as CustomEvent<{entityId: string; isolate: boolean}>).detail;
+      const obj = entityObject(entityId);
+      const camera = cameraRef.current;
+      const orbit = orbitRef.current;
+      if (!obj || !camera || !orbit) {
+        useStore.getState().setStatus('This component has no physical geometry in the current 3D scene.');
+        return;
+      }
+      const focusedEntity = sceneEntities(projectRef.current).get(entityId);
+      if (focusedEntity?.kind === 'support') { setShowSupports(true); sceneControlsRef.current?.setLayerVisible('supports', true); }
+      if (focusedEntity?.kind === 'penetration') { setShowFirestops(true); sceneControlsRef.current?.setLayerVisible('firestops', true); }
+      const sid = sheetIdForEntity(projectRef.current, entityId);
+      const fid = sid ? projectRef.current.sheets[sid]?.floorId : undefined;
+      if (fid) { setFloorId(fid); floorIdRef.current = fid; }
+      setInstallationFilter('all');
+      setSystemId('');
+      sceneControlsRef.current?.filterSystem(null);
+      sceneControlsRef.current?.setInstallation(projectRef.current, appearance, 'all');
+      if (singleFloor && fid) sceneControlsRef.current?.isolateFloor(fid);
+      setIsolatedId(isolate ? entityId : null);
+      sceneControlsRef.current?.isolateEntity(isolate ? entityId : null);
+      // Let the floor scope effect finish before applying the close inspection pose.
+      requestAnimationFrame(() => {
+        frameObject(camera, orbit, obj);
+        refreshWalkBounds();
+        syncSelectionHelpers();
+      });
+    };
+    window.addEventListener('opencad:focus-entity', onFocus);
+    return () => window.removeEventListener('opencad:focus-entity', onFocus);
+  }, [appearance, singleFloor]);
 
   // ---------- Floor / system option lists for the toolbar ------------------
   const floors = useMemo(() => {
@@ -1076,19 +1186,26 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       frameObject(camera, orbit, obj);
       refreshWalkBounds();
     } else {
+      framedOnceRef.current = false;
       setResetTick((t) => t + 1);
     }
   };
 
   return (
-    <>
+    <div className="site-workspace">
+      <div className="site-view-header"><div className="site-view-title"><i />Installation model <small>{singleFloor ? project.floors?.[floorId]?.name : 'Whole project'} · 3D</small></div>
+        <div className="site-view-mode" aria-label="Model appearance">{(['progress', 'materials', 'systems'] as const).map((mode) => <button key={mode} className={appearance === mode ? 'active' : ''} aria-pressed={appearance === mode} onClick={() => setAppearance(mode)}>{mode === 'progress' ? 'Progress' : mode === 'materials' ? 'Materials' : 'Systems'}</button>)}</div>
+      </div>
+      <div className="site-viewport">
       <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
       {renderError && <div className="canvas-3d-fallback">{renderError}</div>}
       {!renderError && (
         <div className="canvas-3d-overlay">
-          3D View · click containment to select · hover for size/clearance · arrows/WASD to move
+          Drag to orbit · scroll to zoom · click a part to inspect · WASD to walk
         </div>
       )}
+      {!renderError && appearance === 'progress' && <div className="site-status-legend"><span><i className="status-dot completed" />Completed · full colour</span><span><i className="status-dot in-progress" />In progress</span><span><i className="status-dot planned" />Planned</span></div>}
+      {isolatedId && <div className="site-selection-banner">Isolated component<button onClick={() => { setIsolatedId(null); sceneControlsRef.current?.isolateEntity(null); handleResetView(); }}>Show context</button></div>}
       {!renderError && hoverInfo && (
         <div
           className="canvas-3d-tooltip"
@@ -1104,7 +1221,8 @@ export function SiteSceneViewer({ project, width, height }: Props) {
         </div>
       )}
       {!renderError && (
-        <div className="canvas-3d-controls" style={{ minWidth: 200 }}>
+        <div className="canvas-3d-controls" style={{ minWidth: 174, width: 174 }}>
+        <span className="site-control-label">MODEL CONTROLS</span>
         <div className="group" role="group" aria-label="3D scope">
           <button
             type="button"
@@ -1126,6 +1244,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
         {singleFloor && floors.length > 0 && (
           <div className="group" role="group" aria-label="Floor">
             <select
+              aria-label="3D floor"
               value={floorId}
               onChange={(e) => setFloorId(e.target.value)}
               style={selectStyle}
@@ -1144,7 +1263,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
               value={systemId}
               onChange={(e) => setSystemId(e.target.value)}
               style={selectStyle}
-              title="Filter containment by system"
+              title="Filter installation by system" aria-label="3D system filter"
             >
               <option value="">All systems</option>
               {systems.map((s) => (
@@ -1171,7 +1290,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
             Walls
             <input
               type="range"
-              min={0.15}
+              min={0}
               max={1}
               step={0.05}
               value={wallOpacity}
@@ -1185,59 +1304,20 @@ export function SiteSceneViewer({ project, width, height }: Props) {
             Fit View
           </button>
         </div>
-        <div className="group walk-pad" role="group" aria-label="First-person movement">
-          <button
-            type="button"
-            className="walk-forward"
-            onClick={(e) => { if (e.detail === 0) moveWalk('forward'); }}
-            onPointerDown={() => startWalkHold('forward')}
-            onPointerUp={stopWalkHold}
-            onPointerLeave={stopWalkHold}
-            onPointerCancel={stopWalkHold}
-            title="Move forward"
-          >
-            ↑
-          </button>
-          <button
-            type="button"
-            className="walk-left"
-            onClick={(e) => { if (e.detail === 0) moveWalk('left'); }}
-            onPointerDown={() => startWalkHold('left')}
-            onPointerUp={stopWalkHold}
-            onPointerLeave={stopWalkHold}
-            onPointerCancel={stopWalkHold}
-            title="Move left"
-          >
-            ←
-          </button>
-          <button
-            type="button"
-            className="walk-back"
-            onClick={(e) => { if (e.detail === 0) moveWalk('back'); }}
-            onPointerDown={() => startWalkHold('back')}
-            onPointerUp={stopWalkHold}
-            onPointerLeave={stopWalkHold}
-            onPointerCancel={stopWalkHold}
-            title="Move back"
-          >
-            ↓
-          </button>
-          <button
-            type="button"
-            className="walk-right"
-            onClick={(e) => { if (e.detail === 0) moveWalk('right'); }}
-            onPointerDown={() => startWalkHold('right')}
-            onPointerUp={stopWalkHold}
-            onPointerLeave={stopWalkHold}
-            onPointerCancel={stopWalkHold}
-            title="Move right"
-          >
-            →
-          </button>
-        </div>
+        <div className="group"><select style={selectStyle} aria-label="3D progress filter" value={installationFilter} onChange={(event) => setInstallationFilter(event.target.value as InstallationFilter)}><option value="all">All installation states</option><option value="completed">Completed only</option><option value="in-progress">In progress only</option><option value="planned">Planned only</option></select></div>
+        <div className="group"><button onClick={() => setPanelsOpen((open) => !open)} className={panelsOpen ? 'active' : ''} aria-pressed={panelsOpen}>{panelsOpen ? 'Close board doors' : 'Open board doors'}</button><button onClick={() => setCoversOpen((open) => !open)} className={coversOpen ? 'active' : ''} aria-pressed={coversOpen}>{coversOpen ? 'Replace covers' : 'Remove covers'}</button></div>
+        <details className="site-controls-detail"><summary>Layers & inspection</summary>
+          <label><input type="checkbox" checked={showCables} onChange={(e) => setShowCables(e.target.checked)} />Routed cables</label>
+          <label><input type="checkbox" checked={showSupports} onChange={(e) => setShowSupports(e.target.checked)} />Supports & fixings</label>
+          <label><input type="checkbox" checked={showFirestops} onChange={(e) => setShowFirestops(e.target.checked)} />Fire-stop sleeves</label>
+          <label><input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} />Equipment labels</label>
+          {!singleFloor && <label>Separate floors<input type="range" aria-label="Separate floors" min={0} max={6000} step={500} value={floorSeparation} onChange={(e) => { setFloorSeparation(Number(e.target.value)); }} /></label>}
+          <button onClick={() => { const obj = activeSceneObject(); if (obj && cameraRef.current && orbitRef.current) placeWalkCamera(cameraRef.current, orbitRef.current, obj); }}>Walk at eye level</button>
+        </details>
         </div>
       )}
-    </>
+      </div>
+    </div>
   );
 }
 

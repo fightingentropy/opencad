@@ -16,8 +16,22 @@ OpenCAD Electrical is a browser-first design tool for cable containment systems 
 - **IFC import/export**, DXF underlay import, and COBie, Excel-compatible CSV, PDF, PNG and SVG exports
 - **Compliance dashboard** running project-wide checks against the active standards profile
 - **Multi-floor 3D building scene** with floor isolation, system filters and live cross-sections
+- **Installation workspace** with searchable components, progress colours, specifications, connected cables, site comments and a dated project timeline
+- **Detailed equipment and containment** with hinged board doors, DIN rails, breakers, busbars, cable glands, mechanical equipment, perforated trays, basket wires, support fixings and fire-stop sleeves
 
 ![3D site view](docs/screenshot-3d.png)
+
+## Inspect and record an installation
+
+Open **3D → Model explorer**, search a tag or filter by floor/type/status, and select a component. The inspector shows its dimensions, electrical ratings, system and connected cable records. **Focus in 3D** locates the part; **Isolate part** removes surrounding context. The model itself also supports click selection, including equipment, fittings, supports and penetration seals.
+
+The **Progress** view leaves completed parts in their full material colours. Planned parts are grey and in-progress parts are muted; neither state makes geometry transparent or changes its dimensions. **Materials** restores physical materials for inspection, while **Systems** helps trace services. Use **Open board doors**, **Remove covers**, and the layer controls to inspect internals, routed cables, fixings and fire stops. Project scope also supports separating floors. Legacy panel and single-sheet viewers have the same Progress/Materials states and part selection.
+
+Each component can be marked **Planned**, **In progress**, or **Completed** and given site comments. Changes appear in its history and in the **Timeline** tab, with event filters and earlier-event loading. Undo/redo works in 3D. Status and comments travel with the entity through autosave, project JSON export/import and the existing collaboration transport. Viewers cannot write installation records. Regenerating routes preserves matched accessory identities and history; recorded accessories that no longer match are retained as manual parts for review. Reload migrations preserve recorded parts and their geometry.
+
+Equipment internals are representative procedural models, not manufacturer-certified CAD or a circuit assembly schedule. Sizes, ratings, route elevations, cable assignments and seal records come from the project; missing catalogue/manufacturer details are not inferred as verified. Conduit needs an explicit elevation to be exposed in the site view. Automatically generated hanger assemblies that physically clash with a route are omitted from the rendered scene and retain their records for coordination; this is not a substitute for a support design check. Fire-stop geometry illustrates the recorded opening and seal without certifying its installation. Installation completion is separate from electrical testing, approval or energisation.
+
+The bundled corporate sample includes dated **Demo team** progress and comments. Existing projects start unrecorded parts as planned and never receive those demonstration records. Activity history is stored per entity (up to 2,000 events and 4,000 characters per comment); the existing simultaneous same-entity collaboration conflict behaviour still applies.
 
 ## Try the demo
 

@@ -1,9 +1,9 @@
 // Parametric extruded 3D containment renderer.
 //
 // One ContainmentEntity → one THREE.Object3D (a Group). Horizontal
-// containment types extrude each polyline segment. Conduit is deliberately
-// not rendered as physical 3D geometry here because the plan polyline is a
-// routing aid, not a reliable wall/surface-mounted BIM path.
+// containment types use folded sheet, channel and wire cross-sections.
+// Explicitly elevated conduit routes become physical tubular runs; plan-only
+// route aids remain hidden unless the caller opts in.
 //
 // Supported containmentTypes: tray, ladder, basket, trunking, conduit,
 // duct, busbar. Sub-types apply visual variations (perforated tray,
@@ -18,6 +18,7 @@ import type {
 import type { SystemId } from '../models/site';
 import { defaultElevation } from './elevations';
 import type { Floor } from '../models/site';
+import { detailBoxes, finiteDimension, roundedRoute, solidBox, type DetailBox } from './ContainmentGeometry';
 
 // ---------- Material palette -------------------------------------------------
 
@@ -78,6 +79,12 @@ export interface RenderOpts {
   forceElevation?: number;
   /** Flip Y — pass `H` (sheet height in mm) when rendering CAD-y entities. */
   flipY?: number;
+  /** Construction detail budget. Overview keeps the same physical envelope. */
+  detail?: 'overview' | 'detailed';
+  /** Keep lids on trunking and covered tray. False exposes internal sections. */
+  showCovers?: boolean;
+  /** Render conduit even when its placement uses an inferred elevation. */
+  renderConduit?: boolean;
 }
 
 // ---------- Helpers ----------------------------------------------------------
@@ -154,7 +161,7 @@ function* iterSegments(points: { x: number; y: number }[], flipY?: number): Gene
     const dx = b.x - a.x;
     const dy = by - ay;
     const len = Math.hypot(dx, dy);
-    if (len < 1e-3) continue;
+    if (!Number.isFinite(len) || len < 1e-3) continue;
     yield {
       ax: a.x,
       ay,
@@ -170,370 +177,307 @@ function* iterSegments(points: { x: number; y: number }[], flipY?: number): Gene
 
 // ---------- Cross-section builders ------------------------------------------
 
-// Tray: open box (3 walls + bottom). subType 'perforated' adds slots, the
-// solid-bottom variant gets none.
-function buildTraySegment(
-  width: number,
-  height: number,
-  len: number,
-  mat: THREE.MeshStandardMaterial,
-  subType: string | undefined,
-): THREE.Group {
-  const wrap = new THREE.Group();
-  const tk = 2;
-  const bottom = new THREE.Mesh(new THREE.BoxGeometry(len, width, tk), mat);
-  bottom.position.z = -height / 2 + tk / 2;
-  bottom.castShadow = true;
-  bottom.receiveShadow = true;
-  wrap.add(bottom);
-  for (const sy of [-1, 1]) {
-    const side = new THREE.Mesh(new THREE.BoxGeometry(len, tk, height), mat);
-    side.position.set(0, sy * (width / 2 - tk / 2), 0);
-    side.castShadow = true;
-    side.receiveShadow = true;
-    wrap.add(side);
-  }
-  // Approximate perforations as a row of small dark stripes — visually
-  // sufficient at panel-overview scale. Skip for solid-bottom and
-  // return-flange (which is just a flange detail, not perforation).
-  if (subType !== 'solid-bottom' && subType !== 'return-flange') {
-    const slotMat = new THREE.MeshStandardMaterial({
-      color: 0x2a2e34,
-      metalness: 0.0,
-      roughness: 0.95,
-    });
-    const slotCount = Math.max(2, Math.floor(len / 60));
-    for (let k = 0; k < slotCount; k++) {
-      const slot = new THREE.Mesh(
-        new THREE.BoxGeometry(8, width * 0.55, 0.5),
-        slotMat,
-      );
-      slot.position.set(
-        -len / 2 + (k + 0.5) * (len / slotCount),
-        0,
-        -height / 2 + tk + 0.3,
-      );
-      wrap.add(slot);
-    }
-  }
-  // Return flange — a small inward lip at the top of each side rail.
-  if (subType === 'return-flange') {
-    const flangeMat = mat;
-    for (const sy of [-1, 1]) {
-      const flange = new THREE.Mesh(
-        new THREE.BoxGeometry(len, width * 0.1, tk),
-        flangeMat,
-      );
-      flange.position.set(
-        0,
-        sy * (width / 2 - tk / 2 - (width * 0.1) / 2),
-        height / 2 - tk / 2,
-      );
-      wrap.add(flange);
-    }
-  }
-  return wrap;
+function addBoxes(group: THREE.Group, parts: DetailBox[], mat: THREE.Material, name: string): void {
+  const instances = detailBoxes(parts, mat, name);
+  if (instances) group.add(instances);
 }
 
-// Ladder: side rails + rungs every 300 mm. Heavy-duty has thicker rails.
-function buildLadderSegment(
-  width: number,
-  height: number,
-  len: number,
-  mat: THREE.MeshStandardMaterial,
-  subType: string | undefined,
-): THREE.Group {
-  const wrap = new THREE.Group();
-  const isHeavy = subType === 'heavy-duty-ladder';
-  const railThk = isHeavy ? 4 : 2.5;
-  const railHeight = height;
-  for (const sy of [-1, 1]) {
-    const rail = new THREE.Mesh(
-      new THREE.BoxGeometry(len, railThk, railHeight),
-      mat,
-    );
-    rail.position.set(0, sy * (width / 2 - railThk / 2), 0);
-    rail.castShadow = true;
-    rail.receiveShadow = true;
-    wrap.add(rail);
+function addCover(group: THREE.Group, length: number, width: number, height: number, mat: THREE.Material, visible: boolean): void {
+  const cover = new THREE.Group();
+  cover.name = 'removable-cover';
+  cover.userData.containmentCover = true;
+  cover.visible = visible;
+  // Folded lid with down-turned edges, separate from the open body.
+  cover.add(solidBox(length, width + 4, 2, 0, 0, height / 2 + 1, mat));
+  for (const side of [-1, 1]) {
+    cover.add(solidBox(length, 2, 9, 0, side * (width / 2 + 1), height / 2 - 3.5, mat));
   }
-  // Rungs at fixed pitch.
-  const rungPitch = 300;
-  const rungCount = Math.max(2, Math.floor(len / rungPitch));
-  const rungThk = isHeavy ? 6 : 4;
-  for (let k = 0; k <= rungCount; k++) {
-    const rung = new THREE.Mesh(
-      new THREE.BoxGeometry(rungThk, width - railThk * 2, rungThk),
-      mat,
-    );
-    rung.position.set(-len / 2 + (k * len) / rungCount, 0, -height / 2 + rungThk / 2);
-    rung.castShadow = true;
-    wrap.add(rung);
-  }
-  return wrap;
+  group.add(cover);
 }
 
-// Basket: a low-profile tray. Keep the mesh detail understated in 3D;
-// cross wires read as stray rods in first-person views.
-function buildBasketSegment(
-  width: number,
-  height: number,
-  len: number,
-  mat: THREE.MeshStandardMaterial,
-): THREE.Group {
+function buildTraySegment(width: number, height: number, len: number, mat: THREE.MeshStandardMaterial, subType: string | undefined, detailed: boolean): THREE.Group {
   const wrap = new THREE.Group();
-  const tk = 1.5;
-  const flangeH = Math.min(height, 12);
-  const bottom = new THREE.Mesh(new THREE.BoxGeometry(len, width, tk), mat);
-  bottom.position.z = -height / 2 + tk / 2;
-  bottom.castShadow = true;
-  bottom.receiveShadow = true;
-  wrap.add(bottom);
-  for (const sy of [-1, 1]) {
-    const side = new THREE.Mesh(new THREE.BoxGeometry(len, tk, flangeH), mat);
-    side.position.set(0, sy * (width / 2 - tk / 2), -height / 2 + flangeH / 2);
-    wrap.add(side);
-  }
-  // Subtle longitudinal rails along the bottom. Do not add transverse
-  // wire rods here: from a walkthrough camera they look like random
-  // vertical pins through the tray.
-  const longCount = 4;
-  for (let r = 0; r < longCount; r++) {
-    const t = (r + 0.5) / longCount;
-    const y = -width / 2 + t * width;
-    const rail = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.7, 0.7, len, 6),
-      mat,
-    );
-    rail.rotation.z = Math.PI / 2;
-    rail.position.set(0, y, -height / 2 + tk + 0.7);
-    wrap.add(rail);
-  }
-  return wrap;
-}
-
-// Trunking: closed box with darker lid. Multi-compartment trunking gets
-// internal divider walls.
-function buildTrunkingSegment(
-  width: number,
-  height: number,
-  len: number,
-  mat: THREE.MeshStandardMaterial,
-  compartments: number | undefined,
-  baseColor: number,
-): THREE.Group {
-  const wrap = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.BoxGeometry(len, width, height), mat);
-  body.castShadow = true;
-  body.receiveShadow = true;
-  wrap.add(body);
-  // Darker lid on top
-  const lidColor = new THREE.Color(baseColor).multiplyScalar(0.55).getHex();
-  const lidMat = new THREE.MeshStandardMaterial({
-    color: lidColor,
-    metalness: 0.05,
-    roughness: 0.6,
-  });
-  const lid = new THREE.Mesh(
-    new THREE.BoxGeometry(len, width * 0.92, height * 0.12),
-    lidMat,
-  );
-  lid.position.z = height / 2 + (height * 0.12) / 2 - 0.5;
-  wrap.add(lid);
-  // Compartment dividers
-  if (compartments && compartments > 1) {
-    const divThk = 1.5;
-    for (let i = 1; i < compartments; i++) {
-      const t = i / compartments;
-      const y = -width / 2 + t * width;
-      const div = new THREE.Mesh(
-        new THREE.BoxGeometry(len, divThk, height * 0.85),
-        lidMat,
-      );
-      div.position.set(0, y, 0);
-      wrap.add(div);
-    }
-  }
-  return wrap;
-}
-
-// Duct: thick-walled box. Used for floor / underground duct runs.
-function buildDuctSegment(
-  width: number,
-  height: number,
-  len: number,
-  mat: THREE.MeshStandardMaterial,
-): THREE.Group {
-  const wrap = new THREE.Group();
-  // Outer shell
-  const outer = new THREE.Mesh(new THREE.BoxGeometry(len, width, height), mat);
-  outer.castShadow = true;
-  outer.receiveShadow = true;
-  wrap.add(outer);
-  // Hollow inner — slightly inset for a thick-walled appearance. We can't
-  // do CSG in three core, so we just darken the inside at the open ends
-  // by adding capped face tiles in a slot colour.
-  const slotMat = new THREE.MeshStandardMaterial({
-    color: 0x2a2e34,
-    metalness: 0.0,
-    roughness: 0.95,
-  });
-  for (const sx of [-1, 1]) {
-    const cap = new THREE.Mesh(
-      new THREE.BoxGeometry(2, width * 0.7, height * 0.7),
-      slotMat,
-    );
-    cap.position.set((sx * len) / 2, 0, 0);
-    wrap.add(cap);
-  }
-  return wrap;
-}
-
-// Busbar: a closed metal box, often with sandwich construction. We use
-// ExtrudeGeometry so the cap details (joints every metre) sit cleanly.
-function buildBusbarSegment(
-  width: number,
-  height: number,
-  len: number,
-  mat: THREE.MeshStandardMaterial,
-  subType: string | undefined,
-): THREE.Group {
-  const wrap = new THREE.Group();
-  const profile = new THREE.Shape();
-  profile.moveTo(-width / 2, -height / 2);
-  profile.lineTo(width / 2, -height / 2);
-  profile.lineTo(width / 2, height / 2);
-  profile.lineTo(-width / 2, height / 2);
-  profile.lineTo(-width / 2, -height / 2);
-  const ext = new THREE.ExtrudeGeometry(profile, {
-    depth: len,
-    bevelEnabled: false,
-  });
-  // Re-orient — ExtrudeGeometry extrudes along +Z; we want length on X.
-  ext.rotateY(Math.PI / 2);
-  ext.translate(-len / 2, 0, 0);
-  const body = new THREE.Mesh(ext, mat);
-  body.castShadow = true;
-  body.receiveShadow = true;
-  wrap.add(body);
-  // Joint covers every 1000 mm — a darker thin band wrapping the box.
-  if (subType !== 'plug-in-busbar') {
-    const jointMat = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(mat.color).multiplyScalar(0.4).getHex(),
-      metalness: 0.6,
-      roughness: 0.4,
-    });
-    const jointPitch = 1000;
-    const joints = Math.floor(len / jointPitch);
-    for (let k = 1; k <= joints; k++) {
-      const x = -len / 2 + k * jointPitch;
-      const j = new THREE.Mesh(
-        new THREE.BoxGeometry(8, width * 1.04, height * 1.04),
-        jointMat,
-      );
-      j.position.set(x, 0, 0);
-      wrap.add(j);
-    }
+  const tk = Math.min(2, height / 8, width / 12);
+  const floorZ = -height / 2 + tk / 2;
+  const perforated = subType !== 'solid-bottom' && subType !== 'return-flange' && detailed && width > 35 && len > 70;
+  if (!perforated) {
+    wrap.add(solidBox(len, width, tk, 0, 0, floorZ, mat, 'tray-bottom'));
   } else {
-    // Plug-in busbar — visible tap-off slots along the bottom.
-    const slotMat = new THREE.MeshStandardMaterial({
-      color: 0x2a2e34,
-      metalness: 0.0,
-      roughness: 0.95,
-    });
-    const slotPitch = 600;
-    const slots = Math.floor(len / slotPitch);
-    for (let k = 1; k <= slots; k++) {
-      const x = -len / 2 + k * slotPitch;
-      const s = new THREE.Mesh(
-        new THREE.BoxGeometry(40, width * 0.4, 4),
-        slotMat,
-      );
-      s.position.set(x, 0, -height / 2 - 0.5);
-      wrap.add(s);
+    // Open slots are negative space between continuous sheet bridges. This
+    // gives true through-holes and shadows without hundreds of CSG meshes.
+    const parts: DetailBox[] = [];
+    const rows = Math.max(1, Math.min(8, Math.floor(width / 65)));
+    const pitchY = width / rows;
+    const slotWidth = Math.min(12, pitchY * 0.23);
+    const count = Math.max(1, Math.min(100, Math.floor(len / 75)));
+    const pitchX = len / count;
+    const slotLength = Math.min(32, pitchX * 0.45);
+    for (let row = 0; row <= rows; row++) {
+      const bandWidth = row === 0 || row === rows ? (pitchY - slotWidth) / 2 : pitchY - slotWidth;
+      const y = row === 0 ? -width / 2 + bandWidth / 2
+        : row === rows ? width / 2 - bandWidth / 2 : -width / 2 + row * pitchY;
+      parts.push({ x: 0, y, z: floorZ, length: len, width: bandWidth, height: tk });
     }
+    for (let row = 0; row < rows; row++) {
+      const y = -width / 2 + (row + 0.5) * pitchY;
+      for (let k = 0; k <= count; k++) {
+        const bridgeLength = k === 0 || k === count ? (pitchX - slotLength) / 2 : pitchX - slotLength;
+        const x = k === 0 ? -len / 2 + bridgeLength / 2
+          : k === count ? len / 2 - bridgeLength / 2 : -len / 2 + k * pitchX;
+        parts.push({ x, y, z: floorZ, length: bridgeLength, width: slotWidth, height: tk });
+      }
+    }
+    addBoxes(wrap, parts, mat, 'perforated-tray-bottom');
+  }
+  const rails: DetailBox[] = [];
+  const lipWidth = Math.min(12, width * 0.1);
+  for (const side of [-1, 1]) {
+    rails.push({ x: 0, y: side * (width / 2 - tk / 2), z: 0, length: len, width: tk, height });
+    rails.push({ x: 0, y: side * (width / 2 - lipWidth / 2), z: height / 2 - tk / 2, length: len, width: lipWidth, height: tk });
+    if (detailed && height >= 40) {
+      // Formed longitudinal bead stiffens the thin side wall.
+      rails.push({ x: 0, y: side * (width / 2 + tk / 2), z: -height * 0.14, length: len, width: tk, height: 5 });
+    }
+  }
+  addBoxes(wrap, rails, mat, 'folded-tray-rails');
+  return wrap;
+}
+
+function buildLadderSegment(width: number, height: number, len: number, mat: THREE.MeshStandardMaterial, subType: string | undefined): THREE.Group {
+  const wrap = new THREE.Group();
+  const tk = subType === 'heavy-duty-ladder' ? 3 : 2;
+  const flange = Math.min(20, width * 0.12);
+  const parts: DetailBox[] = [];
+  for (const side of [-1, 1]) {
+    parts.push({ x: 0, y: side * (width / 2 - tk / 2), z: 0, length: len, width: tk, height });
+    for (const top of [-1, 1]) {
+      parts.push({ x: 0, y: side * (width / 2 - flange / 2), z: top * (height / 2 - tk / 2), length: len, width: flange, height: tk });
+    }
+  }
+  const count = Math.max(1, Math.min(128, Math.ceil(len / 300)));
+  const rungDepth = Math.min(20, height * 0.45);
+  const rungWidth = Math.min(35, len / count * 0.65);
+  for (let k = 0; k < count; k++) {
+    const x = -len / 2 + (k + 0.5) * len / count;
+    // A formed rung has a broad cable bearing face and two short webs.
+    parts.push({ x, y: 0, z: -height / 2 + rungDepth - tk / 2, length: rungWidth, width: width - tk * 2, height: tk });
+    for (const side of [-1, 1]) parts.push({ x: x + side * (rungWidth / 2 - tk / 2), y: 0, z: -height / 2 + rungDepth / 2, length: tk, width: width - tk * 2, height: rungDepth });
+  }
+  addBoxes(wrap, parts, mat, 'formed-ladder-rails-and-rungs');
+  return wrap;
+}
+
+function buildBasketSegment(width: number, height: number, len: number, mat: THREE.MeshStandardMaterial, detailed: boolean): THREE.Group {
+  const wrap = new THREE.Group();
+  const radius = Math.min(2.5, width / 30, height / 10);
+  const count = Math.max(2, Math.min(detailed ? 128 : 40, Math.ceil(len / (detailed ? 100 : 250))));
+  const longitudinal = Math.max(2, Math.min(14, Math.ceil(width / 50)));
+  const instances = new THREE.InstancedMesh(new THREE.CylinderGeometry(radius, radius, 1, 6), mat, count * 3 + longitudinal + 1 + 4);
+  const matrix = new THREE.Matrix4();
+  const quaternion = new THREE.Quaternion();
+  const axis = new THREE.Vector3(0, 1, 0);
+  let index = 0;
+  function wire(a: THREE.Vector3, b: THREE.Vector3): void {
+    const delta = b.clone().sub(a);
+    quaternion.setFromUnitVectors(axis, delta.clone().normalize());
+    matrix.compose(a.clone().add(b).multiplyScalar(0.5), quaternion, new THREE.Vector3(1, delta.length(), 1));
+    instances.setMatrixAt(index++, matrix);
+  }
+  const bottom = -height / 2 + radius;
+  const halfW = width / 2 - radius;
+  const top = height / 2 - radius;
+  for (let k = 0; k < count; k++) {
+    const x = -len / 2 + (k + 0.5) * len / count;
+    wire(new THREE.Vector3(x, -halfW, bottom), new THREE.Vector3(x, halfW, bottom));
+    for (const side of [-1, 1]) wire(new THREE.Vector3(x, side * halfW, bottom), new THREE.Vector3(x, side * halfW, top));
+  }
+  for (let k = 0; k <= longitudinal; k++) {
+    const y = -halfW + k * halfW * 2 / longitudinal;
+    wire(new THREE.Vector3(-len / 2, y, bottom), new THREE.Vector3(len / 2, y, bottom));
+  }
+  for (const side of [-1, 1]) for (const z of [top, bottom + (top - bottom) * 0.5]) {
+    wire(new THREE.Vector3(-len / 2, side * halfW, z), new THREE.Vector3(len / 2, side * halfW, z));
+  }
+  instances.name = 'welded-basket-wire';
+  instances.castShadow = true;
+  instances.receiveShadow = true;
+  instances.computeBoundingSphere();
+  instances.computeBoundingBox();
+  wrap.add(instances);
+  return wrap;
+}
+
+function buildTrunkingSegment(width: number, height: number, len: number, mat: THREE.MeshStandardMaterial, compartments: number | undefined, covers: boolean): THREE.Group {
+  const wrap = buildTraySegment(width, height, len, mat, 'solid-bottom', false);
+  const parts: DetailBox[] = [];
+  const count = Math.max(1, Math.min(8, Math.floor(finiteDimension(compartments, 1))));
+  for (let i = 1; i < count; i++) {
+    parts.push({ x: 0, y: -width / 2 + width * i / count, z: -3, length: len, width: 1.5, height: Math.max(1, height - 6) });
+  }
+  addBoxes(wrap, parts, mat, 'segregation-dividers');
+  addCover(wrap, len, width, height, mat, covers);
+  return wrap;
+}
+
+function buildDuctSegment(width: number, height: number, len: number, mat: THREE.MeshStandardMaterial): THREE.Group {
+  const wrap = new THREE.Group();
+  const tk = Math.min(8, width * 0.1, height * 0.1);
+  const parts: DetailBox[] = [];
+  for (const side of [-1, 1]) {
+    parts.push({ x: 0, y: 0, z: side * (height / 2 - tk / 2), length: len, width, height: tk });
+    parts.push({ x: 0, y: side * (width / 2 - tk / 2), z: 0, length: len, width: tk, height: height - tk * 2 });
+  }
+  addBoxes(wrap, parts, mat, 'hollow-duct-wall');
+  return wrap;
+}
+
+function buildBusbarSegment(width: number, height: number, len: number, mat: THREE.MeshStandardMaterial, subType: string | undefined, covers: boolean): THREE.Group {
+  const wrap = buildTrunkingSegment(width, height, len, mat, 1, covers);
+  const copper = new THREE.MeshStandardMaterial({ color: 0xb97643, metalness: 0.88, roughness: 0.27 });
+  const insulator = new THREE.MeshStandardMaterial({ color: 0x30373c, metalness: 0.02, roughness: 0.75 });
+  const phases: DetailBox[] = [];
+  const conductors = Math.min(5, Math.max(1, Math.floor(width / 14)));
+  for (let i = 0; i < conductors; i++) {
+    phases.push({ x: 0, y: (i - (conductors - 1) / 2) * width * 0.7 / conductors, z: -height * 0.05, length: len - 2, width: Math.min(6, width / 20), height: height * 0.55 });
+  }
+  addBoxes(wrap, phases, copper, 'busbar-copper-conductors');
+  const blocks: DetailBox[] = [];
+  const count = Math.max(1, Math.min(48, Math.ceil(len / 1000)));
+  for (let i = 0; i < count; i++) {
+    const x = -len / 2 + (i + 0.5) * len / count;
+    blocks.push({ x, y: 0, z: -height * 0.35, length: Math.min(45, len / count * 0.5), width: width * 0.8, height: height * 0.15 });
+    if (subType === 'plug-in-busbar') blocks.push({ x, y: 0, z: height / 2 + 5, length: Math.min(65, len / count * 0.5), width: width * 0.55, height: 8 });
+  }
+  addBoxes(wrap, blocks, insulator, 'busbar-insulators-and-tap-offs');
+  return wrap;
+}
+
+function addSplicePlates(wrap: THREE.Group, width: number, height: number, len: number, mat: THREE.MeshStandardMaterial, detailed: boolean): void {
+  if (len < 250 || height < 15) return;
+  const plates: DetailBox[] = [];
+  const boltPositions: THREE.Vector3[] = [];
+  const jointCount = Math.min(24, Math.max(0, Math.floor((len - 250) / 3000)));
+  // End connector plates also make short field-cut sections identifiable.
+  const positions = [-len / 2 + 85, ...Array.from({ length: jointCount }, (_, k) => -len / 2 + (k + 1) * 3000)];
+  for (const x of positions) for (const side of [-1, 1]) {
+    plates.push({ x, y: side * (width / 2 + 2), z: 0, length: 140, width: 3, height: height * 0.65 });
+    if (detailed) for (const dx of [-43, 43]) for (const dz of [-1, 1]) {
+      boltPositions.push(new THREE.Vector3(x + dx, side * (width / 2 + 5), dz * height * 0.19));
+    }
+  }
+  addBoxes(wrap, plates, mat, 'bolted-splice-plates');
+  if (!boltPositions.length) return;
+  const boltMat = new THREE.MeshStandardMaterial({ color: 0x646d73, metalness: 0.85, roughness: 0.3 });
+  const bolts = new THREE.InstancedMesh(new THREE.CylinderGeometry(4.5, 4.5, 4, 6), boltMat, boltPositions.length);
+  boltPositions.forEach((position, index) => bolts.setMatrixAt(index, new THREE.Matrix4().makeTranslation(position.x, position.y, position.z)));
+  bolts.name = 'splice-hex-bolts';
+  bolts.castShadow = true;
+  bolts.computeBoundingSphere();
+  bolts.computeBoundingBox();
+  wrap.add(bolts);
+}
+
+function buildConduit(containment: ContainmentEntity, opts: RenderOpts, diameter: number, baseZ: number, mat: THREE.MeshStandardMaterial): THREE.Group {
+  const wrap = new THREE.Group();
+  const radius = diameter / 2;
+  const curve = roundedRoute(containment.points, baseZ + radius, diameter * 3, opts.flipY);
+  if (!curve) return wrap;
+  const steps = Math.max(16, Math.min(512, Math.ceil(curve.getLength() / 100) + containment.points.length * 12));
+  const radial = opts.detail === 'overview' ? 8 : 16;
+  const shell = new THREE.Mesh(new THREE.TubeGeometry(curve, steps, radius, radial, false), mat);
+  shell.name = 'conduit-outer-wall';
+  shell.castShadow = true;
+  shell.receiveShadow = true;
+  wrap.add(shell);
+  const innerRadius = Math.max(radius * 0.65, radius - 2);
+  const insideMat = mat.clone();
+  insideMat.side = THREE.BackSide;
+  const inner = new THREE.Mesh(new THREE.TubeGeometry(curve, steps, innerRadius, radial, false), insideMat);
+  inner.name = 'conduit-inner-wall';
+  wrap.add(inner);
+  for (const t of [0, 1]) {
+    const rim = new THREE.Mesh(new THREE.RingGeometry(innerRadius, radius, radial), mat);
+    rim.position.copy(curve.getPointAt(t));
+    const tangent = curve.getTangentAt(t).multiplyScalar(t === 0 ? -1 : 1);
+    rim.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), tangent);
+    wrap.add(rim);
+  }
+  const joints = Math.min(32, Math.floor(curve.getLength() / 3000));
+  for (let i = 1; i <= joints; i++) {
+    const t = i / (joints + 1);
+    const coupling = new THREE.Mesh(new THREE.CylinderGeometry(radius + 2, radius + 2, Math.min(45, diameter * 1.4), radial, 1, true), mat);
+    coupling.name = 'conduit-coupling';
+    coupling.position.copy(curve.getPointAt(t));
+    coupling.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), curve.getTangentAt(t));
+    wrap.add(coupling);
   }
   return wrap;
 }
 
 // ---------- Public entry point ----------------------------------------------
 
-/**
- * Render a containment entity as a 3D group. Returns null only for
- * truly degenerate input (no points / zero-length).
- */
-export function renderContainment3D(
-  containment: ContainmentEntity,
-  opts: RenderOpts = {},
-): THREE.Object3D {
+/** Every returned group exclusively owns its geometries/materials. */
+export function renderContainment3D(containment: ContainmentEntity, opts: RenderOpts = {}): THREE.Object3D {
   const root = new THREE.Group();
   root.name = `containment:${containment.id}`;
-  if (!containment.points || containment.points.length < 2) {
-    tagPicking(root, containment.id);
-    return root;
-  }
-
-  const w = containment.width ?? 100;
-  const h = containment.height ?? 50;
-
-  if (containment.containmentType === 'conduit') {
-    tagPicking(root, containment.id);
-    return root;
-  }
-
+  tagPicking(root, containment.id);
+  if (!containment.points || containment.points.length < 2) return root;
+  const w = finiteDimension(containment.width, 100, 8);
+  const h = finiteDimension(containment.height, 50, 8);
+  const baseZ = Number.isFinite(opts.forceElevation) ? opts.forceElevation!
+    : defaultElevation(containment, opts.floor);
+  if (!Number.isFinite(baseZ)) return root;
+  const segments = [...iterSegments(containment.points, opts.flipY)];
+  if (!segments.length) return root;
+  if (containment.containmentType === 'conduit' && !opts.renderConduit
+    && !Number.isFinite(containment.elevation) && !Number.isFinite(opts.forceElevation)) return root;
   const colorSpec = pickColor(containment, opts);
   const baseMat = makeMat(colorSpec);
-
-  // Bottom-of-section Z elevation.
-  const baseZ =
-    typeof opts.forceElevation === 'number'
-      ? opts.forceElevation
-      : defaultElevation(containment, opts.floor);
-
-  for (const seg of iterSegments(containment.points, opts.flipY)) {
-    let segGroup: THREE.Group | null = null;
-    let centerZ = baseZ + h / 2;
-
-    switch (containment.containmentType) {
-      case 'tray':
-        segGroup = buildTraySegment(w, h, seg.len, baseMat, containment.subType);
-        break;
-      case 'ladder':
-        segGroup = buildLadderSegment(w, h, seg.len, baseMat, containment.subType);
-        break;
-      case 'basket':
-        segGroup = buildBasketSegment(w, h, seg.len, baseMat);
-        break;
-      case 'trunking':
-        segGroup = buildTrunkingSegment(
-          w,
-          h,
-          seg.len,
-          baseMat,
-          containment.compartments,
-          colorSpec.color,
-        );
-        break;
-      case 'duct':
-        segGroup = buildDuctSegment(w, h, seg.len, baseMat);
-        break;
-      case 'busbar':
-        segGroup = buildBusbarSegment(w, h, seg.len, baseMat, containment.subType);
-        break;
+  if (containment.containmentType === 'conduit') {
+    root.add(buildConduit(containment, opts, w, baseZ, baseMat));
+  } else {
+    const detailed = opts.detail !== 'overview';
+    for (const seg of segments) {
+      let body: THREE.Group;
+      switch (containment.containmentType) {
+        case 'tray':
+          body = buildTraySegment(w, h, seg.len, baseMat, containment.subType, detailed);
+          break;
+        case 'ladder':
+          body = buildLadderSegment(w, h, seg.len, baseMat, containment.subType);
+          break;
+        case 'basket':
+          body = buildBasketSegment(w, h, seg.len, baseMat, detailed);
+          break;
+        case 'trunking':
+          body = buildTrunkingSegment(w, h, seg.len, baseMat, containment.compartments, opts.showCovers !== false);
+          break;
+        case 'duct':
+          body = buildDuctSegment(w, h, seg.len, baseMat);
+          break;
+        case 'busbar':
+          body = buildBusbarSegment(w, h, seg.len, baseMat, containment.subType, opts.showCovers !== false);
+          break;
+        default: continue;
+      }
+      if (containment.containmentType !== 'duct') addSplicePlates(body, w, h, seg.len, baseMat, detailed);
+      body.name = 'containment-section';
+      body.position.set(seg.cx, seg.cy, baseZ + h / 2);
+      body.rotation.z = seg.heading;
+      root.add(body);
     }
-
-    if (!segGroup) continue;
-    segGroup.position.set(seg.cx, seg.cy, centerZ);
-    segGroup.rotation.z = seg.heading;
-    root.add(segGroup);
   }
-
   tagPicking(root, containment.id);
   return root;
 }
 
-// Re-export for callers that want to pre-resolve a colour without running
-// the renderer.
+/** Toggle tagged removable lids without rebuilding geometry or losing picking. */
+export function setContainmentCoversOpen(object: THREE.Object3D, open: boolean): void {
+  object.traverse((child) => {
+    if (child.userData.containmentCover) child.visible = !open;
+  });
+}
+
 export function colourFor(c: ContainmentEntity, opts: RenderOpts = {}): number {
   return pickColor(c, opts).color;
 }
