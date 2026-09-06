@@ -5,7 +5,7 @@
 // continues to render the legacy panel/single-floor scenes; this viewer
 // shows the whole site (all buildings + all floors stacked at ffl).
 //
-// SceneControls are wired to a small floating toolbar:
+// SceneControls are wired to a docked viewport toolbar:
 //   - Single Floor / Whole Site toggle
 //   - Floor isolation drop-down
 //   - System filter drop-down
@@ -38,6 +38,7 @@ import { useStore } from '../state/store';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { entitySceneRoots, sceneEntities, type InstallationAppearance, type InstallationFilter } from './InstallationAppearance';
 import { installationEntityLabel } from '../models/installation';
+import './site-workspace.css';
 
 interface Props {
   project: Project;
@@ -409,6 +410,7 @@ const disposeSelectionHelper = (helper: THREE.BoxHelper): void => {
 export function SiteSceneViewer({ project, width, height }: Props) {
   const selection = useStore((s) => s.editor.selection);
   const mountRef = useRef<HTMLDivElement>(null);
+  const displayMenuRef = useRef<HTMLDetailsElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -449,6 +451,25 @@ export function SiteSceneViewer({ project, width, height }: Props) {
   // Bumped to force a scene rebuild from the live project. We rebuild
   // when the underlying site / building / floor / sheets change.
   const [resetTick, setResetTick] = useState(0);
+
+  useEffect(() => {
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      const menu = displayMenuRef.current;
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      const menu = displayMenuRef.current;
+      if (event.key !== 'Escape' || !menu?.open) return;
+      menu.open = false;
+      menu.querySelector('summary')?.focus();
+    };
+    window.addEventListener('pointerdown', closeOnOutsidePress);
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('pointerdown', closeOnOutsidePress);
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
 
   useEffect(() => {
     projectRef.current = project;
@@ -554,8 +575,8 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     const initialH = mount.clientHeight || height || 600;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xd4dde1);
-    scene.fog = new THREE.Fog(0xd4dde1, 90000, 240000);
+    scene.background = new THREE.Color(0xe3e5e7);
+    scene.fog = new THREE.Fog(0xe3e5e7, 90000, 240000);
     sceneRef.current = scene;
 
     // Camera with z-up so vertical riser lengths read correctly.
@@ -1192,142 +1213,164 @@ export function SiteSceneViewer({ project, width, height }: Props) {
   };
 
   return (
-    <div className="site-workspace">
-      <div className="site-view-header"><div className="site-view-title"><i />Installation model <small>{singleFloor ? project.floors?.[floorId]?.name : 'Whole project'} · 3D</small></div>
-        <div className="site-view-mode" aria-label="Model appearance">{(['progress', 'materials', 'systems'] as const).map((mode) => <button key={mode} className={appearance === mode ? 'active' : ''} aria-pressed={appearance === mode} onClick={() => setAppearance(mode)}>{mode === 'progress' ? 'Progress' : mode === 'materials' ? 'Materials' : 'Systems'}</button>)}</div>
+    <div className={`site-workspace${width < 850 ? ' site-workspace-compact' : ''}${width < 620 ? ' site-workspace-narrow' : ''}`}>
+      <div className="site-view-header" role="toolbar" aria-label="3D model controls">
+        <div className="site-view-title">
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="m10 1.8 7 4v8.4l-7 4-7-4V5.8l7-4Z M3 5.8l7 4 7-4 M10 9.8v8.4" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
+          </svg>
+          <span>3D model</span>
+        </div>
+        {!renderError && <>
+          <div className="site-scope-control" role="group" aria-label="3D scope">
+            <button type="button" className={viewScope === 'site' ? 'active' : ''}
+              aria-pressed={viewScope === 'site'} onClick={() => setViewScope('site')} title="Frame the full project">Project</button>
+            <button type="button" className={viewScope === 'floor' ? 'active' : ''}
+              aria-pressed={viewScope === 'floor'} onClick={() => setViewScope('floor')} title="Inspect one floor">Floor</button>
+          </div>
+          {singleFloor && floors.length > 0 && (
+            <div className="site-floor-control" role="group" aria-label="Floor">
+              <select aria-label="3D floor" value={floorId} onChange={(event) => setFloorId(event.target.value)}>
+                {floors.map((floor) => <option key={floor.id} value={floor.id}>L{floor.level} · {floor.name}</option>)}
+              </select>
+            </div>
+          )}
+          {width < 620 ? (
+            <select className="site-appearance-select" aria-label="Model appearance" value={appearance}
+              onChange={(event) => setAppearance(event.target.value as InstallationAppearance)}>
+              <option value="progress">Progress</option>
+              <option value="materials">Materials</option>
+              <option value="systems">Systems</option>
+            </select>
+          ) : <div className="site-view-mode" role="group" aria-label="Model appearance">
+            {(['progress', 'materials', 'systems'] as const).map((mode) => (
+              <button type="button" key={mode} className={appearance === mode ? 'active' : ''}
+                aria-pressed={appearance === mode} onClick={() => setAppearance(mode)}>
+                {mode === 'progress' ? 'Progress' : mode === 'materials' ? 'Materials' : 'Systems'}
+              </button>
+            ))}
+          </div>}
+          <div className="site-view-actions">
+            <div role="group" aria-label="Reset view">
+              <button type="button" className="site-toolbar-button" onClick={handleResetView} title="Frame the active 3D view">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M1.5 5V1.5H5 M11 1.5h3.5V5 M14.5 11v3.5H11 M5 14.5H1.5V11 M5 5h6v6H5V5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
+                </svg>
+                Fit View
+              </button>
+            </div>
+            <details className="site-controls-detail" ref={displayMenuRef}>
+              <summary title="Layers & inspection">
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M2 4h12 M2 8h12 M2 12h12" stroke="currentColor" strokeWidth="1.2" />
+                  <path d="M5 2.5v3 M11 6.5v3 M6 10.5v3" stroke="currentColor" strokeWidth="2.4" />
+                </svg>
+                Display
+                <svg className="site-menu-chevron" width="9" height="9" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+                  <path d="m2 3.5 3 3 3-3" stroke="currentColor" strokeWidth="1.2" />
+                </svg>
+              </summary>
+              <div className="site-display-panel">
+                <div className="site-display-section">
+                  <div className="site-control-label">Layers & inspection</div>
+                  <div className="site-layer-controls">
+                    <label><input type="checkbox" checked={showCables} onChange={(event) => setShowCables(event.target.checked)} />Routed cables</label>
+                    <label><input type="checkbox" checked={showSupports} onChange={(event) => setShowSupports(event.target.checked)} />Supports & fixings</label>
+                    <label><input type="checkbox" checked={showFirestops} onChange={(event) => setShowFirestops(event.target.checked)} />Fire-stop sleeves</label>
+                    <label><input type="checkbox" checked={showLabels} onChange={(event) => setShowLabels(event.target.checked)} />Equipment labels</label>
+                  </div>
+                  <div className="site-inspection-controls">
+                    <button type="button" onClick={() => setPanelsOpen((open) => !open)} className={panelsOpen ? 'active' : ''}
+                      aria-pressed={panelsOpen}>{panelsOpen ? 'Close board doors' : 'Open board doors'}</button>
+                    <button type="button" onClick={() => setCoversOpen((open) => !open)} className={coversOpen ? 'active' : ''}
+                      aria-pressed={coversOpen}>{coversOpen ? 'Replace covers' : 'Remove covers'}</button>
+                  </div>
+                </div>
+                <div className="site-display-section">
+                  <div className="site-control-label">Visibility</div>
+                  {systems.length > 0 && (
+                    <label className="site-setting-row">
+                      <span>System</span>
+                      <select value={systemId} onChange={(event) => setSystemId(event.target.value)}
+                        title="Filter installation by system" aria-label="3D system filter">
+                        <option value="">All systems</option>
+                        {systems.map((system) => <option key={system.id} value={system.id}>{system.name}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  <label className="site-setting-row">
+                    <span>Progress</span>
+                    <select aria-label="3D progress filter" value={installationFilter}
+                      onChange={(event) => setInstallationFilter(event.target.value as InstallationFilter)}>
+                      <option value="all">All installation states</option>
+                      <option value="completed">Completed only</option>
+                      <option value="in-progress">In progress only</option>
+                      <option value="planned">Planned only</option>
+                    </select>
+                  </label>
+                  <div className="site-setting-row" role="group" aria-label="Wall opacity">
+                    <label htmlFor="site-wall-opacity" title="Wall transparency">Walls</label>
+                    <div className="site-range-control">
+                      <input id="site-wall-opacity" type="range" aria-label="Wall opacity" min={0} max={1} step={0.05}
+                        value={wallOpacity} onChange={(event) => setWallOpacity(parseFloat(event.target.value))} />
+                      <output htmlFor="site-wall-opacity">{Math.round(wallOpacity * 100)}%</output>
+                    </div>
+                  </div>
+                  {!singleFloor && (
+                    <div className="site-setting-row">
+                      <label htmlFor="site-floor-separation">Floor spacing</label>
+                      <div className="site-range-control">
+                        <input id="site-floor-separation" type="range" aria-label="Separate floors" min={0} max={6000} step={500}
+                          value={floorSeparation} onChange={(event) => setFloorSeparation(Number(event.target.value))} />
+                        <output htmlFor="site-floor-separation">{floorSeparation / 1000} m</output>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="site-display-section site-walk-setting">
+                  <button type="button" onClick={() => {
+                    const object = activeSceneObject();
+                    if (object && cameraRef.current && orbitRef.current) placeWalkCamera(cameraRef.current, orbitRef.current, object);
+                    if (displayMenuRef.current) displayMenuRef.current.open = false;
+                  }}>Walk at eye level</button>
+                  <span>WASD or arrow keys</span>
+                </div>
+              </div>
+            </details>
+          </div>
+        </>}
       </div>
       <div className="site-viewport">
-      <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
-      {renderError && <div className="canvas-3d-fallback">{renderError}</div>}
-      {!renderError && (
-        <div className="canvas-3d-overlay">
-          Drag to orbit · scroll to zoom · click a part to inspect · WASD to walk
-        </div>
-      )}
-      {!renderError && appearance === 'progress' && <div className="site-status-legend"><span><i className="status-dot completed" />Completed · full colour</span><span><i className="status-dot in-progress" />In progress</span><span><i className="status-dot planned" />Planned</span></div>}
-      {isolatedId && <div className="site-selection-banner">Isolated component<button onClick={() => { setIsolatedId(null); sceneControlsRef.current?.isolateEntity(null); handleResetView(); }}>Show context</button></div>}
-      {!renderError && hoverInfo && (
-        <div
-          className="canvas-3d-tooltip"
-          style={{ left: hoverInfo.x, top: hoverInfo.y }}
-        >
-          <div className="title">{hoverInfo.title}</div>
-          {hoverInfo.rows.map((row) => (
-            <div className="row" key={`${row.label}:${row.value}`}>
-              <span>{row.label}</span>
-              <strong>{row.value}</strong>
-            </div>
-          ))}
-        </div>
-      )}
-      {!renderError && (
-        <div className="canvas-3d-controls" style={{ minWidth: 174, width: 174 }}>
-        <span className="site-control-label">MODEL CONTROLS</span>
-        <div className="group" role="group" aria-label="3D scope">
-          <button
-            type="button"
-            className={viewScope === 'site' ? 'active' : ''}
-            onClick={() => setViewScope('site')}
-            title="Frame the full project"
-          >
-            Project
-          </button>
-          <button
-            type="button"
-            className={viewScope === 'floor' ? 'active' : ''}
-            onClick={() => setViewScope('floor')}
-            title="Inspect one floor"
-          >
-            Floor
-          </button>
-        </div>
-        {singleFloor && floors.length > 0 && (
-          <div className="group" role="group" aria-label="Floor">
-            <select
-              aria-label="3D floor"
-              value={floorId}
-              onChange={(e) => setFloorId(e.target.value)}
-              style={selectStyle}
-            >
-              {floors.map((f) => (
-                <option key={f.id} value={f.id}>
-                  L{f.level} · {f.name}
-                </option>
-              ))}
-            </select>
+        <div ref={mountRef} className="site-render-surface" />
+        {renderError && <div className="canvas-3d-fallback">{renderError}</div>}
+        {isolatedId && (
+          <div className="site-selection-banner">
+            <span>Isolated component</span>
+            <button type="button" onClick={() => { setIsolatedId(null); sceneControlsRef.current?.isolateEntity(null); handleResetView(); }}>Show context</button>
           </div>
         )}
-        {systems.length > 0 && (
-          <div className="group" role="group" aria-label="System filter">
-            <select
-              value={systemId}
-              onChange={(e) => setSystemId(e.target.value)}
-              style={selectStyle}
-              title="Filter installation by system" aria-label="3D system filter"
-            >
-              <option value="">All systems</option>
-              {systems.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+        {!renderError && hoverInfo && (
+          <div className="canvas-3d-tooltip" style={{ left: hoverInfo.x, top: hoverInfo.y }}>
+            <div className="title">{hoverInfo.title}</div>
+            {hoverInfo.rows.map((row) => (
+              <div className="row" key={`${row.label}:${row.value}`}><span>{row.label}</span><strong>{row.value}</strong></div>
+            ))}
           </div>
         )}
-        <div className="group" role="group" aria-label="Wall opacity">
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '4px 8px',
-              fontSize: 10,
-              color: '#e6e8ec',
-              fontFamily: 'var(--font-mono)',
-            }}
-            title="Wall transparency"
-          >
-            Walls
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={wallOpacity}
-              onChange={(e) => setWallOpacity(parseFloat(e.target.value))}
-              style={{ width: 90 }}
-            />
-          </label>
-        </div>
-        <div className="group" role="group" aria-label="Reset view">
-          <button type="button" onClick={handleResetView} title="Frame the active 3D view">
-            Fit View
-          </button>
-        </div>
-        <div className="group"><select style={selectStyle} aria-label="3D progress filter" value={installationFilter} onChange={(event) => setInstallationFilter(event.target.value as InstallationFilter)}><option value="all">All installation states</option><option value="completed">Completed only</option><option value="in-progress">In progress only</option><option value="planned">Planned only</option></select></div>
-        <div className="group"><button onClick={() => setPanelsOpen((open) => !open)} className={panelsOpen ? 'active' : ''} aria-pressed={panelsOpen}>{panelsOpen ? 'Close board doors' : 'Open board doors'}</button><button onClick={() => setCoversOpen((open) => !open)} className={coversOpen ? 'active' : ''} aria-pressed={coversOpen}>{coversOpen ? 'Replace covers' : 'Remove covers'}</button></div>
-        <details className="site-controls-detail"><summary>Layers & inspection</summary>
-          <label><input type="checkbox" checked={showCables} onChange={(e) => setShowCables(e.target.checked)} />Routed cables</label>
-          <label><input type="checkbox" checked={showSupports} onChange={(e) => setShowSupports(e.target.checked)} />Supports & fixings</label>
-          <label><input type="checkbox" checked={showFirestops} onChange={(e) => setShowFirestops(e.target.checked)} />Fire-stop sleeves</label>
-          <label><input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} />Equipment labels</label>
-          {!singleFloor && <label>Separate floors<input type="range" aria-label="Separate floors" min={0} max={6000} step={500} value={floorSeparation} onChange={(e) => { setFloorSeparation(Number(e.target.value)); }} /></label>}
-          <button onClick={() => { const obj = activeSceneObject(); if (obj && cameraRef.current && orbitRef.current) placeWalkCamera(cameraRef.current, orbitRef.current, obj); }}>Walk at eye level</button>
-        </details>
-        </div>
-      )}
       </div>
+      {!renderError && (
+        <div className="site-statusbar">
+          <span className="site-navigation-hint">Drag to orbit · scroll to zoom <span>· WASD to walk</span></span>
+          <span className="site-selection-status">{selection.size > 0 ? `${selection.size} selected` : 'Click a part to inspect'}</span>
+          {appearance === 'progress' ? (
+            <div className="site-status-legend" aria-label="Installation status legend">
+              <span><i className="site-status-mark completed" />Completed</span>
+              <span><i className="site-status-mark in-progress" />In progress</span>
+              <span><i className="site-status-mark planned" />Planned</span>
+            </div>
+          ) : <span className="site-appearance-status">{appearance === 'materials' ? 'Material finishes' : 'System colours'}</span>}
+        </div>
+      )}
     </div>
   );
 }
-
-const selectStyle: React.CSSProperties = {
-  background: 'transparent',
-  color: '#e6e8ec',
-  border: 0,
-  fontFamily: 'var(--font-mono)',
-  fontSize: 10,
-  padding: '4px 8px',
-  width: '100%',
-  outline: 'none',
-};

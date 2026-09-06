@@ -1,6 +1,7 @@
 import React from 'react';
 import { useStore } from '../state/store';
 import type { ToolId } from '../types';
+import { runCommand, shortcutHint } from '../lib/commands';
 
 // Partial because new whole-site tools (equipment, support, ...) don't all
 // have icons yet — those tools are surfaced from menus rather than the ribbon.
@@ -62,6 +63,10 @@ const TOOL_DEFS: { id: ToolId; label: string; group: string; key?: string }[] = 
 ];
 
 const GROUPS = ['Edit', 'Draw', 'Wire', 'Contain', 'Building', 'Place', 'Annot'];
+const GROUP_LABELS: Record<string, string> = {
+  Edit: 'Selection', Draw: 'Drawing', Wire: 'Electrical', Contain: 'Containment',
+  Building: 'Building', Place: 'Placement', Annot: 'Annotation',
+};
 
 export function Ribbon() {
   const tool = useStore((s) => s.editor.tool);
@@ -84,40 +89,64 @@ export function Ribbon() {
   const viewStackLen = useStore((s) => s.viewHistory.stack.length);
   const canViewBack = viewIndex > 0;
   const canViewForward = viewIndex < viewStackLen - 1;
+  const selectionSize = useStore((s) => s.editor.selection.size);
+  const clearSelection = useStore((s) => s.clearSelection);
+  const isModel = viewMode === '3d';
 
   return (
-    <div className="ribbon">
+    <div className={`ribbon${isModel ? ' ribbon-model' : ' ribbon-drawing'}`} role="toolbar" aria-label={isModel ? 'Model workspace commands' : 'Drawing commands'}>
       <div className="ribbon-group" data-group="View">
         <div className="ribbon-buttons">
-          <button className={`tool-btn${viewMode === '2d' ? ' active' : ''}`} onClick={() => setViewMode('2d')} title="2D schematic only">
+          <button type="button" className={`tool-btn${viewMode === '2d' ? ' active' : ''}`} aria-pressed={viewMode === '2d'} onClick={() => setViewMode('2d')} title="2D drawing workspace">
             <span className="icon">
               <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2"><rect x="3" y="5" width="18" height="14"/><path d="M7 9l4 4 6-6"/></svg>
             </span>
-            <span className="label">2D</span>
+            <span className="label">2D drawing</span>
           </button>
-          <button className={`tool-btn${viewMode === 'split' ? ' active' : ''}`} onClick={() => setViewMode('split')} title="Split view (2D + 3D)">
+          <button type="button" className={`tool-btn${viewMode === 'split' ? ' active' : ''}`} aria-pressed={viewMode === 'split'} onClick={() => setViewMode('split')} title="Split view (2D + 3D)">
             <span className="icon">
               <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2"><rect x="3" y="5" width="18" height="14"/><line x1="12" y1="5" x2="12" y2="19"/></svg>
             </span>
             <span className="label">Split</span>
           </button>
-          <button className={`tool-btn${viewMode === '3d' ? ' active' : ''}`} onClick={() => setViewMode('3d')} title="3D model only">
+          <button type="button" className={`tool-btn${viewMode === '3d' ? ' active' : ''}`} aria-pressed={viewMode === '3d'} onClick={() => setViewMode('3d')} title="3D model workspace">
             <span className="icon">
               <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg>
             </span>
-            <span className="label">3D</span>
+            <span className="label">3D model</span>
           </button>
         </div>
-        <div className="ribbon-group-label">View</div>
+        <div className="ribbon-group-label">Workspace</div>
       </div>
 
-      {GROUPS.map((g) => (
+      {isModel && (
+        <div className="ribbon-group" data-group="Inspect">
+          <div className="ribbon-buttons">
+            <button type="button" className={`tool-btn${tool === 'select' ? ' active' : ''}`} aria-pressed={tool === 'select'} onClick={() => setTool('select')} title="Select components in the model">
+              <span className="icon">{ICONS.select}</span><span className="label">Select</span>
+            </button>
+            <button type="button" className="tool-btn" onClick={() => runCommand('dialog.find-entity')} title={`Find a component (${shortcutHint('dialog.find-entity')})`}>
+              <span className="icon"><svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="1.7"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></span>
+              <span className="label">Find component</span>
+            </button>
+            <button type="button" className="tool-btn" onClick={clearSelection} disabled={selectionSize === 0} title="Clear the current selection">
+              <span className="icon"><svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="1.7"><rect x="4" y="4" width="16" height="16" strokeDasharray="3 3"/><path d="m8 8 8 8m0-8-8 8"/></svg></span>
+              <span className="label">Clear</span>
+            </button>
+          </div>
+          <div className="ribbon-group-label">Inspect</div>
+        </div>
+      )}
+
+      {!isModel && GROUPS.map((g) => (
         <div className="ribbon-group" key={g} data-group={g}>
           <div className="ribbon-buttons">
             {TOOL_DEFS.filter((t) => t.group === g).map((t) => (
               <button
                 key={t.id}
+                type="button"
                 className={`tool-btn${tool === t.id ? ' active' : ''}`}
+                aria-pressed={tool === t.id}
                 onClick={() => setTool(t.id)}
                 title={`${t.label}${t.key ? ` (${t.key})` : ''}`}
               >
@@ -140,7 +169,7 @@ export function Ribbon() {
               </button>
             )}
           </div>
-          <div className="ribbon-group-label">{g}</div>
+          <div className="ribbon-group-label">{GROUP_LABELS[g]}</div>
         </div>
       ))}
 
@@ -162,7 +191,7 @@ export function Ribbon() {
         <div className="ribbon-group-label">History</div>
       </div>
 
-      <div className="ribbon-group" data-group="Snap">
+      {!isModel && <div className="ribbon-group" data-group="Snap">
         <div className="ribbon-buttons">
           <button className={`tool-btn${ortho ? ' active' : ''}`} onClick={() => setOrtho(!ortho)} title="Ortho (F8)">
             <span className="icon">
@@ -190,9 +219,9 @@ export function Ribbon() {
           </button>
         </div>
         <div className="ribbon-group-label">Snap</div>
-      </div>
+      </div>}
 
-      <div className="ribbon-group" data-group="Nav">
+      {!isModel && <div className="ribbon-group" data-group="Nav">
         <div className="ribbon-buttons">
           <button
             className="tool-btn"
@@ -217,8 +246,10 @@ export function Ribbon() {
             <span className="label">Fwd</span>
           </button>
         </div>
-        <div className="ribbon-group-label">Nav</div>
-      </div>
+        <div className="ribbon-group-label">View history</div>
+      </div>}
+
+      {isModel && <div className="ribbon-context">Installation workspace</div>}
 
     </div>
   );

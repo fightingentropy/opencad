@@ -15,23 +15,19 @@ function SaveIndicator() {
   if (status === 'error') {
     return (
       <span
-        className="status-section status-save"
-        style={{ color: 'var(--danger)' }}
-        title={`Autosave failed (${error ?? 'unknown error'}). Use File → Save to download a copy.${
-          lastSavedAt ? ` Last saved ${formatSaveTime(lastSavedAt)}.` : ''
-        }`}
+        className="status-section status-save status-save-error"
+        title={`Autosave failed (${error ?? 'unknown error'}). Use File → Save to download a copy.${lastSavedAt ? ` Last saved ${formatSaveTime(lastSavedAt)}.` : ''}`}
       >
-        NOT SAVED — {(error ?? 'save failed').toUpperCase()}
+        Not saved — {error ?? 'save failed'}
       </span>
     );
   }
   return (
-    <span className="status-section status-save" style={{ color: 'var(--text-mute)' }}>
-      {status === 'saving' && 'SAVING…'}
-      {status === 'saved' && lastSavedAt !== null && (
-        <>SAVED <span style={{ color: 'var(--text-dim)' }}>{formatSaveTime(lastSavedAt)}</span></>
-      )}
-      {(status === 'idle' || (status === 'saved' && lastSavedAt === null)) && 'AUTOSAVE'}
+    <span className="status-section status-save">
+      <span className={`save-indicator-dot${status === 'saving' ? ' saving' : ''}`} aria-hidden="true" />
+      {status === 'saving' && 'Saving…'}
+      {status === 'saved' && lastSavedAt !== null && <>Saved <span className="status-value">{formatSaveTime(lastSavedAt)}</span></>}
+      {(status === 'idle' || (status === 'saved' && lastSavedAt === null)) && 'Autosave'}
     </span>
   );
 }
@@ -44,54 +40,32 @@ export function StatusBar() {
   const setSnap = useStore((s) => s.setSnap);
   const c = editor.cursorSnap ?? editor.cursor;
   const totalEntities = Object.keys(sheet?.entities ?? {}).length;
+  const isModel = editor.viewMode === '3d';
 
   return (
-    <div className="status-bar">
-      <span className="status-section status-coords">
-        <span style={{ color: 'var(--text-mute)' }}>X</span>
-        <span style={{ color: 'var(--text)', minWidth: 64 }}>{c.x.toFixed(2)}</span>
-        <span style={{ color: 'var(--text-mute)' }}>Y</span>
-        <span style={{ color: 'var(--text)', minWidth: 64 }}>{c.y.toFixed(2)}</span>
-        <span style={{ color: 'var(--text-mute)' }}>{units}</span>
-      </span>
-      <span
-        className={`status-section status-snap ${editor.snap.enabled ? 'active' : ''}`}
-        onClick={() => setSnap({ enabled: !editor.snap.enabled })}
-        style={{ cursor: 'pointer' }}
-      >
-        SNAP {editor.snap.enabled ? 'ON' : 'OFF'}
-      </span>
-      <span
-        className={`status-section status-grid ${editor.snap.grid ? 'active' : ''}`}
-        onClick={() => setSnap({ grid: !editor.snap.grid })}
-        style={{ cursor: 'pointer' }}
-      >
-        GRID {editor.snap.gridSize}{units}
-      </span>
-      <span
-        className={`status-section status-ortho ${editor.ortho ? 'active' : ''}`}
-        onClick={() => setOrtho(!editor.ortho)}
-        style={{ cursor: 'pointer' }}
-      >
-        ORTHO {editor.ortho ? 'ON' : 'OFF'}
-      </span>
-      <span className="status-section status-tool">
-        TOOL <span style={{ color: 'var(--accent)' }}>{editor.tool.toUpperCase()}</span>
-      </span>
-      <span className="status-section status-sheet">
-        SHEET <span style={{ color: 'var(--accent)' }}>{sheet?.number}</span>
-      </span>
-      <span className="status-section status-entities">
-        ENTITIES {totalEntities}
-      </span>
-      <span className="status-section status-selection">
-        SEL {editor.selection.size}
-      </span>
+    <div className={`status-bar${isModel ? ' status-bar-model' : ''}`} aria-label="Workspace status">
+      {isModel ? (
+        <span className="status-section status-workspace">3D model</span>
+      ) : (
+        <>
+          <span className="status-section status-coords">
+            <span>X</span><span className="status-value">{c.x.toFixed(2)}</span>
+            <span>Y</span><span className="status-value">{c.y.toFixed(2)}</span>
+            <span>{units}</span>
+          </span>
+          <button type="button" className={`status-section status-snap${editor.snap.enabled ? ' active' : ''}`} aria-pressed={editor.snap.enabled} onClick={() => setSnap({ enabled: !editor.snap.enabled })} title="Toggle snapping (F9)">Snap {editor.snap.enabled ? 'on' : 'off'}</button>
+          <button type="button" className={`status-section status-grid${editor.snap.grid ? ' active' : ''}`} aria-pressed={editor.snap.grid} onClick={() => setSnap({ grid: !editor.snap.grid })} title="Toggle grid snapping (F7)">Grid <span className="status-value">{editor.snap.gridSize}</span>{units}</button>
+          <button type="button" className={`status-section status-ortho${editor.ortho ? ' active' : ''}`} aria-pressed={editor.ortho} onClick={() => setOrtho(!editor.ortho)} title="Toggle orthogonal drawing (F8)">Ortho {editor.ortho ? 'on' : 'off'}</button>
+          <span className="status-section status-tool">{editor.tool.replaceAll('-', ' ')}</span>
+        </>
+      )}
+      <span className="status-section status-sheet">Sheet <span className="status-value">{sheet?.number}</span></span>
+      <span className="status-section status-entities"><span className="status-value">{totalEntities}</span> {isModel ? 'components on sheet' : 'entities'}</span>
+      <span className="status-section status-selection"><span className="status-value">{editor.selection.size}</span> selected</span>
+      {isModel && <span className="status-message" title={editor.statusMessage}>{editor.statusMessage || 'Ready'}</span>}
       <span className="status-spacer" />
       <SaveIndicator />
-      <span className="status-section status-zoom" style={{ borderRight: 'none' }}>
-        Z{editor.viewport.zoom.toFixed(2)}× • {standard}
-      </span>
+      <span className="status-section status-zoom">{!isModel && <><span className="status-value">{editor.viewport.zoom.toFixed(2)}×</span><span>·</span></>}{units} · {standard}</span>
     </div>
   );
 }
