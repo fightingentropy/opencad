@@ -2,7 +2,8 @@ import type { CommandDef } from './commands';
 import { fuzzyScore, searchCommands } from './commands';
 import { getInsertableComponents, type InsertableComponent } from './component-library';
 import { getSymbol } from '../symbols';
-import type { Entity, Project, Sheet } from '../types';
+import type { EditorState, Entity, Project, Sheet } from '../types';
+import { toolPlacementComponent } from '../state/tool-actions';
 
 interface SearchFields {
   id: string;
@@ -42,10 +43,18 @@ export function buildWorkspaceSearchIndex(
   project: Project,
   components: readonly InsertableComponent[] = getInsertableComponents(project),
   commands: readonly CommandDef[] = searchCommands(''),
+  viewMode: EditorState['viewMode'] = '2d',
 ): WorkspaceSearchResult[] {
   const results: WorkspaceSearchResult[] = [];
+  const componentAliases = new Map<string, string>();
   for (const command of commands) {
     if (command.contextual || (command.isEnabled && !command.isEnabled()) || command.id === 'help.palette') continue;
+    const placement = command.id.startsWith('tool.')
+      ? toolPlacementComponent(project, viewMode, command.id.slice(5)) : undefined;
+    if (placement && components.some((component) => component.id === placement.id)) {
+      componentAliases.set(placement.id, command.title);
+      continue;
+    }
     results.push({
       id: `command:${command.id}`, kind: 'command', title: command.title, detail: '',
       keywords: `${command.category} ${command.id} run command`, identifiers: [command.id], command,
@@ -53,7 +62,8 @@ export function buildWorkspaceSearchIndex(
   }
   for (const component of components) results.push({
     id: `component:${component.id}`, kind: 'component', title: component.title, detail: component.detail,
-    keywords: `${component.keywords} add insert place component`, identifiers: component.identifiers ?? [], component,
+    keywords: `${component.keywords} ${componentAliases.get(component.id) ?? ''} add insert place component`,
+    identifiers: [...(component.identifiers ?? []), ...(componentAliases.has(component.id) ? [componentAliases.get(component.id)!] : [])], component,
   });
   for (const sheetId of orderedIds(project.sheetOrder, project.sheets)) {
     const sheet = project.sheets[sheetId];

@@ -1,6 +1,7 @@
 import { useStore } from '../state/store';
 import { fitViewportToSheet } from './fit';
 import type { ToolId } from '../types';
+import { activateTool } from '../state/tool-actions';
 
 // ---------------------------------------------------------------------------
 // Command registry — the single source of truth for every invokable action
@@ -194,7 +195,7 @@ const toolCommand = (
   shortcut: hotkey
     ? { display: hotkey.toUpperCase(), matches: bareKey(hotkey) }
     : undefined,
-  run: ({ store }) => store.setTool(tool),
+  run: () => activateTool(tool),
 });
 
 const uiCommand = (
