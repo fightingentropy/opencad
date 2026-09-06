@@ -14,6 +14,10 @@ import type { SymbolDef, Bounds } from '../types';
 import { transformSymbolPoint } from '../lib/hittest';
 import { entityBounds, boundsOverlap, inflateBounds } from '../lib/math';
 import { computeOrthogonalRoute } from '../lib/autoroute';
+import type { Cable } from '../models/cable';
+import { normalizeStandardsProfile } from '../models/standards';
+import { computeContainmentFill } from '../calc/fill';
+import { checkSegregation } from '../calc/segregation';
 
 export interface RenderOptions {
   width: number;
@@ -24,6 +28,8 @@ export interface RenderOptions {
   autoRoute?: boolean;
   /** When true, flip the default L-shape direction for the auto-route preview. */
   autoRouteFlip?: boolean;
+  /** Transient component ghost; never added to the sheet or hit testing. */
+  placementPreview?: Entity;
 }
 
 const SELECTION_COLOR = '#ffd84d';
@@ -152,17 +158,9 @@ export const render2d = (
 
   const layerVisible = (id: string) => project.layers[id]?.visible ?? true;
 
-  // Resolve filter / overlay state. These editor fields are optional —
-  // honored only when present on the EditorState (forward-compatible).
-  const editorAny = editor as unknown as Record<string, unknown>;
-  const phaseFilter = (editorAny.phaseFilter as string | undefined) ?? 'all';
-  const systemFilter = (editorAny.systemFilter as string | undefined) ?? 'all';
-  const complianceOverlay = editorAny.complianceOverlay as
-    | 'none'
-    | 'fill'
-    | 'segregation'
-    | 'support-spacing'
-    | undefined;
+  const phaseFilter = editor.phaseFilter ?? 'all';
+  const systemFilter = editor.systemFilter ?? 'all';
+  const complianceOverlay = editor.complianceOverlay ?? 'off';
 
   // Visible world rectangle — used to cull off-screen entities below.
   // screenToWorld is exactly the inverse of the world transform set above,
@@ -253,7 +251,6 @@ export const render2d = (
       isHovered,
       zoom: v.zoom,
       filteredOut,
-      complianceOverlay,
       project,
     });
 
@@ -263,13 +260,26 @@ export const render2d = (
 
   // Compliance overlay — applied after entities so the tint sits on top
   // of containment runs without leaking under labels.
-  if (complianceOverlay && complianceOverlay !== 'none') {
+  if (complianceOverlay !== 'off') {
     drawComplianceOverlay(ctx, sheet, project, complianceOverlay);
   }
 
   // Drafting preview
   if (editor.drafting) {
     drawDrafting(ctx, editor, opts);
+  }
+
+  if (opts.placementPreview) {
+    const preview = { ...opts.placementPreview, color: HOVER_COLOR };
+    const layer = project.layers[preview.layerId];
+    if (layer) {
+      ctx.save();
+      ctx.globalAlpha = 0.6;
+      drawEntity(ctx, preview, layer, opts, {
+        isSelected: false, isHovered: true, zoom: v.zoom, project,
+      });
+      ctx.restore();
+    }
   }
 
   // Symbol placement preview
@@ -455,7 +465,6 @@ type DrawState = {
   isHovered: boolean;
   zoom: number;
   filteredOut?: boolean;
-  complianceOverlay?: 'none' | 'fill' | 'segregation' | 'support-spacing';
   project?: Project;
 };
 
@@ -2403,20 +2412,13 @@ const drawComplianceOverlay = (
 ): void => {
   if (mode === 'support-spacing') return; // stub for now
 
-  // Try to access cable schedule and standards profile via untyped lookups so
-  // this works with both the current project shape and future extensions.
-  const projAny = project as unknown as Record<string, unknown>;
-  const schedule = projAny.cableSchedule as
-    | { cables?: Array<Record<string, unknown>> }
-    | undefined;
-  const cables = schedule?.cables ?? [];
-  const standards = projAny.standardsProfile;
+  const cables = Object.values(project.cableSchedule?.cables ?? {});
+  const standards = normalizeStandardsProfile(project.standardsProfile);
 
   // Map containmentId -> assigned cable list
-  const assigned = new Map<string, Array<Record<string, unknown>>>();
+  const assigned = new Map<string, Cable[]>();
   for (const c of cables) {
-    const route = (c.route as { containmentIds?: string[] } | undefined)?.containmentIds ?? [];
-    for (const cid of route) {
+    for (const cid of new Set(c.route)) {
       const arr = assigned.get(cid) ?? [];
       arr.push(c);
       assigned.set(cid, arr);
@@ -2425,18 +2427,20 @@ const drawComplianceOverlay = (
 
   for (const id of sheet.entityOrder) {
     const e = sheet.entities[id] as Entity | undefined;
-    if (!e || e.kind !== 'containment') continue;
-    const cont = e as import('../types').ContainmentEntity;
+    if (!e || e.kind !== 'containment' || !e.visible || project.layers[e.layerId]?.visible === false) continue;
+    const cont = e;
     const pts = cont.points;
     if (pts.length < 2) continue;
     const w = cont.width ?? 50;
 
     if (mode === 'fill') {
-      const fillRatio = computeContainmentFillSafe(cont, assigned.get(id) ?? [], standards);
-      if (fillRatio === null) continue;
+      const list = assigned.get(id) ?? [];
+      if (list.length === 0) continue;
+      const fill = computeContainmentFill(cont, list, standards);
+      if (fill.innerAreaMm2 <= 0 || !Number.isFinite(fill.fillPct)) continue;
       let tint = '#5fbf5f'; // green
-      if (fillRatio > 0.45) tint = '#ff5d5d';
-      else if (fillRatio >= 0.35) tint = '#ffb14d';
+      if (fill.fillStatus === 'over') tint = '#ff5d5d';
+      else if (fill.fillStatus === 'warning') tint = '#ffb14d';
 
       ctx.save();
       ctx.strokeStyle = tint;
@@ -2452,7 +2456,7 @@ const drawComplianceOverlay = (
       // Percentage label near the start
       drawWorldText(
         ctx,
-        `${Math.round(fillRatio * 100)}%`,
+        `${Math.round(fill.fillPct)}%`,
         pts[0].x,
         pts[0].y + w * 0.6,
         3,
@@ -2464,14 +2468,10 @@ const drawComplianceOverlay = (
       ctx.restore();
     } else if (mode === 'segregation') {
       const list = assigned.get(id) ?? [];
-      const cats = new Set<string>();
-      for (const c of list) {
-        const cat = (c.category as string | undefined) ?? (c.segregationGroup as string | undefined);
-        if (cat) cats.add(cat);
-      }
-      if (cats.size > 1) {
+      const segregation = checkSegregation(cont, list);
+      if (segregation.violations.length > 0) {
         ctx.save();
-        ctx.strokeStyle = '#ff5d5d';
+        ctx.strokeStyle = segregation.ok ? '#ffb14d' : '#ff5d5d';
         ctx.lineWidth = Math.max(1.0, w * 0.12);
         ctx.setLineDash([3, 2]);
         ctx.beginPath();
@@ -2483,30 +2483,4 @@ const drawComplianceOverlay = (
       }
     }
   }
-};
-
-/**
- * Best-effort fill computation. Tries to call computeContainmentFill from
- * '../calc/fill' if present in the project; otherwise falls back to a coarse
- * approximation derived from cable counts and outside diameters.
- */
-const computeContainmentFillSafe = (
-  cont: import('../types').ContainmentEntity,
-  cables: Array<Record<string, unknown>>,
-  _standards: unknown
-): number | null => {
-  if (cables.length === 0) return null;
-  const w = cont.width ?? 50;
-  const h = cont.height ?? w;
-  const containmentArea =
-    cont.containmentType === 'conduit'
-      ? Math.PI * (w / 2) * (w / 2)
-      : w * h;
-  if (containmentArea <= 0) return null;
-  let cableArea = 0;
-  for (const c of cables) {
-    const od = (c.outsideDiameter as number | undefined) ?? (c.od as number | undefined) ?? 8;
-    cableArea += Math.PI * (od / 2) * (od / 2);
-  }
-  return Math.min(2, cableArea / containmentArea);
 };

@@ -1,13 +1,13 @@
 /* OpenCAD Electrical — neutral CAD workstation shell. */
 :root {
-  --bg-0: #e8ebee;
-  --bg-1: #f4f5f6;
-  --bg-2: #eceef0;
-  --bg-3: #e3e7eb;
-  --bg-4: #d5dce3;
+  --bg-0: #f1f3f5;
+  --bg-1: #fbfcfd;
+  --bg-2: #f5f6f8;
+  --bg-3: #edf0f3;
+  --bg-4: #dce2e8;
   --bg-5: #b8c2cb;
-  --border: #cbd0d5;
-  --border-light: #b8c0c8;
+  --border: #e2e6eb;
+  --border-light: #d2d9e1;
   --text: #28313b;
   --text-dim: #5c6671;
   --text-mute: #6c7680;
@@ -59,7 +59,7 @@ button {
   color: var(--text);
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: 3px;
+  border-radius: 6px;
   transition: background 0.12s, border-color 0.12s;
 }
 
@@ -123,8 +123,8 @@ input[type=color] {
 /* App layout */
 .app {
   display: grid;
-  grid-template-rows: 32px 52px minmax(0, 1fr) 26px;
-  grid-template-columns: 220px 1fr 280px;
+  grid-template-rows: 48px 40px minmax(0, 1fr) 24px;
+  grid-template-columns: var(--sidebar-width, 228px) minmax(0, 1fr) var(--inspector-width, 280px);
   grid-template-areas:
     "menu menu menu"
     "ribbon ribbon ribbon"
@@ -136,152 +136,53 @@ input[type=color] {
   color: var(--text);
 }
 
+.app.installation-mode {
+  grid-template-rows: 48px minmax(0, 1fr) 24px;
+  grid-template-areas: "menu menu menu" "left main right" "status status status";
+}
+.app.hide-left { --sidebar-width: 0px; }
+.app.hide-right { --inspector-width: 0px; }
+.app.hide-left > .left-panel, .app.hide-right > .right-panel { display: none; }
 .menu-bar {
   grid-area: menu;
   display: flex;
   align-items: center;
   min-width: 0;
-  padding: 0 10px;
-  background: #252b32;
-  color: #edf0f3;
-  border-bottom: 1px solid #1d2329;
-  gap: 2px;
-  font-size: 12px;
-}
-
-.menu-brand {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  gap: 7px;
-  margin-right: 20px;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-
-.menu-brand .logo {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: 1px solid #677787;
-  border-radius: 2px;
-  color: #d9e2ea;
-  background: #303a44;
-}
-
-.brand-discipline { color: #b8c2cc; font-weight: 400; }
-
-.menu-item {
-  padding: 4px 9px;
-  border: 1px solid transparent;
-  border-radius: 2px;
-  color: #dce2e8;
-  font-size: 12px;
-  font-weight: 400;
-  cursor: pointer;
-  position: relative;
-}
-.menu-item:hover, .menu-item.open {
-  background: #39424c;
-  border-color: #4a5663;
-}
-.menu-spacer { flex: 1; min-width: 8px; }
-.menu-info {
-  display: flex;
-  align-items: center;
+  padding: 0 12px;
+  background: #fff;
+  border-bottom: 1px solid var(--border);
   gap: 12px;
-  min-width: 0;
-  color: #d1d8df;
-  font-size: 11px;
+  font-size: 12px;
+  z-index: 55;
 }
-.menu-project-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.menu-project-meta { color: #a6b0bb; flex-shrink: 0; }
-.menu-command-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 14px;
-  margin-left: 14px;
-  padding: 3px 7px;
-  color: #d8e0e7;
-  border: 1px solid #4d5966;
-  border-radius: 2px;
-  font-size: 11px;
-  flex-shrink: 0;
-}
-.menu-command-button:hover { background: #3b4550; border-color: #758496; }
-.menu-command-button kbd { color: #acb9c6; font-family: var(--font-sans); font-size: 10px; }
-.menu-bar .context-menu { color: var(--text); background: var(--bg-1); }
-
-.ribbon {
-  grid-area: ribbon;
-  display: flex;
-  align-items: center;
-  background: #303740;
-  border-bottom: 1px solid #242b33;
-  padding: 3px 6px;
-  gap: 2px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: thin;
-}
-.ribbon-group {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  border-right: 1px solid #4c5661;
-  padding: 0 8px;
-  gap: 3px;
-  flex-shrink: 0;
-}
-.ribbon-group[data-group="View"] {
-  position: sticky;
-  left: 0;
-  z-index: 5;
-  background: #303740;
-}
-.ribbon-group:last-child { border-right: none; }
-.ribbon-group-label {
-  display: block;
-  font-size: 10px;
-  line-height: 10px;
-  font-weight: 400;
-  color: #adb7c1;
-  white-space: nowrap;
-}
-.ribbon-buttons { display: flex; gap: 2px; }
-.tool-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-  min-width: 28px;
-  height: 28px;
-  border-radius: 2px;
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-dim);
-  transition: background 0.12s, border-color 0.12s;
-}
-.tool-btn:hover { background: var(--bg-3); color: var(--text); }
-.tool-btn.active { background: #e4ecf5; color: var(--accent); border-color: var(--accent); box-shadow: none; }
-.tool-btn .icon { display: inline-flex; align-items: center; font-size: 17px; line-height: 1; }
+.menu-item { display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 4px; font-weight: 600; border-radius: 6px; }
+.menu-item > svg:first-child { color: #526c86; }
+.menu-item > svg:last-child { color: #8b95a0; }
+.menu-item:hover, .menu-item.open { background: var(--bg-3); border-color: transparent; }
+.menu-project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #7c8793; border-left: 1px solid var(--border); padding-left: 14px; max-width: 260px; min-width: 40px; }
+.menu-spacer { flex: 1; min-width: 0; }
+.menu-command-button { display: inline-flex; align-items: center; gap: 8px; width: 222px; flex-shrink: 0; height: 30px; padding: 0 9px; color: #818b96; border: 1px solid #e9ecf0; border-radius: 7px; background: #f7f8fa; font-size: 11px; }
+.menu-command-button:hover { background: #f0f3f6; border-color: #d8dfe7; }
+.menu-command-button kbd { margin-left: auto; font-family: var(--font-sans); font-size: 10px; color: #929ba5; }
+.menu-history, .menu-panels { display: flex; align-items: center; gap: 2px; }
+.header-icon { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; padding: 0; color: #6e7a87; border-radius: 6px; }
+.header-icon:hover { border-color: transparent; }
+.header-icon[aria-pressed=true] { color: #455f7a; }
+.header-view-switch { display: flex; align-items: center; background: #f0f2f5; border-radius: 7px; padding: 2px; flex-shrink: 0; }
+.header-view-switch button { display: inline-flex; align-items: center; justify-content: center; font-size: 10px; padding: 0; width: 30px; height: 26px; color: #7c8793; border: 0; border-radius: 5px; }
+.header-view-switch button[aria-pressed=true] { color: #34495f; background: #fff; box-shadow: 0 1px 3px #26384b14; }
+.menu-bar .context-menu { color: var(--text); background: #fff; }
+.menu-bar .app-menu { width: 240px; padding: 5px; border-radius: 10px; box-shadow: 0 12px 40px #1c29321c; }
+.menu-bar .context-menu .item { width: 100%; border: 0; border-radius: 5px; text-align: left; padding: 8px 10px; white-space: nowrap; }
+.menu-bar .context-menu .submenu { min-width: 245px; padding: 5px; border-radius: 8px; }
+.ribbon { grid-area: ribbon; display: flex; align-items: center; justify-content: center; background: #fbfcfd; border-bottom: 1px solid var(--border); padding: 4px 8px; gap: 4px; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.ribbon-divider { height: 18px; width: 1px; background: var(--border); margin: 0 6px; flex-shrink: 0; }
+.tool-btn { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; padding: 4px; min-width: 30px; height: 30px; border-radius: 6px; cursor: pointer; background: transparent; border: 1px solid transparent; color: var(--text-dim); }
+.tool-btn:hover { background: var(--bg-3); color: var(--text); border-color: transparent; }
+.tool-btn.active { background: #e9eff7; color: var(--accent); border-color: transparent; }
+.tool-btn .icon { display: inline-flex; align-items: center; }
 .tool-btn .icon svg { width: 18px; height: 18px; }
-.tool-btn .label { display: none; font-size: 11px; font-weight: 400; white-space: nowrap; }
-.ribbon .tool-btn { color: #d2dae2; }
-.ribbon .tool-btn:hover { color: #fff; background: #424d5a; border-color: #566473; }
-.ribbon .tool-btn.active { color: #fff; background: var(--accent); border-color: var(--accent); }
-.ribbon .tool-btn:disabled { opacity: 0.35; }
-.ribbon .tool-btn:disabled:hover { background: transparent; border-color: transparent; }
-.ribbon-model .tool-btn, .ribbon-group[data-group="View"] .tool-btn { gap: 5px; padding: 4px 7px; }
-.ribbon-model .tool-btn .label, .ribbon-group[data-group="View"] .tool-btn .label { display: inline; }
-.ribbon-context { margin-left: auto; padding: 0 14px; color: #a8b4c0; white-space: nowrap; font-size: 11px; }
+.tool-btn .label { display: none; }
 
 .tool-btn-small {
   display: inline-flex;
@@ -336,8 +237,8 @@ input[type=color] {
 
 .status-bar {
   grid-area: status;
-  background: #e8ebee;
-  border-top: 1px solid #c5ccd3;
+  background: #fbfcfd;
+  border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
   min-width: 0;
@@ -356,7 +257,7 @@ input[type=color] {
   gap: 5px;
   padding: 0 10px;
   border: 0;
-  border-right: 1px solid #cbd2d9;
+  border-right: 1px solid var(--border);
   border-radius: 0;
   height: 100%;
   font-size: inherit;
@@ -393,9 +294,9 @@ button.status-section:hover { background: #dce2e8; border-right-color: #bbc6d1; 
   display: flex;
   align-items: center;
   padding: 6px 10px;
-  background: var(--bg-2);
+  background: transparent;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   text-transform: none;
   letter-spacing: 0;
   color: var(--text-dim);
@@ -413,6 +314,14 @@ button.status-section:hover { background: #dce2e8; border-right-color: #bbc6d1; 
   overflow-y: auto;
   padding: 6px 0;
 }
+
+/* Secondary editing panels stay out of the way until needed. */
+.panel-disclosure { border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.panel-disclosure > summary { padding: 11px 12px; color: #77838f; font-size: 11px; cursor: pointer; }
+.panel-disclosure > .panel-section { border-bottom: 0; }
+.library-add-button { display: flex; align-items: center; gap: 8px; margin: 12px 10px; padding: 8px; text-align: left; font-size: 11px; color: #65788c; }
+.library-add-button kbd { margin-left: auto; color: #96a0ac; font-family: var(--font-sans); font-size: 10px; }
+.properties-empty { padding: 16px 12px; color: #87929d; font-size: 11px; line-height: 1.6; }
 
 /* Layer list */
 .layer-row {
@@ -1289,7 +1198,7 @@ button.status-section:hover { background: #dce2e8; border-right-color: #bbc6d1; 
    ============================================================ */
 @media (max-width: 900px) {
   .app {
-    grid-template-rows: 36px 48px minmax(0, 1fr) 26px;
+    grid-template-rows: 48px 40px minmax(0, 1fr) 24px;
     grid-template-columns: 1fr;
     grid-template-areas:
       "menu"
@@ -1301,10 +1210,8 @@ button.status-section:hover { background: #dce2e8; border-right-color: #bbc6d1; 
   .menu-bar {
     padding: 0 8px;
     font-size: 12px;
-    overflow-x: auto;
-    /* Hide the scrollbar for a tidier mobile look but keep horizontal
-       scrolling so users can still reach items beyond the right edge. */
-    scrollbar-width: none;
+    gap: 7px;
+    overflow: visible;
   }
   .menu-bar::-webkit-scrollbar { display: none; }
   .menu-brand { margin-right: 8px; flex-shrink: 0; }
@@ -1312,8 +1219,17 @@ button.status-section:hover { background: #dce2e8; border-right-color: #bbc6d1; 
      side-by-side on a 375px viewport. The ⌬ logo carries enough identity
      on its own; the wordmark hides below 480px. */
   .menu-brand .logo { font-size: 16px; }
-  .menu-info { display: none; }
-  .menu-command-button { display: none; }
+  .menu-project-name { display: none; }
+  .menu-command-button { display: inline-flex; width: 32px; padding: 0; justify-content: center; }
+  .menu-command-button span, .menu-command-button kbd { display: none; }
+  .menu-bar .app-menu { max-width: calc(100vw - 24px); max-height: calc(100dvh - 65px); overflow-y: auto; }
+  .menu-bar .context-menu .submenu { position: static; box-shadow: none; border: 0; background: #f7f8fa; min-width: 0; width: 100%; margin-top: 5px; }
+  .menu-bar .submenu-anchor { flex-wrap: wrap; }
+  .header-split { display: none !important; }
+  .menu-panels { display: none; }
+  .app.installation-mode { grid-template-areas: "menu" "main" "status"; }
+  .installation-mode .left-panel, .installation-mode .right-panel { top: 48px; }
+  .installation-mode .drawer-backdrop { top: 48px; }
   .ribbon-context { display: none; }
   .menu-item { flex-shrink: 0; }
 
@@ -1343,8 +1259,8 @@ button.status-section:hover { background: #dce2e8; border-right-color: #bbc6d1; 
   .left-panel,
   .right-panel {
     position: fixed;
-    top: 84px; /* menu + ribbon */
-    bottom: 26px; /* status */
+    top: 88px; /* menu + ribbon */
+    bottom: 24px; /* status */
     width: min(86vw, 320px);
     z-index: 40;
     box-shadow: var(--shadow-lg);
@@ -1983,9 +1899,9 @@ button.status-section:hover { background: #dce2e8; border-right-color: #bbc6d1; 
   display: flex;
   gap: 6px;
   padding: 6px 10px;
-  background: var(--bg-2);
+  background: transparent;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-dim);
@@ -2224,115 +2140,6 @@ button.status-section:hover { background: #dce2e8; border-right-color: #bbc6d1; 
     right: 8px;
     bottom: auto;
   }
-}
-
-/* ============================================================
-   COMMAND PALETTE (⌘K)
-   ============================================================ */
-.cmdk-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 12vh;
-  z-index: 150; /* above modal backdrops (100), below toasts (200) */
-}
-
-.cmdk {
-  width: 560px;
-  max-width: calc(100vw - 32px);
-  background: var(--bg-1);
-  border: 1px solid var(--border-light);
-  border-radius: 3px;
-  box-shadow: var(--shadow-lg);
-  overflow: hidden;
-}
-
-.cmdk-input {
-  width: 100%;
-  background: var(--bg-2);
-  border: none;
-  border-bottom: 1px solid var(--border);
-  color: var(--text);
-  font-family: var(--font-sans);
-  font-size: 14px;
-  padding: 12px 14px;
-  outline: none;
-  caret-color: var(--accent);
-}
-
-.cmdk-input::placeholder { color: var(--text-mute); }
-
-.cmdk-list {
-  max-height: 46vh;
-  overflow-y: auto;
-  padding: 4px 0;
-}
-
-.cmdk-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 14px;
-  font-size: 12px;
-  cursor: pointer;
-  color: var(--text);
-}
-
-.cmdk-item.active { background: var(--bg-3); }
-
-.cmdk-title {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.cmdk-cat {
-  margin-left: auto;
-  flex-shrink: 0;
-  color: var(--text-mute);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.cmdk-key {
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.cmdk-empty {
-  padding: 14px;
-  color: var(--text-mute);
-  font-size: 12px;
-  text-align: center;
-}
-
-/* Find-entity dialog (⌘F) — reuses the cmdk shell; these cover the extra
-   metadata spans (layer swatch, entity kind, sheet name). */
-.find-entity-swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  border: 1px solid var(--border-light);
-  flex-shrink: 0;
-}
-
-.find-entity-kind {
-  flex-shrink: 0;
-  color: var(--text-mute);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.find-entity-sheet {
-  margin-left: auto;
-  flex-shrink: 0;
-  color: var(--text-mute);
-  font-size: 10px;
 }
 
 /* ============================================================

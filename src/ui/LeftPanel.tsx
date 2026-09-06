@@ -1,4 +1,6 @@
 import React, { useState, useMemo } from 'react';
+import { AppIcon } from './AppIcon';
+import { runCommand } from '../lib/commands';
 import { useStore } from '../state/store';
 import { useActiveLayerId, useLayerOrder, useLayers } from '../state/selectors';
 import { CATEGORY_LABELS, searchSymbols, renderSymbolPreview, symbolsByCategory } from '../symbols';
@@ -8,8 +10,8 @@ import type { ContainmentType, SymbolCategory, ToolId, Layer } from '../types';
 export function LeftPanel({ open = false }: { open?: boolean } = {}) {
   return (
     <div className={`left-panel${open ? ' open' : ''}`}>
-      <ContainmentLibrary />
-      <SymbolLibrary />
+      <button type="button" className="library-add-button" onClick={() => runCommand('help.palette')}><AppIcon name="plus" size={17} /><span>Add component</span><kbd>⌘K</kbd></button>
+      <details className="panel-disclosure"><summary>Library</summary><ContainmentLibrary /><SymbolLibrary /></details>
       <Layers />
     </div>
   );

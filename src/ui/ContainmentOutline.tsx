@@ -2,6 +2,8 @@ import type { ContainmentEntity } from '../types';
 import { useStore } from '../state/store';
 import { focusInstallation } from './InstallationPanel';
 import './containment-workspace.css';
+import { AppIcon } from './AppIcon';
+import { runCommand } from '../lib/commands';
 
 const names: Record<string, string> = { tray: 'Cable tray', trunking: 'Trunking', basket: 'Wire basket' };
 const routeLength = (entity: ContainmentEntity) => entity.points.reduce((sum, point, i, points) =>
@@ -17,8 +19,7 @@ export function ContainmentOutline() {
   });
   const selected = routes.find((route) => selection.has(route.id));
   return <aside className="containment-outline" aria-label="Containment outline">
-    <div className="containment-outline-heading"><h1>Containment layout</h1><p>Open tops · dimensions in mm</p></div>
-    <div className="containment-outline-label">Routes <span>{routes.length}</span></div>
+    <div className="containment-outline-heading"><h1>Objects <span>{routes.length}</span></h1><button type="button" aria-label="Add component" title="Add component (⌘K)" onClick={() => runCommand('help.palette')}><AppIcon name="plus" size={17} /></button></div>
     <div className="containment-route-list">{routes.map((route) => <button
       type="button" key={route.id} aria-label={`Inspect ${names[route.containmentType]}`}
       aria-pressed={selection.has(route.id)} className={selection.has(route.id) ? 'selected' : ''}
@@ -31,17 +32,13 @@ export function ContainmentOutline() {
       <span><strong>{names[route.containmentType]}</strong><small>{route.width} × {route.height} mm</small></span>
     </button>)}</div>
     {selected ? <section className="containment-properties" aria-label="Route properties">
-      <div className="containment-outline-label">Selected route <button type="button" onClick={() => useStore.getState().clearSelection()} aria-label="Clear selection">×</button></div>
+      <div className="containment-outline-label"><span>Properties</span><span className="containment-property-actions"><button type="button" onClick={() => focusInstallation(selected.id)} aria-label="Focus route" title="Focus route"><AppIcon name="focus" size={15} /></button><button type="button" onClick={() => useStore.getState().clearSelection()} aria-label="Clear selection" title="Clear selection"><AppIcon name="close" size={15} /></button></span></div>
       <dl>
-        <div><dt>Type</dt><dd>{names[selected.containmentType]}</dd></div>
         <div><dt>Width</dt><dd>{selected.width} mm</dd></div>
         <div><dt>Depth</dt><dd>{selected.height} mm</dd></div>
-        <div><dt>Route length</dt><dd>{(routeLength(selected) / 1000).toFixed(2)} m</dd></div>
-        <div><dt>Finish</dt><dd>{selected.finish ? selected.finish.replaceAll('-', ' ') : 'Unspecified'}</dd></div>
-        <div><dt>Top</dt><dd>Open</dd></div>
+        <div><dt>Length</dt><dd>{(routeLength(selected) / 1000).toFixed(2)} m</dd></div>
+        {selected.finish ? <div><dt>Finish</dt><dd>{selected.finish.replaceAll('-', ' ')}</dd></div> : selected.material ? <div><dt>Material</dt><dd>{selected.material.replaceAll('-', ' ')}</dd></div> : null}
       </dl>
-      <button type="button" className="containment-focus" onClick={() => focusInstallation(selected.id)}>Focus route</button>
-    </section> : <p className="containment-selection-hint">Select a route to inspect its dimensions.</p>}
-    <div className="containment-outline-footer">Drag to orbit<br />Scroll to zoom · Right-drag to pan</div>
+    </section> : null}
   </aside>;
 }

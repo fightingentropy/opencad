@@ -69,15 +69,10 @@ export function RightPanel({ open = false }: { open?: boolean } = {}) {
   return (
     <div className={`right-panel${open ? ' open' : ''}`}>
       <Properties />
-      <CalculationsPanel />
-      <div className="panel-section">
-        <div className="panel-header">View Filters</div>
-        <PhaseFilter />
-        <SystemFilter />
-      </div>
-      <FillVisualizationOverlay />
-      <ReviewSection />
-      <ProjectInfo />
+      <details className="panel-disclosure"><summary>Calculations</summary><CalculationsPanel /><FillVisualizationOverlay /></details>
+      <details className="panel-disclosure"><summary>Filters</summary><PhaseFilter /><SystemFilter /></details>
+      <details className="panel-disclosure"><summary>Review</summary><ReviewSection /></details>
+      <details className="panel-disclosure"><summary>Project</summary><ProjectInfo /></details>
     </div>
   );
 }
@@ -134,22 +129,12 @@ function Properties() {
       <div className="panel-header">
         Properties
         <div className="panel-actions">
-          <span className="kbd">{sel.length} sel</span>
+          {sel.length > 1 && <span className="kbd">{sel.length}</span>}
         </div>
       </div>
       <div className="panel-body">
         {sel.length === 0 && (
-          <div style={{ padding: 16, color: 'var(--text-mute)', fontSize: 12, textAlign: 'center' }}>
-            <div style={{ marginBottom: 8 }}>Nothing selected</div>
-            <div style={{ fontSize: 11, lineHeight: 1.5 }}>
-              Click an entity to inspect or edit. Drag a selection box to multi-select.
-              <br />
-              <br />
-              Press <span className="kbd">R</span> to rotate symbols 90°.
-              <br />
-              Press <span className="kbd">Del</span> to delete.
-            </div>
-          </div>
+          <div className="properties-empty">Select an object to edit its properties.</div>
         )}
         {sel.length > 1 && (
           <div style={{ padding: 12 }}>
@@ -200,12 +185,9 @@ function SinglePropertiesEditor({ entity, onUpdate }: { entity: Entity; onUpdate
     <div style={{ padding: '8px 0' }}>
       <Section title="General">
         <Row label="Type">
-          <span style={{ color: 'var(--accent)', textTransform: 'uppercase', fontSize: 11, fontFamily: 'var(--font-mono)' }}>
+          <span style={{ color: 'var(--text-dim)', textTransform: 'capitalize', fontSize: 11 }}>
             {entity.kind}
           </span>
-        </Row>
-        <Row label="ID">
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-mute)' }}>{entity.id}</span>
         </Row>
         <Row label="Layer">
           <select

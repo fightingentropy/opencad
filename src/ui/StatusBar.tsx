@@ -1,6 +1,6 @@
 import React from 'react';
 import { useStore } from '../state/store';
-import { useActiveSheet, useProjectMeta } from '../state/selectors';
+import { useProjectMeta } from '../state/selectors';
 import { useSaveStatus } from '../state/save-status';
 
 const formatSaveTime = (ts: number): string =>
@@ -16,7 +16,7 @@ function SaveIndicator() {
     return (
       <span
         className="status-section status-save status-save-error"
-        title={`Autosave failed (${error ?? 'unknown error'}). Use File → Save to download a copy.${lastSavedAt ? ` Last saved ${formatSaveTime(lastSavedAt)}.` : ''}`}
+        title={`Autosave failed (${error ?? 'unknown error'}). Use OpenCAD → Save a copy to download a copy.${lastSavedAt ? ` Last saved ${formatSaveTime(lastSavedAt)}.` : ''}`}
       >
         Not saved — {error ?? 'save failed'}
       </span>
@@ -26,27 +26,23 @@ function SaveIndicator() {
     <span className="status-section status-save">
       <span className={`save-indicator-dot${status === 'saving' ? ' saving' : ''}`} aria-hidden="true" />
       {status === 'saving' && 'Saving…'}
-      {status === 'saved' && lastSavedAt !== null && <>Saved <span className="status-value">{formatSaveTime(lastSavedAt)}</span></>}
+      {status === 'saved' && lastSavedAt !== null && <span title={`Saved at ${formatSaveTime(lastSavedAt)}`}>Saved</span>}
       {(status === 'idle' || (status === 'saved' && lastSavedAt === null)) && 'Autosave'}
     </span>
   );
 }
 
 export function StatusBar() {
-  const { units, standard } = useProjectMeta();
-  const sheet = useActiveSheet();
+  const { units } = useProjectMeta();
   const editor = useStore((s) => s.editor);
   const setOrtho = useStore((s) => s.setOrtho);
   const setSnap = useStore((s) => s.setSnap);
   const c = editor.cursorSnap ?? editor.cursor;
-  const totalEntities = Object.keys(sheet?.entities ?? {}).length;
   const isModel = editor.viewMode === '3d';
 
   return (
     <div className={`status-bar${isModel ? ' status-bar-model' : ''}`} aria-label="Workspace status">
-      {isModel ? (
-        <span className="status-section status-workspace">3D model</span>
-      ) : (
+      {!isModel && (
         <>
           <span className="status-section status-coords">
             <span>X</span><span className="status-value">{c.x.toFixed(2)}</span>
@@ -59,13 +55,11 @@ export function StatusBar() {
           <span className="status-section status-tool">{editor.tool.replaceAll('-', ' ')}</span>
         </>
       )}
-      <span className="status-section status-sheet">Sheet <span className="status-value">{sheet?.number}</span></span>
-      <span className="status-section status-entities"><span className="status-value">{totalEntities}</span> {isModel ? 'components on sheet' : 'entities'}</span>
-      <span className="status-section status-selection"><span className="status-value">{editor.selection.size}</span> selected</span>
-      {isModel && <span className="status-message" title={editor.statusMessage}>{editor.statusMessage || 'Ready'}</span>}
+      {editor.selection.size > 0 && <span className="status-section status-selection"><span className="status-value">{editor.selection.size}</span> selected</span>}
+      {isModel && <span className="status-message" title={editor.statusMessage}>{editor.statusMessage}</span>}
       <span className="status-spacer" />
       <SaveIndicator />
-      <span className="status-section status-zoom">{!isModel && <><span className="status-value">{editor.viewport.zoom.toFixed(2)}×</span><span>·</span></>}{units} · {standard}</span>
+      <span className="status-section status-zoom">{!isModel && <><span className="status-value">{editor.viewport.zoom.toFixed(2)}×</span><span>·</span></>}{units}</span>
     </div>
   );
 }

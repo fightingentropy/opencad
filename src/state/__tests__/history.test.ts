@@ -68,6 +68,55 @@ describe('undo/redo round-trips', () => {
     expect(state().project).toBe(after);
   });
 
+  it('undoing insertion drops the removed selection and retains existing selected objects', () => {
+    state().addEntity(makeLine('existing'));
+    state().addEntity(makeLine('inserted'));
+    state().setSelection(['existing', 'inserted']);
+
+    state().undo();
+    expect(activeSheet().entities.inserted).toBeUndefined();
+    expect(state().editor.selection).toEqual(new Set(['existing']));
+
+    state().redo();
+    expect(activeSheet().entities.inserted).toBeDefined();
+    expect(state().editor.selection).toEqual(new Set(['existing']));
+  });
+
+  it('redoing deletion removes a restored object from selection without clearing surviving objects', () => {
+    state().addEntities([makeLine('existing'), makeLine('deleted')]);
+    state().setSelection(['existing', 'deleted']);
+    state().removeEntity('deleted');
+    expect(state().editor.selection).toEqual(new Set(['existing']));
+
+    state().undo();
+    expect(activeSheet().entities.deleted).toBeDefined();
+    expect(state().editor.selection).toEqual(new Set(['existing']));
+    state().setSelection(['existing', 'deleted']);
+    state().redo();
+    expect(activeSheet().entities.deleted).toBeUndefined();
+    expect(state().editor.selection).toEqual(new Set(['existing']));
+  });
+
+  it('reconciles against the restored active sheet even when a selected ID exists on another sheet', () => {
+    const firstSheetId = state().project.activeSheetId;
+    state().addEntity(makeLine('first-sheet-object'));
+    state().addSheet({ name: 'Other sheet' });
+    state().addEntity(makeLine('other-sheet-object'));
+    state().setSelection(['other-sheet-object']);
+    state().setProjectPatch({ activeSheetId: firstSheetId });
+    state().setSelection(['first-sheet-object']);
+
+    state().undo();
+    expect(activeSheet().name).toBe('Other sheet');
+    expect(state().project.sheets[firstSheetId].entities['first-sheet-object']).toBeDefined();
+    expect(state().editor.selection.size).toBe(0);
+
+    state().setSelection(['other-sheet-object']);
+    state().redo();
+    expect(state().project.activeSheetId).toBe(firstSheetId);
+    expect(state().editor.selection.size).toBe(0);
+  });
+
   it('addEntity / updateEntity / removeEntities round-trip', () => {
     state().addEntity(makeLine('e1'));
     expect(activeSheet().entities['e1']).toBeDefined();

@@ -1,14 +1,17 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   allCommands,
   clearRecentlyUsed,
   dispatchShortcut,
   fuzzyScore,
   markRecentlyUsed,
+  runCommand,
   searchCommands,
   shortcutHint,
+  subscribeTo3DViewCommands,
 } from '../commands';
 import { useStore } from '../../state/store';
+import { fitViewportToSheet } from '../fit';
 
 // Synthetic keyboard event — matchers only read key + modifier flags, so a
 // plain object stands in for a real KeyboardEvent under the node test env.
@@ -220,5 +223,71 @@ describe('dispatchShortcut', () => {
     // Empty selection disables edit.delete, so Delete falls through.
     useStore.getState().clearSelection();
     expect(dispatchShortcut(evt('Delete'))).toBe(false);
+  });
+});
+
+describe('view command routing', () => {
+  let editor: ReturnType<typeof useStore.getState>['editor'];
+  let unsubscribe: (() => void) | undefined;
+
+  beforeEach(() => {
+    editor = useStore.getState().editor;
+    vi.stubGlobal('window', Object.assign(new EventTarget(), { innerWidth: 1500, innerHeight: 900 }));
+    useStore.getState().setViewport({ x: 120, y: -80, zoom: 2 });
+  });
+
+  afterEach(() => {
+    unsubscribe?.();
+    unsubscribe = undefined;
+    vi.unstubAllGlobals();
+    useStore.setState({ editor });
+    clearRecentlyUsed();
+  });
+
+  it.each([
+    ['view.zoom-in', { type: 'zoom', factor: 1.25 }],
+    ['view.zoom-out', { type: 'zoom', factor: 0.8 }],
+    ['view.zoom-extents', { type: 'fit' }],
+  ])('routes %s to the 3D viewer without changing the saved 2D viewport', (id, command) => {
+    useStore.getState().setViewMode('3d');
+    const viewport = useStore.getState().editor.viewport;
+    const handler = vi.fn();
+    unsubscribe = subscribeTo3DViewCommands(handler);
+
+    expect(runCommand(id as string)).toBe(true);
+    expect(handler).toHaveBeenCalledExactlyOnceWith(command);
+    expect(useStore.getState().editor.viewport).toBe(viewport);
+  });
+
+  it.each(['2d', 'split'] as const)('keeps zoom and fit on the 2D canvas in %s mode', (mode) => {
+    useStore.getState().setViewMode(mode);
+    const handler = vi.fn();
+    unsubscribe = subscribeTo3DViewCommands(handler);
+
+    runCommand('view.zoom-in');
+    expect(useStore.getState().editor.viewport).toEqual({ x: 120, y: -80, zoom: 2.5 });
+    runCommand('view.zoom-out');
+    expect(useStore.getState().editor.viewport).toEqual({ x: 120, y: -80, zoom: 2 });
+    runCommand('view.zoom-extents');
+    const { project } = useStore.getState();
+    expect(useStore.getState().editor.viewport).toEqual(fitViewportToSheet(project.sheets[project.activeSheetId], 1000, 700));
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('removes the old viewer listener when its effect cleans up', () => {
+    useStore.getState().setViewMode('3d');
+    const oldViewer = vi.fn();
+    const nextViewer = vi.fn();
+    const stopOldViewer = subscribeTo3DViewCommands(oldViewer);
+    runCommand('view.zoom-in');
+    stopOldViewer();
+    unsubscribe = subscribeTo3DViewCommands(nextViewer);
+    runCommand('view.zoom-out');
+
+    expect(oldViewer).toHaveBeenCalledExactlyOnceWith({ type: 'zoom', factor: 1.25 });
+    expect(nextViewer).toHaveBeenCalledExactlyOnceWith({ type: 'zoom', factor: 0.8 });
+    unsubscribe();
+    runCommand('view.zoom-extents');
+    expect(nextViewer).toHaveBeenCalledTimes(1);
   });
 });

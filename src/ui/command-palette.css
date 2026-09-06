@@ -1,0 +1,91 @@
+.workspace-search-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: min(16vh, 144px) 20px 28px;
+  background: rgb(21 28 38 / 22%);
+  backdrop-filter: blur(3px);
+}
+.workspace-search-dialog {
+  width: 640px;
+  max-width: 100%;
+  max-height: min(680px, 80vh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgb(21 28 38 / 10%);
+  border-radius: 16px;
+  background: #fff;
+  color: #202630;
+  box-shadow: 0 24px 80px rgb(20 28 40 / 20%), 0 3px 12px rgb(20 28 40 / 6%);
+  font-family: var(--font-sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif);
+}
+.workspace-search-field {
+  min-height: 70px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 0 20px;
+  border-bottom: 1px solid #eceef1;
+}
+.workspace-search-field > svg { width: 22px; height: 22px; flex: 0 0 auto; color: #747c88; }
+.workspace-search-field input {
+  flex: 1;
+  width: 0;
+  padding: 20px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: #202630;
+  font: inherit;
+  font-size: 17px;
+  line-height: 1.4;
+  box-shadow: none;
+}
+.workspace-search-field input::placeholder { color: #8b919b; }
+.workspace-search-dialog kbd {
+  min-width: 19px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 5px;
+  border: 1px solid #e8eaee;
+  border-radius: 4px;
+  background: #fbfbfc;
+  color: #7b828d;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+.workspace-search-field > kbd { font-size: 11px; padding: 3px 6px; }
+.workspace-search-heading { padding: 15px 22px 6px; color: #727d89; font-size: 11px; font-weight: 500; }
+.workspace-search-results { flex: 1; min-height: 0; overflow-y: auto; padding: 7px 9px 9px; overscroll-behavior: contain; }
+.workspace-search-result { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 10px 12px; border-radius: 8px; cursor: pointer; }
+.workspace-search-result.is-active { background: #f1f4f8; }
+.workspace-search-icon { width: 20px; height: 20px; flex: 0 0 20px; color: #7b8491; }
+.workspace-search-icon svg { width: 100%; height: 100%; }
+.workspace-search-copy { display: flex; flex: 1; flex-direction: column; min-width: 0; gap: 3px; }
+.workspace-search-title { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; font-weight: 500; line-height: 1.4; }
+.workspace-search-detail { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #727d89; font-size: 11px; line-height: 1.35; }
+.workspace-search-action { flex: 0 0 auto; color: #6b7785; font-size: 10px; }
+.workspace-search-result.is-active .workspace-search-action { color: #536276; }
+.workspace-search-shortcut { flex: 0 0 auto; }
+.workspace-search-empty { min-height: 154px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 20px; text-align: center; }
+.workspace-search-empty strong { max-width: 100%; overflow-wrap: anywhere; font-size: 13px; font-weight: 500; }
+.workspace-search-empty span { color: #9299a3; font-size: 12px; }
+.workspace-search-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid #eceef1; padding: 11px 20px; color: #969ca5; font-size: 10px; }
+.workspace-search-footer > span:last-child { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.workspace-search-footer > span:last-child kbd:nth-of-type(3) { margin-left: 9px; }
+.workspace-search-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+@media (max-width: 640px) {
+  .workspace-search-backdrop { padding: 9vh 12px 20px; }
+  .workspace-search-dialog { max-height: 80dvh; border-radius: 13px; }
+  .workspace-search-field { padding: 0 16px; min-height: 64px; }
+  .workspace-search-field input { font-size: 16px; }
+  .workspace-search-footer { padding: 10px 16px; }
+  .workspace-search-footer > span:first-child { max-width: 50%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+}

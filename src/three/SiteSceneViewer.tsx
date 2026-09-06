@@ -35,10 +35,21 @@ import {
   type MeasurementRow,
 } from './measurements';
 import { useStore } from '../state/store';
+import { subscribeTo3DViewCommands } from '../lib/commands';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { entitySceneRoots, sceneEntities, type InstallationAppearance, type InstallationFilter } from './InstallationAppearance';
 import { installationEntityLabel } from '../models/installation';
 import { createHoverIntent, type HoverPoint } from './HoverIntent';
+import {
+  cancelComponentPlacement, commitComponentPlacement, componentPlacementPreview,
+  setComponentPlacementPosition, useComponentPlacement,
+} from '../state/component-placement';
+import { renderContainment3D } from './ContainmentRender3D';
+import { defaultElevation } from './elevations';
+import {
+  componentPreviewOffset, intersectComponentWorkplane, isPlacementClick,
+  trackPlacementPointer, type ComponentWorkplane, type PlacementPointer,
+} from './ComponentPlacement';
 import './site-workspace.css';
 
 interface Props {
@@ -415,6 +426,7 @@ const disposeSelectionHelper = (helper: THREE.BoxHelper): void => {
 
 export function SiteSceneViewer({ project, width, height, containmentOnly = false }: Props) {
   const selection = useStore((s) => s.editor.selection);
+  const placement = useComponentPlacement((state) => state.pending);
   const mountRef = useRef<HTMLDivElement>(null);
   const displayMenuRef = useRef<HTMLDetailsElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -851,7 +863,7 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     cancelHoverRef.current = cancelHover;
 
     const handlePointerMove = (event: PointerEvent): void => {
-      if (event.buttons !== 0 || event.pointerType === 'touch') {
+      if (useComponentPlacement.getState().pending || event.buttons !== 0 || event.pointerType === 'touch') {
         cancelHover();
         return;
       }
@@ -1063,6 +1075,140 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     if (sun instanceof THREE.DirectionalLight) sun.castShadow = !containmentOnly;
   }, [containmentOnly]);
 
+  useEffect(() => {
+    if (placement?.surface !== '3d') return;
+    const scene = sceneRef.current;
+    const camera = cameraRef.current;
+    const canvas = rendererRef.current?.domElement;
+    const orbit = orbitRef.current;
+    if (!scene || !camera || !canvas || !orbit) return;
+    const sheet = placement.project.sheets[placement.sheetId];
+    const floor = sheet?.floorId ? placement.project.floors?.[sheet.floorId] : undefined;
+    const buildingId = floor?.buildingId ?? sheet?.buildingId;
+    const building = buildingId ? placement.project.buildings?.[buildingId] : undefined;
+    const entity = componentPlacementPreview({ x: 0, y: 0 });
+    if (entity?.kind !== 'containment') return;
+    const workplane: ComponentWorkplane = {
+      originX: building?.gridOriginX ?? 0,
+      originY: building?.gridOriginY ?? 0,
+      floorElevation: floor?.ffl ?? 0,
+      componentElevation: defaultElevation(entity, floor),
+    };
+    // The preview is built once around its local origin. Pointer motion only
+    // translates it, so it cannot rebuild the installation or its materials.
+    const ghost = renderContainment3D(entity, { floor, showCovers: false });
+    ghost.name = 'component-placement-preview';
+    ghost.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return;
+      object.castShadow = false;
+      object.receiveShadow = false;
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+        if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+        material.color.setHex(0x629deb);
+        material.metalness = 0;
+        material.roughness = 0.8;
+        material.transparent = true;
+        material.opacity = 0.6;
+        material.depthWrite = false;
+      }
+    });
+    scene.add(ghost);
+    cancelHoverRef.current?.();
+    const previousCursor = canvas.style.cursor;
+    canvas.style.cursor = 'crosshair';
+    const raycaster = new THREE.Raycaster();
+    let pointer: PlacementPointer | null = null;
+    const initialRect = canvas.getBoundingClientRect();
+    let lastPointer = { clientX: initialRect.left + initialRect.width / 2, clientY: initialRect.top + initialRect.height / 2 };
+    const previewAtPointer = (): { x: number; y: number } | null => {
+      const rect = canvas.getBoundingClientRect();
+      const inside = lastPointer.clientX >= rect.left && lastPointer.clientX <= rect.right
+        && lastPointer.clientY >= rect.top && lastPointer.clientY <= rect.bottom;
+      if (!inside || rect.width === 0 || rect.height === 0) {
+        ghost.visible = false;
+        setComponentPlacementPosition(null);
+        return null;
+      }
+      raycaster.setFromCamera(new THREE.Vector2(
+        (lastPointer.clientX - rect.left) / rect.width * 2 - 1,
+        -(lastPointer.clientY - rect.top) / rect.height * 2 + 1,
+      ), camera);
+      const position = intersectComponentWorkplane(raycaster.ray, workplane);
+      if (position) {
+        const snap = useStore.getState().editor.snap;
+        if (snap.enabled && snap.grid && snap.gridSize > 0) {
+          position.x = Math.round(position.x / snap.gridSize) * snap.gridSize;
+          position.y = Math.round(position.y / snap.gridSize) * snap.gridSize;
+        }
+        ghost.position.copy(componentPreviewOffset(position, workplane));
+      }
+      ghost.visible = position != null;
+      setComponentPlacementPosition(position);
+      return position;
+    };
+    const onMove = (event: PointerEvent): void => {
+      lastPointer = event;
+      previewAtPointer();
+      if (pointer) {
+        trackPlacementPointer(pointer, event.clientX, event.clientY);
+        event.stopImmediatePropagation();
+      }
+    };
+    const onDown = (event: PointerEvent): void => {
+      if (event.button !== 0) return;
+      pointer = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, dragged: false };
+      lastPointer = event;
+      previewAtPointer();
+      canvas.setPointerCapture(event.pointerId);
+      event.preventDefault();
+      // Capture precedes both OrbitControls and normal entity selection.
+      event.stopImmediatePropagation();
+    };
+    const onUp = (event: PointerEvent): void => {
+      if (!pointer || pointer.pointerId !== event.pointerId) return;
+      const click = isPlacementClick(pointer, event.clientX, event.clientY, event.pointerId);
+      pointer = null;
+      lastPointer = event;
+      const position = previewAtPointer();
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+      if (click && position) commitComponentPlacement(position);
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    const onLeave = (): void => {
+      ghost.visible = false;
+      setComponentPlacementPosition(null);
+    };
+    const onCancel = (): void => { pointer = null; onLeave(); };
+    canvas.addEventListener('pointerdown', onDown, true);
+    canvas.addEventListener('pointermove', onMove, true);
+    canvas.addEventListener('pointerup', onUp, true);
+    canvas.addEventListener('pointercancel', onCancel, true);
+    canvas.addEventListener('pointerleave', onLeave);
+    orbit.addEventListener('change', previewAtPointer);
+    previewAtPointer();
+    return () => {
+      if (pointer && canvas.hasPointerCapture(pointer.pointerId)) canvas.releasePointerCapture(pointer.pointerId);
+      canvas.removeEventListener('pointerdown', onDown, true);
+      canvas.removeEventListener('pointermove', onMove, true);
+      canvas.removeEventListener('pointerup', onUp, true);
+      canvas.removeEventListener('pointercancel', onCancel, true);
+      canvas.removeEventListener('pointerleave', onLeave);
+      orbit.removeEventListener('change', previewAtPointer);
+      canvas.style.cursor = previousCursor;
+      scene.remove(ghost);
+      const geometries = new Set<THREE.BufferGeometry>();
+      const materials = new Set<THREE.Material>();
+      ghost.traverse((object) => {
+        if (!(object instanceof THREE.Mesh)) return;
+        geometries.add(object.geometry);
+        for (const material of Array.isArray(object.material) ? object.material : [object.material]) materials.add(material);
+      });
+      for (const geometry of geometries) geometry.dispose();
+      for (const material of materials) material.dispose();
+    };
+  }, [placement]);
+
   const moveWalk = (direction: WalkDirection, multiplier = 1): void => {
     const camera = cameraRef.current;
     const orbit = orbitRef.current;
@@ -1207,7 +1353,7 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
 
   useEffect(() => {
     const onFocus = (event: Event) => {
-      const { entityId, isolate } = (event as CustomEvent<{entityId: string; isolate: boolean}>).detail;
+      const { entityId, isolate, onFocused } = (event as CustomEvent<{entityId: string; isolate: boolean; onFocused?: () => void}>).detail;
       const obj = entityObject(entityId);
       const camera = cameraRef.current;
       const orbit = orbitRef.current;
@@ -1233,11 +1379,40 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
         frameObject(camera, orbit, obj, cameraView);
         refreshWalkBounds();
         syncSelectionHelpers();
+        onFocused?.();
       });
     };
     window.addEventListener('opencad:focus-entity', onFocus);
     return () => window.removeEventListener('opencad:focus-entity', onFocus);
   }, [appearance, singleFloor, containmentOnly, cameraView]);
+
+  useEffect(() => subscribeTo3DViewCommands((command) => {
+    const camera = cameraRef.current;
+    const orbit = orbitRef.current;
+    if (!camera || !orbit) return;
+    const offset = camera.position.clone().sub(orbit.target);
+    let distance = offset.length();
+    if (offset.lengthSq() === 0) camera.getWorldDirection(offset).negate();
+    if (command.type === 'fit') {
+      const object = activeSceneObject();
+      if (!object) return;
+      cancelComponentPlacement();
+      const sphere = objectBoundingSphere(object);
+      const vertical = THREE.MathUtils.degToRad(camera.fov) / 2;
+      const horizontal = Math.atan(Math.tan(vertical) * camera.aspect);
+      distance = sphere.radius / Math.sin(Math.min(vertical, horizontal)) * 1.12;
+      orbit.target.copy(sphere.center);
+      refreshWalkBounds();
+    } else {
+      distance /= command.factor;
+    }
+    // Recenter along the existing heading, including a manually orbited pose.
+    distance = THREE.MathUtils.clamp(distance, orbit.minDistance, orbit.maxDistance);
+    camera.position.copy(orbit.target).add(offset.setLength(distance));
+    orbit.update();
+    // The active scene scope is captured by activeSceneObject/refreshWalkBounds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [singleFloor, floorId, isolatedId]);
 
   // ---------- Floor / system option lists for the toolbar ------------------
   const floors = useMemo(() => {
@@ -1270,6 +1445,7 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
   }, [floors, floorId, project.activeFloorId]);
 
   const handleResetView = () => {
+    cancelComponentPlacement();
     const obj = activeSceneObject();
     const camera = cameraRef.current;
     const orbit = orbitRef.current;
@@ -1285,18 +1461,12 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
   return (
     <div className={`site-workspace${containmentOnly ? ' site-workspace-containment' : ''}${width < 850 ? ' site-workspace-compact' : ''}${width < 620 ? ' site-workspace-narrow' : ''}`}>
       <div className="site-view-header" role="toolbar" aria-label="3D model controls">
-        <div className="site-view-title">
-          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-            <path d="m10 1.8 7 4v8.4l-7 4-7-4V5.8l7-4Z M3 5.8l7 4 7-4 M10 9.8v8.4" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
-          </svg>
-          <span>{containmentOnly ? 'Containment' : '3D model'}</span>
-        </div>
         {!renderError && <>
           {containmentOnly && <div className="site-view-mode" role="group" aria-label="View angle">
             <button type="button" className={cameraView === 'iso' ? 'active' : ''}
-              aria-pressed={cameraView === 'iso'} onClick={() => setCameraView('iso')} title="View from above at an angle">Iso</button>
+              aria-pressed={cameraView === 'iso'} onClick={() => { cancelComponentPlacement(); setCameraView('iso'); }} title="View from above at an angle">Iso</button>
             <button type="button" className={cameraView === 'top' ? 'active' : ''}
-              aria-pressed={cameraView === 'top'} onClick={() => setCameraView('top')} title="Look straight down into the open sections">Top</button>
+              aria-pressed={cameraView === 'top'} onClick={() => { cancelComponentPlacement(); setCameraView('top'); }} title="Look straight down into the open sections">Top</button>
           </div>}
           {!containmentOnly && <>
           <div className="site-scope-control" role="group" aria-label="3D scope">
@@ -1330,11 +1500,11 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
           </>}
           <div className="site-view-actions">
             <div role="group" aria-label="Reset view">
-              <button type="button" className="site-toolbar-button" onClick={handleResetView} title="Frame the active 3D view">
+              <button type="button" className={`site-toolbar-button${containmentOnly ? ' site-fit-button' : ''}`} onClick={handleResetView} title="Fit view" aria-label="Fit view">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M1.5 5V1.5H5 M11 1.5h3.5V5 M14.5 11v3.5H11 M5 14.5H1.5V11 M5 5h6v6H5V5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
                 </svg>
-                {containmentOnly ? 'Fit' : 'Fit View'}
+                {!containmentOnly && 'Fit View'}
               </button>
             </div>
             {!containmentOnly && <details className="site-controls-detail" ref={displayMenuRef}>
@@ -1421,6 +1591,10 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
       <div className="site-viewport">
         <div ref={mountRef} className="site-render-surface" />
         {renderError && <div className="canvas-3d-fallback">{renderError}</div>}
+        {placement?.surface === '3d' && <div className="site-placement-hint" role="status">
+          <span>{placement.hint}</span>
+          <button type="button" onClick={() => cancelComponentPlacement()} title="Cancel placement (Esc)" aria-label="Cancel placement">×</button>
+        </div>}
         {isolatedId && (
           <div className="site-selection-banner">
             <span>Isolated component</span>
@@ -1436,7 +1610,7 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
           </div>
         )}
       </div>
-      {!renderError && (
+      {!renderError && !containmentOnly && (
         <div className="site-statusbar">
           <span className="site-navigation-hint">Drag to orbit · scroll to zoom {!containmentOnly && <span>· WASD to walk</span>}</span>
           <span className="site-selection-status">{selection.size > 0 ? `${selection.size} selected` : 'Click a part to inspect'}</span>
