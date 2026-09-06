@@ -504,8 +504,8 @@ export function MenuBar({
   return (
     <div className="menu-bar">
       <div className="menu-brand">
-        <span className="logo">⌬</span>
-        <span className="brand-name">OpenCAD <span style={{ color: '#3ba3ff' }}>Electrical</span></span>
+        <span className="logo" aria-hidden="true"><svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 4h14v12H3zM6 7h8M6 10h5M6 13h8"/></svg></span>
+        <span className="brand-name">OpenCAD <span className="brand-discipline">Electrical</span></span>
       </div>
       <input ref={fileInputRef} type="file" accept=".json" onChange={onFileChosen} style={{ display: 'none' }} />
       <input ref={dxfInputRef} type="file" accept=".dxf" onChange={onDXFChosen} style={{ display: 'none' }} />
@@ -627,7 +627,8 @@ export function MenuBar({
         <MenuOpt label="About OpenCAD Electrical" onClick={action(onShowAbout)} hint="" />
       </MenuButton>
       <div className="menu-spacer" />
-      <span className="menu-info">{projectName} · {sheetCount} sheets · {projectStandard}</span>
+      <span className="menu-info" title={`${projectName} · ${sheetCount} sheets · ${projectStandard}`}><span className="menu-project-name">{projectName}</span><span className="menu-project-meta">{sheetCount} sheets · {projectStandard}</span></span>
+      <button type="button" className="menu-command-button" onClick={() => runCommand('help.palette')} title={`Search commands (${shortcutHint('help.palette')})`}><span>Commands</span><kbd>{shortcutHint('help.palette')}</kbd></button>
       {viewGeneratorKind && (
         <ViewGeneratorModal
           kind={viewGeneratorKind}
@@ -645,7 +646,7 @@ function MenuButton({
 }) {
   return (
     <div style={{ position: 'relative' }}>
-      <div className="menu-item" onClick={onClick} style={open ? { background: 'var(--bg-3)' } : undefined}>{label}</div>
+      <button type="button" className={`menu-item${open ? ' open' : ''}`} onClick={onClick} aria-haspopup="menu" aria-expanded={open}>{label}</button>
       {open && (
         <div className="context-menu" style={{ left: 0, top: 24 }}>
           {children}

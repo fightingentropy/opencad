@@ -294,7 +294,7 @@ export function App() {
           region's grid slot (and drawer slot on mobile). */}
       <ErrorBoundary label="Left panel" className={`left-panel${leftOpen ? ' open' : ''}`}>
         <div className={`left-panel${leftOpen ? ' open' : ''}`}>
-        {viewMode === '3d' && <div className="workspace-switch"><button className={explorerMode === 'model' ? 'active' : ''} onClick={() => setExplorerMode('model')}>Model explorer</button><button className={explorerMode === 'draw' ? 'active' : ''} onClick={() => setExplorerMode('draw')}>Drawing tools</button></div>}
+        {viewMode === '3d' && <div className="workspace-switch" role="group" aria-label="Explorer mode"><button aria-pressed={explorerMode === 'model'} className={explorerMode === 'model' ? 'active' : ''} onClick={() => setExplorerMode('model')}>Model explorer</button><button aria-pressed={explorerMode === 'draw'} className={explorerMode === 'draw' ? 'active' : ''} onClick={() => setExplorerMode('draw')}>Drawing tools</button></div>}
         {viewMode === '3d' && explorerMode === 'model' ? <InstallationBrowser /> : <LeftPanel open={leftOpen} />}
         </div>
       </ErrorBoundary>
@@ -321,7 +321,7 @@ export function App() {
       </div>
       <ErrorBoundary label="Properties panel" className={`right-panel${rightOpen ? ' open' : ''}`}>
         <div className={`right-panel${rightOpen ? ' open' : ''}`}>
-        <div className="workspace-switch"><button className={inspectorMode === 'installation' ? 'active' : ''} onClick={() => setInspectorMode('installation')}>Installation</button><button className={inspectorMode === 'design' ? 'active' : ''} onClick={() => setInspectorMode('design')}>Design & engineering</button></div>
+        <div className="workspace-switch" role="group" aria-label="Inspector mode"><button aria-pressed={inspectorMode === 'installation'} className={inspectorMode === 'installation' ? 'active' : ''} onClick={() => setInspectorMode('installation')}>Installation</button><button aria-pressed={inspectorMode === 'design'} className={inspectorMode === 'design' ? 'active' : ''} onClick={() => setInspectorMode('design')}>Design & engineering</button></div>
         {inspectorMode === 'installation' ? <InstallationPanel /> : <RightPanel open={rightOpen} />}
         </div>
       </ErrorBoundary>
@@ -339,16 +339,20 @@ export function App() {
           <button
             className="mobile-fab fab-left"
             onClick={() => { setLeftOpen(!leftOpen); setRightOpen(false); }}
-            title="Symbols & Layers"
+            title={viewMode === '3d' ? 'Model explorer' : 'Symbols & Layers'}
+            aria-label={viewMode === '3d' ? 'Model explorer' : 'Symbols & Layers'}
+            aria-expanded={leftOpen}
           >☰</button>
           <button
             className="mobile-fab fab-right"
             onClick={() => { setRightOpen(!rightOpen); setLeftOpen(false); }}
             title="Properties"
+            aria-label="Properties"
+            aria-expanded={rightOpen}
           >ⓘ</button>
-          <button className="mobile-fab fab-zoomin" onClick={() => zoomBy(1.25)} title="Zoom in">＋</button>
+          {viewMode !== '3d' && <><button className="mobile-fab fab-zoomin" onClick={() => zoomBy(1.25)} title="Zoom in">＋</button>
           <button className="mobile-fab fab-zoomout" onClick={() => zoomBy(0.8)} title="Zoom out">−</button>
-          <button className="mobile-fab fab-fit" onClick={fitToPage} title="Fit page" style={{ fontSize: 16 }}>⊡</button>
+          <button className="mobile-fab fab-fit" onClick={fitToPage} title="Fit page" style={{ fontSize: 16 }}>⊡</button></>}
         </>
       )}
 
