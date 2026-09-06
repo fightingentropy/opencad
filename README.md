@@ -35,7 +35,7 @@ The bundled corporate sample includes dated **Demo team** progress and comments.
 
 ## Try the demo
 
-A hosted build is available at **<https://opencad.pages.dev>**. Open it directly in the browser — there's no install step and the sample whole-site project loads on first launch.
+A hosted build is available at **<https://opencad.pages.dev>**. First launch opens a simple 3D containment layout: open-top tray (300 × 50 mm), trunking (150 × 150 mm) and wire basket (300 × 54 mm), each with a 3 m run and 1.5 m return. Use Iso, Top and Fit to inspect the geometry. This is a generic section study, not a fabrication drawing. Saved projects reopen as before; File → New containment layout creates the new study after a replacement prompt, with an option to save the current project first.
 
 ## Collaboration (Beta)
 

@@ -18,7 +18,7 @@ import type {
 import type { SystemId } from '../models/site';
 import { defaultElevation } from './elevations';
 import type { Floor } from '../models/site';
-import { detailBoxes, finiteDimension, roundedRoute, solidBox, type DetailBox } from './ContainmentGeometry';
+import { detailBoxes, finiteDimension, joinedProfileGeometry, joinedRouteFrames, roundedRoute, solidBox, type DetailBox } from './ContainmentGeometry';
 
 // ---------- Material palette -------------------------------------------------
 
@@ -195,6 +195,165 @@ function addCover(group: THREE.Group, length: number, width: number, height: num
   group.add(cover);
 }
 
+function joinedFrames(containment: ContainmentEntity, width: number, flipY?: number): ReturnType<typeof joinedRouteFrames> {
+  const curve = roundedRoute(containment.points, 0, width * 1.5, flipY);
+  return curve ? joinedRouteFrames(curve.getPoints(20)) : [];
+}
+
+function addProfile(
+  group: THREE.Group,
+  frames: ReturnType<typeof joinedRouteFrames>,
+  profile: number[][],
+  mat: THREE.Material,
+  name: string,
+): void {
+  const mesh = new THREE.Mesh(joinedProfileGeometry(frames, profile.map(([y, z]) => new THREE.Vector2(y, z))), mat);
+  mesh.name = name;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  group.add(mesh);
+}
+
+function addPerforatedRouteBottom(
+  wrap: THREE.Group,
+  containment: ContainmentEntity,
+  frames: ReturnType<typeof joinedRouteFrames>,
+  width: number,
+  thickness: number,
+  mat: THREE.Material,
+  flipY?: number,
+): void {
+  const curve = roundedRoute(containment.points, 0, width * 1.5, flipY);
+  if (!curve || frames.length < 2) return;
+  const edge = (offset: number): THREE.Vector2[] => frames.map(({ point, normal }) => point.clone().addScaledVector(normal, offset));
+  const outline = [...edge(width / 2), ...edge(-width / 2).reverse()];
+  const shape = new THREE.Shape(outline);
+  const rows = Math.max(1, Math.min(8, Math.floor(width / 65)));
+  const pitchY = width / rows;
+  const slotWidth = Math.min(12, pitchY * 0.23);
+  // Slots only occupy the straight sections; bend plates remain continuous.
+  for (const leg of curve.curves) {
+    if (!(leg instanceof THREE.LineCurve3)) continue;
+    const length = leg.getLength();
+    if (length <= 70) continue;
+    const count = Math.max(1, Math.min(100, Math.floor(length / 75)));
+    const pitchX = length / count;
+    const slotLength = Math.min(32, pitchX * 0.45);
+    const tangent = leg.getTangent(0);
+    const normal = new THREE.Vector2(-tangent.y, tangent.x);
+    for (let row = 0; row < rows; row++) for (let i = 0; i < count; i++) {
+      const center = leg.getPoint((i + 0.5) / count);
+      const lateral = -width / 2 + (row + 0.5) * pitchY;
+      const hole = new THREE.Path();
+      for (const [j, [dx, dy]] of [[-1, -1], [1, -1], [1, 1], [-1, 1]].entries()) {
+        const x = center.x + tangent.x * dx * slotLength / 2 + normal.x * (lateral + dy * slotWidth / 2);
+        const y = center.y + tangent.y * dx * slotLength / 2 + normal.y * (lateral + dy * slotWidth / 2);
+        if (j === 0) hole.moveTo(x, y); else hole.lineTo(x, y);
+      }
+      hole.closePath();
+      shape.holes.push(hole);
+    }
+  }
+  const bottom = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: false, curveSegments: 1 }), mat);
+  bottom.name = 'perforated-tray-bottom';
+  bottom.castShadow = true;
+  bottom.receiveShadow = true;
+  wrap.add(bottom);
+}
+
+/** One open section follows the bend, with no overlapping boxes or end walls. */
+function buildJoinedTrough(containment: ContainmentEntity, width: number, height: number, mat: THREE.MeshStandardMaterial, opts: RenderOpts): THREE.Group {
+  const wrap = new THREE.Group();
+  const frames = joinedFrames(containment, width, opts.flipY);
+  const tk = Math.min(2, height / 8, width / 12);
+  const half = width / 2;
+  const lip = Math.min(12, width * 0.1);
+  const perforated = containment.containmentType === 'tray' && opts.detail !== 'overview'
+    && containment.subType !== 'solid-bottom' && containment.subType !== 'return-flange' && width > 35;
+  if (perforated) {
+    addPerforatedRouteBottom(wrap, containment, frames, width, tk, mat, opts.flipY);
+    for (const side of [-1, 1]) addProfile(wrap, frames, [
+      [half, tk], [half, height], [half - lip, height],
+      [half - lip, height - tk], [half - tk, height - tk], [half - tk, tk],
+    ].map(([y, z]) => [y * side, z]), mat, 'continuous-tray-rail');
+  } else {
+    addProfile(wrap, frames, [
+      [-half, 0], [half, 0], [half, height], [half - lip, height],
+      [half - lip, height - tk], [half - tk, height - tk], [half - tk, tk],
+      [-half + tk, tk], [-half + tk, height - tk], [-half + lip, height - tk],
+      [-half + lip, height], [-half, height],
+    ], mat, 'continuous-open-trough');
+  }
+  if (containment.containmentType === 'trunking') {
+    const count = Math.max(1, Math.min(8, Math.floor(finiteDimension(containment.compartments, 1))));
+    for (let i = 1; i < count; i++) {
+      const y = -half + width * i / count;
+      addProfile(wrap, frames, [[y - 0.75, tk], [y + 0.75, tk], [y + 0.75, height - 6], [y - 0.75, height - 6]], mat, 'segregation-dividers');
+    }
+    const cover = new THREE.Group();
+    cover.name = 'removable-cover';
+    cover.userData.containmentCover = true;
+    cover.visible = opts.showCovers !== false;
+    addProfile(cover, frames, [
+      [-half - 2, height - 8], [-half, height - 8], [-half, height],
+      [half, height], [half, height - 8], [half + 2, height - 8],
+      [half + 2, height + 2], [-half - 2, height + 2],
+    ], mat, 'folded-trunking-lid');
+    wrap.add(cover);
+  }
+  return wrap;
+}
+
+function buildJoinedBasket(containment: ContainmentEntity, width: number, height: number, mat: THREE.MeshStandardMaterial, opts: RenderOpts): THREE.Group {
+  const wrap = new THREE.Group();
+  const curve = roundedRoute(containment.points, 0, width * 1.5, opts.flipY);
+  if (!curve) return wrap;
+  const frames = joinedRouteFrames(curve.getPoints(20));
+  const radius = Math.min(2.5, width / 30, height / 10);
+  const bottom = radius;
+  const top = height - radius;
+  const half = width / 2 - radius;
+  const longitudinal = Math.max(2, Math.min(14, Math.ceil(width / 50)));
+  // Continuous longitudinal wires follow the same section through the bend.
+  const wires: [number, number][] = [];
+  for (let i = 0; i <= longitudinal; i++) wires.push([-half + i * half * 2 / longitudinal, bottom]);
+  for (const side of [-1, 1]) for (const z of [top, height / 2]) wires.push([side * half, z]);
+  for (const [y, z] of wires) {
+    const profile = Array.from({ length: 8 }, (_, i) => [y + Math.cos(i * Math.PI / 4) * radius, z + Math.sin(i * Math.PI / 4) * radius]);
+    addProfile(wrap, frames, profile, mat, 'continuous-basket-wire');
+  }
+  const count = Math.max(2, Math.min(opts.detail === 'overview' ? 40 : 128, Math.ceil(curve.getLength() / 100)));
+  const uprights = new THREE.InstancedMesh(new THREE.CylinderGeometry(radius, radius, 1, 8), mat, count * 3);
+  const matrix = new THREE.Matrix4();
+  const rotation = new THREE.Quaternion();
+  const axis = new THREE.Vector3(0, 1, 0);
+  let index = 0;
+  const wire = (a: THREE.Vector3, b: THREE.Vector3): void => {
+    const delta = b.clone().sub(a);
+    rotation.setFromUnitVectors(axis, delta.clone().normalize());
+    matrix.compose(a.clone().add(b).multiplyScalar(0.5), rotation, new THREE.Vector3(1, delta.length(), 1));
+    uprights.setMatrixAt(index++, matrix);
+  };
+  for (let i = 0; i < count; i++) {
+    const t = (i + 0.5) / count;
+    const point = curve.getPointAt(t);
+    const tangent = curve.getTangentAt(t);
+    const normal = new THREE.Vector3(-tangent.y, tangent.x, 0).normalize();
+    const a = point.clone().addScaledVector(normal, -half).setZ(bottom);
+    const b = point.clone().addScaledVector(normal, half).setZ(bottom);
+    wire(a, b);
+    wire(a, a.clone().setZ(top));
+    wire(b, b.clone().setZ(top));
+  }
+  uprights.name = 'welded-basket-wire';
+  uprights.castShadow = true;
+  uprights.receiveShadow = true;
+  uprights.computeBoundingBox();
+  uprights.computeBoundingSphere();
+  wrap.add(uprights);
+  return wrap;
+}
+
 function buildTraySegment(width: number, height: number, len: number, mat: THREE.MeshStandardMaterial, subType: string | undefined, detailed: boolean): THREE.Group {
   const wrap = new THREE.Group();
   const tk = Math.min(2, height / 8, width / 12);
@@ -232,7 +391,7 @@ function buildTraySegment(width: number, height: number, len: number, mat: THREE
   const rails: DetailBox[] = [];
   const lipWidth = Math.min(12, width * 0.1);
   for (const side of [-1, 1]) {
-    rails.push({ x: 0, y: side * (width / 2 - tk / 2), z: 0, length: len, width: tk, height });
+    rails.push({ x: 0, y: side * (width / 2 - tk / 2), z: 0, length: len, width: tk, height: height - tk * 2 });
     rails.push({ x: 0, y: side * (width / 2 - lipWidth / 2), z: height / 2 - tk / 2, length: len, width: lipWidth, height: tk });
     if (detailed && height >= 40) {
       // Formed longitudinal bead stiffens the thin side wall.
@@ -435,6 +594,14 @@ export function renderContainment3D(containment: ContainmentEntity, opts: Render
   const baseMat = makeMat(colorSpec);
   if (containment.containmentType === 'conduit') {
     root.add(buildConduit(containment, opts, w, baseZ, baseMat));
+  } else if (containment.containmentType === 'trunking'
+    || (segments.length > 1 && (containment.containmentType === 'tray' || containment.containmentType === 'basket'))) {
+    const body = containment.containmentType === 'basket'
+      ? buildJoinedBasket(containment, w, h, baseMat, opts)
+      : buildJoinedTrough(containment, w, h, baseMat, opts);
+    body.name = 'containment-section';
+    body.position.z = baseZ;
+    root.add(body);
   } else {
     const detailed = opts.detail !== 'overview';
     for (const seg of segments) {
@@ -448,9 +615,6 @@ export function renderContainment3D(containment: ContainmentEntity, opts: Render
           break;
         case 'basket':
           body = buildBasketSegment(w, h, seg.len, baseMat, detailed);
-          break;
-        case 'trunking':
-          body = buildTrunkingSegment(w, h, seg.len, baseMat, containment.compartments, opts.showCovers !== false);
           break;
         case 'duct':
           body = buildDuctSegment(w, h, seg.len, baseMat);

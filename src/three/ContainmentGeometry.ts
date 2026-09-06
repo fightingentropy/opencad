@@ -52,6 +52,62 @@ export function finiteDimension(value: number | undefined, fallback: number, min
   return value != null && Number.isFinite(value) ? Math.max(min, value) : fallback;
 }
 
+/** A shared cross-section at each route vertex prevents overlapping elbows. */
+export function joinedRouteFrames(points: { x: number; y: number }[], flipY?: number): { point: THREE.Vector2; normal: THREE.Vector2 }[] {
+  const clean: THREE.Vector2[] = [];
+  for (const p of points) {
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
+    const point = new THREE.Vector2(p.x, flipY == null ? p.y : flipY - p.y);
+    if (!clean.length || clean[clean.length - 1].distanceToSquared(point) > 0.01) clean.push(point);
+  }
+  if (clean.length < 2) return [];
+  return clean.map((point, i) => {
+    const before = i ? point.clone().sub(clean[i - 1]).normalize() : clean[1].clone().sub(point).normalize();
+    const after = i < clean.length - 1 ? clean[i + 1].clone().sub(point).normalize() : before;
+    const normalBefore = new THREE.Vector2(-before.y, before.x);
+    const normalAfter = new THREE.Vector2(-after.y, after.x);
+    const normal = normalBefore.clone().add(normalAfter);
+    if (normal.lengthSq() < 1e-6) return { point, normal: normalAfter };
+    normal.normalize();
+    // Bound acute/reversing corners rather than projecting infinitely long tips.
+    normal.divideScalar(Math.max(0.25, normal.dot(normalBefore)));
+    return { point, normal };
+  });
+}
+
+/** Sweep a closed lateral/Z profile with one shared, capped surface per route. */
+export function joinedProfileGeometry(
+  frames: ReturnType<typeof joinedRouteFrames>,
+  profile: THREE.Vector2[],
+): THREE.BufferGeometry {
+  const geometry = new THREE.BufferGeometry();
+  if (frames.length < 2 || profile.length < 3) return geometry;
+  const section = THREE.ShapeUtils.isClockWise(profile) ? [...profile].reverse() : profile;
+  const rings = frames.map(({ point, normal }) => section.map((p) => new THREE.Vector3(
+    point.x + normal.x * p.x, point.y + normal.y * p.x, p.y,
+  )));
+  const positions: number[] = [];
+  const triangle = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3): void => {
+    positions.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+  };
+  for (let i = 0; i < rings.length - 1; i++) {
+    for (let j = 0; j < section.length; j++) {
+      const next = (j + 1) % section.length;
+      triangle(rings[i][j], rings[i][next], rings[i + 1][next]);
+      triangle(rings[i][j], rings[i + 1][next], rings[i + 1][j]);
+    }
+  }
+  for (const [a, b, c] of THREE.ShapeUtils.triangulateShape(section, [])) {
+    triangle(rings[0][c], rings[0][b], rings[0][a]);
+    triangle(rings[rings.length - 1][a], rings[rings.length - 1][b], rings[rings.length - 1][c]);
+  }
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.computeVertexNormals();
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
 /**
  * Offset in the route's local cross-section, including at the first/last
  * vertices. Vector bisectors avoid angle-wrap discontinuities on westbound

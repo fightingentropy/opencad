@@ -91,6 +91,27 @@ describe('renderContainment3D', () => {
     expect(ray.intersectObject(bottom).length).toBeGreaterThan(0);
   });
 
+  it('retains real slots on both straight legs of a continuous perforated-tray bend', () => {
+    const tray = {
+      ...makeBasket(), containmentType: 'tray' as const, subType: 'perforated' as const,
+      points: [{ x: 0, y: 0 }, { x: 2000, y: 0 }, { x: 2000, y: 2000 }],
+    };
+    for (const flipY of [undefined, 4000]) {
+      const obj = renderContainment3D(tray, { flipY });
+      obj.updateMatrixWorld(true);
+      const bottom = obj.getObjectByName('perforated-tray-bottom')!;
+      expect(bottom).toBeInstanceOf(THREE.Mesh);
+      for (const [x, y] of [[38.75, 37.5], [1962.5, 488.75]]) {
+        const ray = new THREE.Raycaster(new THREE.Vector3(x, flipY == null ? y : flipY - y, 2600), new THREE.Vector3(0, 0, -1));
+        expect(ray.intersectObject(obj, true)).toHaveLength(0);
+      }
+      const bridge = new THREE.Raycaster(new THREE.Vector3(5, flipY == null ? 37.5 : flipY - 37.5, 2600), new THREE.Vector3(0, 0, -1));
+      const hits = bridge.intersectObject(bottom);
+      expect(hits).toHaveLength(1);
+      expect(hits[0].point.z).toBeCloseTo(2402);
+    }
+  });
+
   it('opens trunking lids without a solid block obstructing the interior', () => {
     const trunking = { ...makeBasket(), containmentType: 'trunking' as const, compartments: 2 };
     const obj = renderContainment3D(trunking);
@@ -105,6 +126,65 @@ describe('renderContainment3D', () => {
     expect(hit?.point.z).toBeCloseTo(2402);
     setContainmentCoversOpen(obj, false);
     expect(cover.visible).toBe(true);
+  });
+
+  it.each(['tray', 'trunking'] as const)('keeps the %s bend interior open without overlapping leg walls', (containmentType) => {
+    const containment = {
+      ...makeBasket(), containmentType,
+      points: [{ x: 0, y: 0 }, { x: 2000, y: 0 }, { x: 2000, y: 2000 }],
+    };
+    for (const flipY of [undefined, 4000]) {
+      const obj = renderContainment3D(containment, { showCovers: false, flipY });
+      obj.updateMatrixWorld(true);
+      const visible: THREE.Object3D[] = [];
+      obj.traverseVisible((part) => { if (part instanceof THREE.Mesh) visible.push(part); });
+      // This point used to hit the first leg's side wall across the elbow.
+      const ray = new THREE.Raycaster(
+        new THREE.Vector3(1890, flipY == null ? 149 : flipY - 149, 2600),
+        new THREE.Vector3(0, 0, -1),
+      );
+      const hits = ray.intersectObjects(visible, false);
+      expect(hits[0]?.point.z).toBeCloseTo(2402);
+      expect(hits.filter((hit) => Math.abs(hit.point.z - 2402) < 0.01)).toHaveLength(1);
+    }
+  });
+
+  it('completely removes closed lids from the visible bent-trunking interior', () => {
+    const obj = renderContainment3D({
+      ...makeBasket(), containmentType: 'trunking',
+      points: [{ x: 0, y: 0 }, { x: 2000, y: 0 }, { x: 2000, y: 2000 }],
+    }, { showCovers: false });
+    obj.updateMatrixWorld(true);
+    const ray = new THREE.Raycaster(new THREE.Vector3(1890, 149, 2600), new THREE.Vector3(0, 0, -1));
+    const firstVisibleHit = (): number | undefined => {
+      const visible: THREE.Object3D[] = [];
+      obj.traverseVisible((part) => { if (part instanceof THREE.Mesh) visible.push(part); });
+      return ray.intersectObjects(visible, false)[0]?.point.z;
+    };
+    expect(firstVisibleHit()).toBeCloseTo(2402);
+    setContainmentCoversOpen(obj, false);
+    expect(firstVisibleHit()).toBeCloseTo(2502);
+    setContainmentCoversOpen(obj, true);
+    expect(firstVisibleHit()).toBeCloseTo(2402);
+  });
+
+  it('turns basket wires through a bend while preserving open mesh cells', () => {
+    const obj = renderContainment3D({
+      ...makeBasket(),
+      points: [{ x: 0, y: 0 }, { x: 2000, y: 0 }, { x: 2000, y: 2000 }],
+    });
+    obj.updateMatrixWorld(true);
+    expect(obj.getObjectByName('continuous-basket-wire')).toBeInstanceOf(THREE.Mesh);
+    expect(obj.getObjectByName('removable-cover')).toBeUndefined();
+    const bounds = new THREE.Box3().setFromObject(obj);
+    expect(bounds.min.z).toBeCloseTo(2400);
+    expect(bounds.max.z).toBeCloseTo(2500);
+    const probes = [[1810, 50], [1840, 80], [1870, 110], [1900, 140], [1930, 170]];
+    const openCells = probes.filter(([x, y]) => {
+      const ray = new THREE.Raycaster(new THREE.Vector3(x, y, 2600), new THREE.Vector3(0, 0, -1));
+      return ray.intersectObject(obj, true).length === 0;
+    });
+    expect(openCells.length).toBeGreaterThanOrEqual(3);
   });
 
   it('keeps busbar width across the route and exposes physical copper conductors', () => {
