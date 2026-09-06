@@ -22,7 +22,6 @@ import { Panel3DContainer } from './three/Panel3DContainer';
 import { Toast } from './ui/Toast';
 import { CommandPalette } from './ui/CommandPalette';
 import { ShortcutsModal } from './ui/ShortcutsModal';
-import { FindEntityModal } from './ui/FindEntityModal';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { dispatchShortcut, registerUiHandlers } from './lib/commands';
 import { notify } from './state/notifications';
@@ -53,7 +52,6 @@ export function App() {
   const [collabOpen, setCollabOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [findEntityOpen, setFindEntityOpen] = useState(false);
   const [collabActive, setCollabActiveLocal] = useState(false);
   const [bootstrapped, setBootstrapped] = useState(false);
   const [panel3DWidth, setPanel3DWidth] = useState<number>(() => {
@@ -66,6 +64,8 @@ export function App() {
   );
   const [leftOpen, setLeftOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [inspectorVisible, setInspectorVisible] = useState(true);
   const saveTimerRef = useRef<number | undefined>(undefined);
 
   // Track viewport size for mobile breakpoint
@@ -193,7 +193,8 @@ export function App() {
   useEffect(() => {
     if (!resizing) return;
     const onMove = (e: MouseEvent) => {
-      const next = window.innerWidth - e.clientX - 280; // 280 = right panel width
+      const edge = document.querySelector('.main')?.getBoundingClientRect().right ?? window.innerWidth;
+      const next = edge - e.clientX;
       const clamped = Math.max(220, Math.min(900, next));
       setPanel3DWidth(clamped);
     };
@@ -223,7 +224,6 @@ export function App() {
     setCollabOpen(false);
     setShortcutsOpen(false);
     setPaletteOpen(false);
-    setFindEntityOpen(false);
   };
 
   // Shared by the menu item and the `dialog.cross-section` command: requires
@@ -251,7 +251,7 @@ export function App() {
       openCollaboration: () => setCollabOpen(true),
       openAbout: () => setAboutOpen(true),
       openShortcuts: () => setShortcutsOpen(true),
-      openFindEntity: () => setFindEntityOpen(true),
+      openFindEntity: () => setPaletteOpen(true),
       toggleCommandPalette: () => setPaletteOpen((v) => !v),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -275,9 +275,13 @@ export function App() {
   };
 
   return (
-    <div className={`app${viewMode === '3d' ? ' installation-mode' : ''}${simpleContainment ? ' containment-mode' : ''}`} style={resizing ? { cursor: 'col-resize', userSelect: 'none' } : undefined}>
+    <div className={`app${viewMode === '3d' ? ' installation-mode' : ''}${simpleContainment ? ' containment-mode' : ''}${!isMobile && !sidebarVisible ? ' hide-left' : ''}${!isMobile && !inspectorVisible ? ' hide-right' : ''}`} style={resizing ? { cursor: 'col-resize', userSelect: 'none' } : undefined}>
       <MenuBar
         simpleContainment={simpleContainment}
+        leftVisible={isMobile ? leftOpen : sidebarVisible}
+        rightVisible={isMobile ? rightOpen : inspectorVisible}
+        onToggleLeft={() => { if (isMobile) { setLeftOpen(!leftOpen); setRightOpen(false); } else setSidebarVisible(!sidebarVisible); }}
+        onToggleRight={() => { if (isMobile) { setRightOpen(!rightOpen); setLeftOpen(false); } else setInspectorVisible(!inspectorVisible); }}
         onShowBom={() => setBomOpen(true)}
         onShowAbout={() => setAboutOpen(true)}
         onShowCableSchedule={() => setCableScheduleOpen(true)}
@@ -287,7 +291,7 @@ export function App() {
         onShowCrossSection={openCrossSection}
         onShowCollaboration={() => setCollabOpen(true)}
       />
-      {!simpleContainment && <Ribbon />}
+      {viewMode !== '3d' && <Ribbon />}
       {/* Each major region mounts inside its own error boundary so a crash
           in one (e.g. a malformed entity reaching a properties render)
           leaves the others interactive. The panel boundaries reuse the
@@ -295,7 +299,7 @@ export function App() {
           region's grid slot (and drawer slot on mobile). */}
       <ErrorBoundary label="Left panel" className={`left-panel${leftOpen ? ' open' : ''}`}>
         <div className={`left-panel${leftOpen ? ' open' : ''}`}>
-        {viewMode === '3d' && !simpleContainment && <div className="workspace-switch" role="group" aria-label="Explorer mode"><button aria-pressed={explorerMode === 'model'} className={explorerMode === 'model' ? 'active' : ''} onClick={() => setExplorerMode('model')}>Model explorer</button><button aria-pressed={explorerMode === 'draw'} className={explorerMode === 'draw' ? 'active' : ''} onClick={() => setExplorerMode('draw')}>Drawing tools</button></div>}
+        {viewMode === '3d' && !simpleContainment && <div className="workspace-switch" role="group" aria-label="Explorer mode"><button aria-pressed={explorerMode === 'model'} className={explorerMode === 'model' ? 'active' : ''} onClick={() => setExplorerMode('model')}>Objects</button><button aria-pressed={explorerMode === 'draw'} className={explorerMode === 'draw' ? 'active' : ''} onClick={() => setExplorerMode('draw')}>Library</button></div>}
         {simpleContainment ? <ContainmentOutline /> : viewMode === '3d' && explorerMode === 'model' ? <InstallationBrowser /> : <LeftPanel open={leftOpen} />}
         </div>
       </ErrorBoundary>
@@ -317,13 +321,13 @@ export function App() {
             {viewMode === 'split' && !isMobile && <Panel3DContainer width={panel3DWidth} />}
             {viewMode === '3d' && <Panel3DContainer fillParent />}
           </div>
-          {simpleContainment ? null : viewMode === '3d' ? <details className="installation-hierarchy"><summary>Sheets, floors & zones</summary><SiteNavigator /></details> : <SiteNavigator />}
+          {!containmentSheet && <details className="installation-hierarchy"><summary>Project</summary><SiteNavigator /></details>}
         </ErrorBoundary>
       </div>
       {!simpleContainment && <ErrorBoundary label="Properties panel" className={`right-panel${rightOpen ? ' open' : ''}`}>
         <div className={`right-panel${rightOpen ? ' open' : ''}`}>
-        <div className="workspace-switch" role="group" aria-label="Inspector mode"><button aria-pressed={inspectorMode === 'installation'} className={inspectorMode === 'installation' ? 'active' : ''} onClick={() => setInspectorMode('installation')}>Installation</button><button aria-pressed={inspectorMode === 'design'} className={inspectorMode === 'design' ? 'active' : ''} onClick={() => setInspectorMode('design')}>Design & engineering</button></div>
-        {inspectorMode === 'installation' ? <InstallationPanel /> : <RightPanel open={rightOpen} />}
+        {viewMode === '3d' && <div className="workspace-switch" role="group" aria-label="Inspector mode"><button aria-pressed={inspectorMode === 'installation'} className={inspectorMode === 'installation' ? 'active' : ''} onClick={() => setInspectorMode('installation')}>Installation</button><button aria-pressed={inspectorMode === 'design'} className={inspectorMode === 'design' ? 'active' : ''} onClick={() => setInspectorMode('design')}>Properties</button></div>}
+        {viewMode === '3d' && inspectorMode === 'installation' ? <InstallationPanel /> : <RightPanel open={rightOpen} />}
         </div>
       </ErrorBoundary>}
       <StatusBar />
@@ -376,7 +380,6 @@ export function App() {
         {collabOpen && <CollaborationModal onClose={() => setCollabOpen(false)} />}
         {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
         {paletteOpen && <CommandPalette onClose={() => setPaletteOpen(false)} />}
-        {findEntityOpen && <FindEntityModal onClose={() => setFindEntityOpen(false)} />}
       </ErrorBoundary>
 
       {/* Toast stack renders last so notifications sit above modals. */}

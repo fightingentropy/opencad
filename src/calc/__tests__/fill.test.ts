@@ -136,6 +136,20 @@ describe('computeContainmentFill', () => {
     expect(r.limit).toBeCloseTo(0.31, 2);
   });
 
+  it.each([
+    { outerDiameter: 13, expectedStatus: 'warning' },
+    { outerDiameter: 15, expectedStatus: 'over' },
+  ])('classifies two-conductor NEC fill as $expectedStatus using its 31% limit', ({ outerDiameter, expectedStatus }) => {
+    const c = makeContainment({ containmentType: 'conduit', width: 40, innerCsaMm2: 1000 });
+    const cables = Array.from({ length: 2 }, () => makeCable({ cores: 1, outerDiameter }));
+    const r = computeContainmentFill(c, cables, nec);
+    // 13 mm cables occupy 26.5%; 15 mm cables occupy 35.3%.
+    // Both would incorrectly appear green against the one-conductor 53% limit.
+    expect(r.limit).toBe(0.31);
+    expect(r.fillPct).toBeCloseTo((Math.PI / 4) * outerDiameter ** 2 * 2 / 1000 * 100);
+    expect(r.fillStatus).toBe(expectedStatus);
+  });
+
   it('NEC conduit with 3+ conductors uses 40% limit', () => {
     const c = makeContainment({ containmentType: 'conduit', width: 25 });
     const cables = Array.from({ length: 4 }, () =>

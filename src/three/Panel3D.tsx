@@ -4,6 +4,7 @@
 // DIN-rail enclosure.
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { subscribeTo3DViewCommands } from '../lib/commands';
 import type {
   Project,
   Sheet,
@@ -2876,6 +2877,72 @@ export function Panel3D({
   useEffect(() => {
     applyDoorMode(contentRootRef.current, doorMode);
   }, [doorMode]);
+
+  // Search and the inspector share the same physical-component focus request.
+  useEffect(() => {
+    const onFocus = (event: Event): void => {
+      const { entityId, sheetId, onFocused } = (event as CustomEvent<{
+        entityId: string; sheetId?: string; onFocused?: () => void;
+      }>).detail;
+      if (sheetId && sheetId !== renderedSheetRef.current) return;
+      const camera = cameraRef.current;
+      const orbit = orbitRef.current?.state;
+      const object = symbolMapRef.current.get(entityId)?.group
+        ?? wireMapRef.current.get(entityId)?.mesh
+        ?? containmentMapRef.current.get(entityId)?.group
+        ?? wallMapRef.current.get(entityId)?.group
+        ?? roomMapRef.current.get(entityId)?.group;
+      if (!camera || !orbit || !object) return;
+      object.updateWorldMatrix(true, true);
+      const bounds = new THREE.Box3().setFromObject(object);
+      if (bounds.isEmpty()) return;
+      const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+      const vertical = THREE.MathUtils.degToRad(camera.fov) / 2;
+      const horizontal = Math.atan(Math.tan(vertical) * camera.aspect);
+      orbit.target.copy(sphere.center);
+      orbit.distance = Math.max(orbit.minDistance, Math.max(20, sphere.radius) / Math.sin(Math.min(vertical, horizontal)) * 1.3);
+      orbit.maxDistance = Math.max(orbit.maxDistance, orbit.distance * 2);
+      camera.near = Math.max(0.1, orbit.distance / 1000);
+      camera.far = Math.max(5000, orbit.distance * 20);
+      camera.updateProjectionMatrix();
+      orbit.apply(camera);
+      onFocused?.();
+    };
+    window.addEventListener('opencad:focus-entity', onFocus);
+    return () => window.removeEventListener('opencad:focus-entity', onFocus);
+  }, []);
+
+  useEffect(() => subscribeTo3DViewCommands((command) => {
+    const camera = cameraRef.current;
+    const orbit = orbitRef.current?.state;
+    if (!camera || !orbit) return;
+    if (command.type === 'fit') {
+      const root = contentRootRef.current;
+      if (!root) return;
+      root.updateWorldMatrix(true, true);
+      const bounds = new THREE.Box3();
+      root.traverseVisible((object) => {
+        const geometry = (object as THREE.Mesh).geometry;
+        if (!geometry) return;
+        if (!geometry.boundingBox) geometry.computeBoundingBox();
+        if (geometry.boundingBox) bounds.union(geometry.boundingBox.clone().applyMatrix4(object.matrixWorld));
+      });
+      if (bounds.isEmpty()) return;
+      const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+      const vertical = THREE.MathUtils.degToRad(camera.fov) / 2;
+      const horizontal = Math.atan(Math.tan(vertical) * camera.aspect);
+      orbit.target.copy(sphere.center);
+      orbit.distance = Math.max(orbit.minDistance, Math.max(20, sphere.radius) / Math.sin(Math.min(vertical, horizontal)) * 1.3);
+      orbit.maxDistance = Math.max(orbit.maxDistance, orbit.distance * 2);
+    } else {
+      orbit.distance = THREE.MathUtils.clamp(orbit.distance / command.factor, orbit.minDistance, orbit.maxDistance);
+    }
+    // Leave azimuth/polar untouched so Fit keeps the current preset or orbit.
+    camera.near = Math.max(0.1, orbit.distance / 1000);
+    camera.far = Math.max(5000, orbit.distance * 20);
+    camera.updateProjectionMatrix();
+    orbit.apply(camera);
+  }), []);
 
   // ---- React to view-preset requests (bumped via viewKey) --------------
   useEffect(() => {

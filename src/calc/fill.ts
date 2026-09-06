@@ -89,8 +89,8 @@ export const fillStatus = (
   pct: number,
   standards: StandardsProfile,
   containmentKind: ContainmentType,
+  limit = limitFor(standards.code, containmentKind, 1),
 ): FillStatus => {
-  const limit = limitFor(standards.code, containmentKind, 1);
   const overPct = limit * 100;
   if (pct > overPct) return 'over';
   if (pct >= overPct - 10) return 'warning';
@@ -113,7 +113,7 @@ export const computeContainmentFill = (
   const fillPct = innerAreaMm2 > 0 ? (occupiedAreaMm2 / innerAreaMm2) * 100 : 0;
   return {
     fillPct,
-    fillStatus: fillStatus(fillPct, standards, containment.containmentType),
+    fillStatus: fillStatus(fillPct, standards, containment.containmentType, limit),
     innerAreaMm2,
     occupiedAreaMm2,
     cableCount: cables.length,

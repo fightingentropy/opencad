@@ -27,9 +27,14 @@ import {
 } from '../io/compliance-report';
 import { generateCostEstimate, costEstimateToCSV } from '../io/cost-estimate';
 import { ViewGeneratorModal, ViewGeneratorKind } from './ViewGeneratorModal';
+import { AppIcon } from './AppIcon';
 
 export function MenuBar({
   simpleContainment = false,
+  leftVisible,
+  rightVisible,
+  onToggleLeft,
+  onToggleRight,
   onShowBom,
   onShowAbout,
   onShowCableSchedule,
@@ -40,6 +45,10 @@ export function MenuBar({
   onShowCollaboration,
 }: {
   simpleContainment?: boolean;
+  leftVisible: boolean;
+  rightVisible: boolean;
+  onToggleLeft: () => void;
+  onToggleRight: () => void;
   onShowBom: () => void;
   onShowAbout: () => void;
   onShowCableSchedule?: () => void;
@@ -59,7 +68,10 @@ export function MenuBar({
   const resetProject = useStore((s) => s.resetProject);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
-  const selectionSize = useStore((s) => s.editor.selection.size);
+  const past = useStore((s) => s.past.length);
+  const future = useStore((s) => s.future.length);
+  const viewMode = useStore((s) => s.editor.viewMode);
+  const setViewMode = useStore((s) => s.setViewMode);
   const setStatus = useStore((s) => s.setStatus);
   const addEntity = useStore((s) => s.addEntity);
   const addEntities = useStore((s) => s.addEntities);
@@ -517,133 +529,71 @@ export function MenuBar({
 
   return (
     <div className="menu-bar">
-      <div className="menu-brand">
-        <span className="logo" aria-hidden="true"><svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M3 4h14v12H3zM6 7h8M6 10h5M6 13h8"/></svg></span>
-        <span className="brand-name">OpenCAD <span className="brand-discipline">Electrical</span></span>
-      </div>
       <input ref={fileInputRef} type="file" accept=".json" onChange={onFileChosen} style={{ display: 'none' }} />
       <input ref={dxfInputRef} type="file" accept=".dxf" onChange={onDXFChosen} style={{ display: 'none' }} />
       <input ref={ifcInputRef} type="file" accept=".ifc" onChange={onIFCChosen} style={{ display: 'none' }} />
       <input ref={cablesInputRef} type="file" accept=".csv" onChange={onCablesChosen} style={{ display: 'none' }} />
-      <MenuButton label="File" open={openMenu === 'file'} onClick={click('file')}>
+      <MenuButton label="OpenCAD" open={openMenu === 'app'} onClick={click('app')}>
         <MenuOpt label="New containment layout" onClick={action(() => newLayoutDialogRef.current?.showModal())} hint="" />
         <MenuOpt label="New blank project" onClick={action(onNew)} hint="" />
-        <MenuOpt label="Open…" onClick={action(onOpen)} hint={shortcutHint('file.open')} />
-        <MenuOpt label="Save" onClick={action(onSave)} hint={shortcutHint('file.save')} />
+        <MenuOpt label="Open project…" onClick={action(onOpen)} hint={shortcutHint('file.open')} />
+        <MenuOpt label="Save a copy…" onClick={action(onSave)} hint={shortcutHint('file.save')} />
         <Divider />
-        <MenuOpt label="Export SVG…" onClick={action(onExportSVG)} hint="" />
-        <MenuOpt label="Export PNG…" onClick={action(onExportPNG)} hint="" />
-        <MenuOpt label="Export PDF…" onClick={action(onExportPDF)} hint={shortcutHint('file.export-pdf')} />
-        <Divider />
-        <SubMenu
-          label="Export"
-          isOpen={openSubmenu === 'export'}
-          onHover={() => setOpenSubmenu('export')}
-        >
-          <MenuOpt label="Export IFC (BIM)…" onClick={action(onExportIFC)} hint="" />
-          <MenuOpt label="Export DXF Underlay (Coming Soon)" onClick={() => {}} hint="" disabled />
-          <MenuOpt label="Export COBie Bundle…" onClick={action(onExportCOBie)} hint="" />
+        <SubMenu label="Export" isOpen={openSubmenu === 'export'} onHover={() => setOpenSubmenu('export')}>
+          <MenuOpt label="SVG…" onClick={action(onExportSVG)} hint="" />
+          <MenuOpt label="PNG…" onClick={action(onExportPNG)} hint="" />
+          <MenuOpt label="PDF…" onClick={action(onExportPDF)} hint={shortcutHint('file.export-pdf')} />
+          <MenuOpt label="IFC…" onClick={action(onExportIFC)} hint="" />
+          <MenuOpt label="COBie…" onClick={action(onExportCOBie)} hint="" />
           <Divider />
-          <MenuOpt label="Export Cable Schedule (CSV)…" onClick={action(onExportCableScheduleCSV)} hint="" />
-          <MenuOpt label="Export Cable Schedule (PDF)…" onClick={action(onExportCableSchedulePDF)} hint="" />
-          <MenuOpt label="Export Containment BOM (CSV)…" onClick={action(onExportContainmentBOMCSV)} hint="" />
-          <MenuOpt label="Export Compliance Report (PDF)…" onClick={action(onExportCompliancePDF)} hint="" />
-          <MenuOpt label="Export Cost Estimate (CSV)…" onClick={action(onExportCostEstimateCSV)} hint="" />
+          <MenuOpt label="Cable schedule · CSV…" onClick={action(onExportCableScheduleCSV)} hint="" />
+          <MenuOpt label="Cable schedule · PDF…" onClick={action(onExportCableSchedulePDF)} hint="" />
+          <MenuOpt label="Containment BOM…" onClick={action(onExportContainmentBOMCSV)} hint="" />
+          <MenuOpt label="Compliance report…" onClick={action(onExportCompliancePDF)} hint="" />
+          <MenuOpt label="Cost estimate…" onClick={action(onExportCostEstimateCSV)} hint="" />
         </SubMenu>
-        <SubMenu
-          label="Import"
-          isOpen={openSubmenu === 'import'}
-          onHover={() => setOpenSubmenu('import')}
-        >
-          <MenuOpt label="Import DWG/DXF as Underlay…" onClick={action(onImportDXF)} hint="" />
-          <MenuOpt label="Import IFC Reference…" onClick={action(onImportIFC)} hint="" />
-          <MenuOpt label="Import Cables (CSV)…" onClick={action(onImportCables)} hint="" />
+        <SubMenu label="Import" isOpen={openSubmenu === 'import'} onHover={() => setOpenSubmenu('import')}>
+          <MenuOpt label="DXF underlay…" onClick={action(onImportDXF)} hint="" />
+          <MenuOpt label="IFC reference…" onClick={action(onImportIFC)} hint="" />
+          <MenuOpt label="Cable schedule…" onClick={action(onImportCables)} hint="" />
         </SubMenu>
-        {onShowCollaboration && (
-          <>
-            <Divider />
-            <MenuOpt label="Collaboration…" onClick={action(onShowCollaboration)} hint="" />
-          </>
-        )}
+        <SubMenu label="Tools" isOpen={openSubmenu === 'tools'} onHover={() => setOpenSubmenu('tools')}>
+          <MenuOpt label="Schedules & BOM…" onClick={action(onShowBom)} hint="" />
+          {onShowCableSchedule && <MenuOpt label="Cable schedule…" onClick={action(onShowCableSchedule)} hint="" />}
+          {onShowCompliance && <MenuOpt label="Compliance…" onClick={action(onShowCompliance)} hint="" />}
+          {onShowCatalogue && <MenuOpt label="Catalogue…" onClick={action(onShowCatalogue)} hint="" />}
+          {onShowCost && <MenuOpt label="Cost estimate…" onClick={action(onShowCost)} hint="" />}
+          {onShowCrossSection && <MenuOpt label="Cross section…" onClick={action(onShowCrossSection)} hint="" />}
+          <Divider />
+          <MenuOpt label="Auto-number wires" onClick={action(onAutoNumber)} hint="" />
+          <MenuOpt label="Regenerate auto-features" onClick={action(onRerunAutoFeatures)} hint="" />
+          <MenuOpt label="Space containments" onClick={action(onStraightenAndSpaceContainments)} hint="" />
+        </SubMenu>
+        <SubMenu label="Standards" isOpen={openSubmenu === 'standards'} onHover={() => setOpenSubmenu('standards')}>
+          <div className="settings-pane" onClick={(event) => event.stopPropagation()}><StandardsProfilePicker /></div>
+        </SubMenu>
+        {onShowCollaboration && <MenuOpt label="Collaboration…" onClick={action(onShowCollaboration)} hint="" />}
+        <Divider />
+        <MenuOpt label="Search everything…" onClick={action(() => runCommand('help.palette'))} hint={shortcutHint('help.palette')} />
+        <MenuOpt label="Keyboard shortcuts" onClick={action(() => runCommand('help.shortcuts'))} hint={shortcutHint('help.shortcuts')} />
+        <MenuOpt label="About OpenCAD" onClick={action(onShowAbout)} hint="" />
       </MenuButton>
-      {!simpleContainment && <MenuButton label="Edit" open={openMenu === 'edit'} onClick={click('edit')}>
-        <MenuOpt label="Undo" onClick={action(undo)} hint={shortcutHint('edit.undo')} />
-        <MenuOpt label="Redo" onClick={action(redo)} hint={shortcutHint('edit.redo')} />
-        <Divider />
-        <MenuOpt label="Select All" onClick={action(() => { const { project, setSelection } = useStore.getState(); const sheet = project.sheets[project.activeSheetId]; setSelection(sheet.entityOrder); })} hint={shortcutHint('edit.select-all')} />
-        <MenuOpt label="Deselect" onClick={action(() => useStore.getState().clearSelection())} hint={shortcutHint('edit.cancel')} />
-        <Divider />
-        <MenuOpt label="Delete Selection" onClick={action(() => { const ids = Array.from(useStore.getState().editor.selection); useStore.getState().removeEntities(ids); })} hint={shortcutHint('edit.delete')} />
-        <Divider />
-        <MenuOpt label="Align Left" onClick={action(() => useStore.getState().alignEntities('left'))} hint="" disabled={selectionSize < 2} />
-        <MenuOpt label="Align Center Horizontal" onClick={action(() => useStore.getState().alignEntities('center-h'))} hint="" disabled={selectionSize < 2} />
-        <MenuOpt label="Align Right" onClick={action(() => useStore.getState().alignEntities('right'))} hint="" disabled={selectionSize < 2} />
-        <MenuOpt label="Align Top" onClick={action(() => useStore.getState().alignEntities('top'))} hint="" disabled={selectionSize < 2} />
-        <MenuOpt label="Align Center Vertical" onClick={action(() => useStore.getState().alignEntities('center-v'))} hint="" disabled={selectionSize < 2} />
-        <MenuOpt label="Align Bottom" onClick={action(() => useStore.getState().alignEntities('bottom'))} hint="" disabled={selectionSize < 2} />
-        <Divider />
-        <MenuOpt label="Distribute Horizontal" onClick={action(() => useStore.getState().distributeEntities('horizontal'))} hint="" disabled={selectionSize < 3} />
-        <MenuOpt label="Distribute Vertical" onClick={action(() => useStore.getState().distributeEntities('vertical'))} hint="" disabled={selectionSize < 3} />
-        <MenuOpt label="Flip Horizontal" onClick={action(() => useStore.getState().flipEntities('horizontal'))} hint={shortcutHint('edit.flip-horizontal')} disabled={selectionSize < 1} />
-        <MenuOpt label="Flip Vertical" onClick={action(() => useStore.getState().flipEntities('vertical'))} hint={shortcutHint('edit.flip-vertical')} disabled={selectionSize < 1} />
-      </MenuButton>}
-      <MenuButton label="View" open={openMenu === 'view'} onClick={click('view')}>
-        <MenuOpt label="Zoom Extents" onClick={action(() => runCommand('view.zoom-extents'))} hint="" />
-        <MenuOpt label="2D Only" onClick={action(() => useStore.getState().setViewMode('2d'))} hint="" />
-        <MenuOpt label="Split View" onClick={action(() => useStore.getState().setViewMode('split'))} hint="" />
-        <MenuOpt label="3D Only" onClick={action(() => useStore.getState().setViewMode('3d'))} hint="" />
-        <MenuOpt label="Toggle Ortho" onClick={action(() => useStore.getState().setOrtho(!useStore.getState().editor.ortho))} hint={shortcutHint('view.toggle-ortho')} />
-        <MenuOpt label="Toggle Snap" onClick={action(() => useStore.getState().setSnap({ enabled: !useStore.getState().editor.snap.enabled }))} hint={shortcutHint('view.toggle-snap')} />
-        <MenuOpt label="Toggle Grid" onClick={action(() => useStore.getState().setSnap({ grid: !useStore.getState().editor.snap.grid }))} hint={shortcutHint('view.toggle-grid')} />
-      </MenuButton>
-      {!simpleContainment && <MenuButton label="Tools" open={openMenu === 'tools'} onClick={click('tools')}>
-        <MenuOpt label="Auto-Number Wires" onClick={action(onAutoNumber)} hint="" />
-        <MenuOpt label="Re-run Auto-Features on Selection" onClick={action(onRerunAutoFeatures)} hint="" />
-        <MenuOpt label="Straighten/Space Selected Containments" onClick={action(onStraightenAndSpaceContainments)} hint="" />
-        <MenuOpt label="Schedules &amp; BOM…" onClick={action(onShowBom)} hint="" />
-        <Divider />
-        {onShowCableSchedule && <MenuOpt label="Cable Schedule…" onClick={action(onShowCableSchedule)} hint="" />}
-        {onShowCompliance && <MenuOpt label="Compliance Dashboard…" onClick={action(onShowCompliance)} hint="" />}
-        {onShowCatalogue && <MenuOpt label="Catalogue Browser…" onClick={action(onShowCatalogue)} hint="" />}
-        {onShowCrossSection && <MenuOpt label="Edit Cross Section…" onClick={action(onShowCrossSection)} hint="" />}
-        <Divider />
-        {onShowCost && <MenuOpt label="Cost Estimate…" onClick={action(onShowCost)} hint="" />}
-        <Divider />
-        <MenuOpt
-          label="Generate Cross-Section…"
-          onClick={action(() => setViewGeneratorKind('cross-section'))}
-          hint=""
-        />
-        <MenuOpt
-          label="Generate Elevation View…"
-          onClick={action(() => setViewGeneratorKind('elevation'))}
-          hint=""
-        />
-        <MenuOpt
-          label="Generate Riser Diagram…"
-          onClick={action(() => setViewGeneratorKind('riser'))}
-          hint=""
-        />
-        <MenuOpt
-          label="Generate Isometric…"
-          onClick={action(() => setViewGeneratorKind('isometric'))}
-          hint=""
-        />
-      </MenuButton>}
-      {!simpleContainment && <MenuButton label="Settings" open={openMenu === 'settings'} onClick={click('settings')}>
-        <div className="settings-pane" onClick={(e) => e.stopPropagation()}>
-          <StandardsProfilePicker />
-        </div>
-      </MenuButton>}
-      <MenuButton label="Help" open={openMenu === 'help'} onClick={click('help')}>
-        <MenuOpt label="Command Palette…" onClick={action(() => runCommand('help.palette'))} hint={shortcutHint('help.palette')} />
-        <MenuOpt label="Keyboard Shortcuts" onClick={action(() => runCommand('help.shortcuts'))} hint={shortcutHint('help.shortcuts')} />
-        <Divider />
-        <MenuOpt label="About OpenCAD Electrical" onClick={action(onShowAbout)} hint="" />
-      </MenuButton>
+      <span className="menu-project-name" title={`${projectName} · ${sheetCount} sheets · ${projectStandard}`}>{projectName}</span>
       <div className="menu-spacer" />
-      <span className="menu-info" title={`${projectName} · ${sheetCount} sheets · ${projectStandard}`}><span className="menu-project-name">{projectName}</span>{!simpleContainment && <span className="menu-project-meta">{sheetCount} sheets · {projectStandard}</span>}</span>
-      <button type="button" className="menu-command-button" onClick={() => runCommand('help.palette')} title={`Search commands (${shortcutHint('help.palette')})`}><span>Commands</span><kbd>{shortcutHint('help.palette')}</kbd></button>
+      <button type="button" className="menu-command-button" onClick={() => runCommand('help.palette')} aria-label="Search everything" title={`Search everything (${shortcutHint('help.palette')})`}><AppIcon name="search" size={16} /><span>Search anything…</span><kbd>{shortcutHint('help.palette')}</kbd></button>
+      <div className="menu-history" role="group" aria-label="Edit history">
+        <button type="button" className="header-icon" onClick={undo} disabled={past === 0} title={`Undo (${shortcutHint('edit.undo')})`} aria-label="Undo"><AppIcon name="undo" /></button>
+        <button type="button" className="header-icon" onClick={redo} disabled={future === 0} title={`Redo (${shortcutHint('edit.redo')})`} aria-label="Redo"><AppIcon name="redo" /></button>
+      </div>
+      <div className="header-view-switch" role="group" aria-label="Workspace view">
+        <button type="button" aria-label="2D drawing" aria-pressed={viewMode === '2d'} onClick={() => setViewMode('2d')}>2D</button>
+        <button type="button" className="header-split" aria-label="Split view" title="Split view" aria-pressed={viewMode === 'split'} onClick={() => setViewMode('split')}><AppIcon name="split" size={15} /></button>
+        <button type="button" aria-label="3D model" aria-pressed={viewMode === '3d'} onClick={() => setViewMode('3d')}>3D</button>
+      </div>
+      <div className="menu-panels" role="group" aria-label="Side panels">
+        <button type="button" className="header-icon" aria-label="Toggle sidebar" title="Toggle sidebar" aria-pressed={leftVisible} onClick={onToggleLeft}><AppIcon name="sidebar" /></button>
+        {!simpleContainment && <button type="button" className="header-icon" aria-label="Toggle inspector" title="Toggle inspector" aria-pressed={rightVisible} onClick={onToggleRight}><AppIcon name="inspector" /></button>}
+      </div>
       <dialog className="new-layout-dialog" ref={newLayoutDialogRef} aria-labelledby="new-layout-title" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
         <h2 id="new-layout-title">Open a new containment layout?</h2>
         <p>This replaces the current project. Save a copy first if you want to keep it.</p>
@@ -667,9 +617,9 @@ function MenuButton({
 }) {
   return (
     <div style={{ position: 'relative' }}>
-      <button type="button" className={`menu-item${open ? ' open' : ''}`} onClick={onClick} aria-haspopup="menu" aria-expanded={open}>{label}</button>
+      <button type="button" className={`menu-item${open ? ' open' : ''}`} onClick={onClick} aria-haspopup="menu" aria-expanded={open}><AppIcon name="app" size={19} /><span>{label}</span><AppIcon name="chevron" size={14} /></button>
       {open && (
-        <div className="context-menu" style={{ left: 0, top: 24 }}>
+        <div className="context-menu app-menu" role="menu" aria-label="Application menu" onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); (event.currentTarget.previousElementSibling as HTMLButtonElement)?.click(); (event.currentTarget.previousElementSibling as HTMLButtonElement)?.focus(); } }} style={{ left: 0, top: 38 }}>
           {children}
         </div>
       )}
@@ -689,14 +639,14 @@ function MenuOpt({
   disabled?: boolean;
 }) {
   return (
-    <div
+    <button type="button" role="menuitem" disabled={disabled}
       className={`item${disabled ? ' disabled' : ''}`}
       onClick={disabled ? undefined : onClick}
       style={disabled ? { opacity: 0.5, cursor: 'default' } : undefined}
     >
       {label}
       {hint && <span className="key">{hint}</span>}
-    </div>
+    </button>
   );
 }
 
@@ -721,6 +671,11 @@ function SubMenu({
   return (
     <div
       className={`item submenu-anchor${isOpen ? ' is-open' : ''}`}
+      role="menuitem"
+      tabIndex={0}
+      aria-haspopup="menu"
+      aria-expanded={isOpen}
+      onKeyDown={(event) => { if (event.key === 'Enter' || event.key === 'ArrowRight' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onHover(); } }}
       onMouseEnter={onHover}
       onClick={(e) => {
         e.stopPropagation();

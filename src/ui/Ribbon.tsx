@@ -1,4 +1,5 @@
 import React from 'react';
+import { AppIcon } from './AppIcon';
 import { useStore } from '../state/store';
 import type { ToolId } from '../types';
 import { runCommand, shortcutHint } from '../lib/commands';
@@ -62,195 +63,17 @@ const TOOL_DEFS: { id: ToolId; label: string; group: string; key?: string }[] = 
   { id: 'measure', label: 'Measure', group: 'Annot', key: 'M' },
 ];
 
-const GROUPS = ['Edit', 'Draw', 'Wire', 'Contain', 'Building', 'Place', 'Annot'];
-const GROUP_LABELS: Record<string, string> = {
-  Edit: 'Selection', Draw: 'Drawing', Wire: 'Electrical', Contain: 'Containment',
-  Building: 'Building', Place: 'Placement', Annot: 'Annotation',
-};
+const PRIMARY_TOOLS: ToolId[] = ['select', 'pan', 'line', 'polyline', 'rectangle', 'circle', 'wire', 'text', 'dimension', 'measure'];
 
 export function Ribbon() {
   const tool = useStore((s) => s.editor.tool);
   const setTool = useStore((s) => s.setTool);
-  const ortho = useStore((s) => s.editor.ortho);
-  const snap = useStore((s) => s.editor.snap);
-  const viewMode = useStore((s) => s.editor.viewMode);
-  const setOrtho = useStore((s) => s.setOrtho);
-  const setSnap = useStore((s) => s.setSnap);
-  const setViewMode = useStore((s) => s.setViewMode);
-  const undo = useStore((s) => s.undo);
-  const redo = useStore((s) => s.redo);
-  const past = useStore((s) => s.past.length);
-  const future = useStore((s) => s.future.length);
-  const autoRoute = useStore((s) => s.autoRoute);
-  const setAutoRoute = useStore((s) => s.setAutoRoute);
-  const viewBack = useStore((s) => s.viewBack);
-  const viewForward = useStore((s) => s.viewForward);
-  const viewIndex = useStore((s) => s.viewHistory.index);
-  const viewStackLen = useStore((s) => s.viewHistory.stack.length);
-  const canViewBack = viewIndex > 0;
-  const canViewForward = viewIndex < viewStackLen - 1;
-  const selectionSize = useStore((s) => s.editor.selection.size);
-  const clearSelection = useStore((s) => s.clearSelection);
-  const isModel = viewMode === '3d';
-
-  return (
-    <div className={`ribbon${isModel ? ' ribbon-model' : ' ribbon-drawing'}`} role="toolbar" aria-label={isModel ? 'Model workspace commands' : 'Drawing commands'}>
-      <div className="ribbon-group" data-group="View">
-        <div className="ribbon-buttons">
-          <button type="button" className={`tool-btn${viewMode === '2d' ? ' active' : ''}`} aria-pressed={viewMode === '2d'} onClick={() => setViewMode('2d')} title="2D drawing workspace">
-            <span className="icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2"><rect x="3" y="5" width="18" height="14"/><path d="M7 9l4 4 6-6"/></svg>
-            </span>
-            <span className="label">2D drawing</span>
-          </button>
-          <button type="button" className={`tool-btn${viewMode === 'split' ? ' active' : ''}`} aria-pressed={viewMode === 'split'} onClick={() => setViewMode('split')} title="Split view (2D + 3D)">
-            <span className="icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2"><rect x="3" y="5" width="18" height="14"/><line x1="12" y1="5" x2="12" y2="19"/></svg>
-            </span>
-            <span className="label">Split</span>
-          </button>
-          <button type="button" className={`tool-btn${viewMode === '3d' ? ' active' : ''}`} aria-pressed={viewMode === '3d'} onClick={() => setViewMode('3d')} title="3D model workspace">
-            <span className="icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg>
-            </span>
-            <span className="label">3D model</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">Workspace</div>
-      </div>
-
-      {isModel && (
-        <div className="ribbon-group" data-group="Inspect">
-          <div className="ribbon-buttons">
-            <button type="button" className={`tool-btn${tool === 'select' ? ' active' : ''}`} aria-pressed={tool === 'select'} onClick={() => setTool('select')} title="Select components in the model">
-              <span className="icon">{ICONS.select}</span><span className="label">Select</span>
-            </button>
-            <button type="button" className="tool-btn" onClick={() => runCommand('dialog.find-entity')} title={`Find a component (${shortcutHint('dialog.find-entity')})`}>
-              <span className="icon"><svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="1.7"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg></span>
-              <span className="label">Find component</span>
-            </button>
-            <button type="button" className="tool-btn" onClick={clearSelection} disabled={selectionSize === 0} title="Clear the current selection">
-              <span className="icon"><svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="1.7"><rect x="4" y="4" width="16" height="16" strokeDasharray="3 3"/><path d="m8 8 8 8m0-8-8 8"/></svg></span>
-              <span className="label">Clear</span>
-            </button>
-          </div>
-          <div className="ribbon-group-label">Inspect</div>
-        </div>
-      )}
-
-      {!isModel && GROUPS.map((g) => (
-        <div className="ribbon-group" key={g} data-group={g}>
-          <div className="ribbon-buttons">
-            {TOOL_DEFS.filter((t) => t.group === g).map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                className={`tool-btn${tool === t.id ? ' active' : ''}`}
-                aria-pressed={tool === t.id}
-                onClick={() => setTool(t.id)}
-                title={`${t.label}${t.key ? ` (${t.key})` : ''}`}
-              >
-                <span className="icon">{ICONS[t.id]}</span>
-                <span className="label">{t.label}</span>
-              </button>
-            ))}
-            {g === 'Wire' && (
-              <button
-                className={`tool-btn${autoRoute ? ' active' : ''}`}
-                onClick={() => setAutoRoute(!autoRoute)}
-                title="Auto-route wires (right-angle paths)"
-              >
-                <span className="icon">
-                  <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="4,18 4,6 20,6" />
-                  </svg>
-                </span>
-                <span className="label">Auto</span>
-              </button>
-            )}
-          </div>
-          <div className="ribbon-group-label">{GROUP_LABELS[g]}</div>
-        </div>
-      ))}
-
-      <div className="ribbon-group" data-group="History">
-        <div className="ribbon-buttons">
-          <button className="tool-btn" onClick={undo} disabled={past === 0} title="Undo (⌘Z)">
-            <span className="icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><path d="M3 8h13a5 5 0 0 1 0 10h-3M3 8l4-4M3 8l4 4"/></svg>
-            </span>
-            <span className="label">Undo</span>
-          </button>
-          <button className="tool-btn" onClick={redo} disabled={future === 0} title="Redo (⌘⇧Z)">
-            <span className="icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><path d="M21 8H8a5 5 0 0 0 0 10h3M21 8l-4-4M21 8l-4 4"/></svg>
-            </span>
-            <span className="label">Redo</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">History</div>
-      </div>
-
-      {!isModel && <div className="ribbon-group" data-group="Snap">
-        <div className="ribbon-buttons">
-          <button className={`tool-btn${ortho ? ' active' : ''}`} onClick={() => setOrtho(!ortho)} title="Ortho (F8)">
-            <span className="icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2"><path d="M3 12h18M12 3v18"/></svg>
-            </span>
-            <span className="label">Ortho</span>
-          </button>
-          <button className={`tool-btn${snap.enabled ? ' active' : ''}`} onClick={() => setSnap({ enabled: !snap.enabled })} title="Snap (F9)">
-            <span className="icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2"><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M3 12h6M15 12h6M12 3v6M12 15v6"/></svg>
-            </span>
-            <span className="label">Snap</span>
-          </button>
-          <button className={`tool-btn${snap.grid ? ' active' : ''}`} onClick={() => setSnap({ grid: !snap.grid })} title="Grid Snap (F7)">
-            <span className="icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="1.5"><path d="M3 3h6v6H3zM15 3h6v6h-6zM3 15h6v6H3zM15 15h6v6h-6z"/></svg>
-            </span>
-            <span className="label">Grid</span>
-          </button>
-          <button className={`tool-btn${snap.osnap ? ' active' : ''}`} onClick={() => setSnap({ osnap: !snap.osnap })} title="Object Snap (F3)">
-            <span className="icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round"><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><path d="M6.34 6.34l2.83 2.83M14.83 14.83l2.83 2.83M6.34 17.66l2.83-2.83M14.83 9.17l2.83-2.83"/><circle cx="12" cy="12" r="3"/></svg>
-            </span>
-            <span className="label">OSnap</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">Snap</div>
-      </div>}
-
-      {!isModel && <div className="ribbon-group" data-group="Nav">
-        <div className="ribbon-buttons">
-          <button
-            className="tool-btn"
-            onClick={viewBack}
-            disabled={!canViewBack}
-            title="Previous view (Alt+←)"
-          >
-            <span className="icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/><circle cx="6" cy="12" r="1.5" fill="currentColor"/></svg>
-            </span>
-            <span className="label">Back</span>
-          </button>
-          <button
-            className="tool-btn"
-            onClick={viewForward}
-            disabled={!canViewForward}
-            title="Next view (Alt+→)"
-          >
-            <span className="icon">
-              <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6"/><circle cx="18" cy="12" r="1.5" fill="currentColor"/></svg>
-            </span>
-            <span className="label">Fwd</span>
-          </button>
-        </div>
-        <div className="ribbon-group-label">View history</div>
-      </div>}
-
-      {isModel && <div className="ribbon-context">Installation workspace</div>}
-
-    </div>
-  );
+  return <div className="ribbon" role="toolbar" aria-label="Drawing tools">
+    {PRIMARY_TOOLS.map((id) => {
+      const item = TOOL_DEFS.find((entry) => entry.id === id)!;
+      return <button key={id} type="button" className={`tool-btn${tool === id ? ' active' : ''}`} aria-label={item.label} aria-pressed={tool === id} onClick={() => setTool(id)} title={`${item.label}${item.key ? ` (${item.key})` : ''}`}><span className="icon">{ICONS[id]}</span></button>;
+    })}
+    <span className="ribbon-divider" />
+    <button type="button" className="tool-btn" aria-label="Add component or find a tool" onClick={() => runCommand('help.palette')} title={`Add component or find a tool (${shortcutHint('help.palette')})`}><AppIcon name="plus" /></button>
+  </div>;
 }

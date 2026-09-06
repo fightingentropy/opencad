@@ -25,6 +25,13 @@ import {
   autoDetectPenetrationsForContainment,
 } from '../lib/auto-features';
 import { publishPresence as publishCollabPresence } from '../collab/runtime';
+import {
+  cancelComponentPlacement,
+  commitComponentPlacement,
+  componentPlacementPreview,
+  setComponentPlacementPosition,
+  useComponentPlacement,
+} from '../state/component-placement';
 
 // After committing one or more containments, derive their fittings,
 // supports, and fire-stop penetrations and dispatch them as a single
@@ -63,6 +70,9 @@ export function CadCanvas() {
   const [dpr, setDpr] = useState(window.devicePixelRatio || 1);
   const [panning, setPanning] = useState(false);
   const [spaceHeld, setSpaceHeld] = useState(false);
+  const placement = useComponentPlacement((state) => state.pending);
+  const placementPosition = useComponentPlacement((state) => state.position);
+  const placementDownRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const [marquee, setMarquee] = useState<{ a: Vec2; b: Vec2 } | null>(null);
   const [draggingSelection, setDraggingSelection] = useState<{
     start: Vec2;
@@ -136,6 +146,28 @@ export function CadCanvas() {
     setViewport(fitViewportToSheet(sheet, size.w, size.h));
   }, [sheet, size.w, size.h, setViewport]);
 
+  useEffect(() => {
+    placementDownRef.current = null;
+    if (placement?.surface !== '2d') return;
+    setPanning(false);
+    setMarquee(null);
+    setDraggingSelection(null);
+    const frame = requestAnimationFrame(() => {
+      const state = useStore.getState();
+      const viewport = state.editor.viewport;
+      const preview = componentPlacementPreview({ x: viewport.x, y: viewport.y });
+      if (preview?.kind === 'symbol') {
+        const bounds = getSymbol(preview.symbolId)?.bounds;
+        const span = bounds ? Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) * preview.scale : 0;
+        if (span > 0 && span * viewport.zoom < 48) {
+          state.setViewport({ ...viewport, zoom: Math.min(200, 48 / span) });
+        }
+      }
+      setComponentPlacementPosition({ x: viewport.x, y: viewport.y });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [placement]);
+
   // Render — schedule a single frame per state change (instead of a perpetual
   // requestAnimationFrame loop). The previous implementation re-queued itself
   // every frame and re-set canvas.width/height each tick, causing both wasted
@@ -169,6 +201,8 @@ export function CadCanvas() {
         symbolLookup: getSymbol,
         autoRoute,
         autoRouteFlip: autoRouteFlipRef.current,
+        placementPreview: placement?.surface === '2d' && placementPosition
+          ? componentPlacementPreview(placementPosition) ?? undefined : undefined,
       });
 
       if (marquee) {
@@ -196,7 +230,7 @@ export function CadCanvas() {
     return () => {
       if (raf !== null) cancelAnimationFrame(raf);
     };
-  }, [sheet, layers, cableSchedule, standardsProfile, editor, size, dpr, marquee, autoRoute]);
+  }, [sheet, layers, cableSchedule, standardsProfile, editor, size, dpr, marquee, autoRoute, placement, placementPosition]);
 
   const eventToWorld = (e: { clientX: number; clientY: number }): Vec2 => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -244,6 +278,14 @@ export function CadCanvas() {
         x: v.x - e.movementX / v.zoom,
         y: v.y + e.movementY / v.zoom,
       });
+      return;
+    }
+
+    if (useComponentPlacement.getState().pending?.surface === '2d') {
+      setComponentPlacementPosition(snap.kind === 'none' ? world : snap.point);
+      const down = placementDownRef.current;
+      if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) down.moved = true;
+      setHover(null);
       return;
     }
 
@@ -324,6 +366,14 @@ export function CadCanvas() {
       // Snapshot the viewport at the start of the gesture so we record
       // exactly one history entry per pan, not one per mouse-move event.
       useStore.getState().recordView();
+      return;
+    }
+
+    if (useComponentPlacement.getState().pending?.surface === '2d') {
+      if (e.button === 0) {
+        placementDownRef.current = { x: e.clientX, y: e.clientY, moved: false };
+        e.preventDefault();
+      } else if (e.button === 2) cancelComponentPlacement();
       return;
     }
 
@@ -485,6 +535,19 @@ export function CadCanvas() {
   };
 
   const handleMouseUp = (e: React.MouseEvent) => {
+    const placementDown = placementDownRef.current;
+    if (placementDown) {
+      placementDownRef.current = null;
+      if (e.button === 0 && !placementDown.moved
+        && Math.hypot(e.clientX - placementDown.x, e.clientY - placementDown.y) <= 5) {
+        const world = eventToWorld(e);
+        const snap = computeSnap(world, sheet, editor.snap, {
+          pixelsPerMm: editor.viewport.zoom, toleranceScreenPx: 12, symbolLookup: getSymbol,
+        }, (id) => layers[id]?.visible ?? true);
+        commitComponentPlacement(snap.kind === 'none' ? world : snap.point);
+      }
+      return;
+    }
     if (panning) {
       setPanning(false);
       // Record the post-gesture viewport so back/forward steps land here.
@@ -786,17 +849,16 @@ export function CadCanvas() {
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
-        onMouseLeave={() => { setHover(null); setPanning(false); setMarquee(null); setDraggingSelection(null); }}
+        onMouseLeave={() => { placementDownRef.current = null; setComponentPlacementPosition(null); setHover(null); setPanning(false); setMarquee(null); setDraggingSelection(null); }}
         onWheel={handleWheel}
         onContextMenu={(e) => e.preventDefault()}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
         onTouchCancel={handleTouchEnd}
-        style={{ touchAction: 'none' }}
+        style={{ touchAction: 'none', cursor: placement?.surface === '2d' ? 'crosshair' : undefined }}
         tabIndex={0}
       />
-      <CoordReadout />
       <CommandHint />
       {textInput && (
         <TextInput
@@ -869,22 +931,13 @@ function TextInput({
   );
 }
 
-function CoordReadout() {
-  const cursor = useStore((s) => s.editor.cursor);
-  const cursorSnap = useStore((s) => s.editor.cursorSnap);
-  const viewport = useStore((s) => s.editor.viewport);
-  const c = cursorSnap ?? cursor;
-  return (
-    <div className="coord-readout">
-      X {c.x.toFixed(2)}  Y {c.y.toFixed(2)}  Z {viewport.zoom.toFixed(2)}
-    </div>
-  );
-}
-
 function CommandHint() {
   const status = useStore((s) => s.editor.statusMessage);
   const tool = useStore((s) => s.editor.tool);
   const drafting = useStore((s) => s.editor.drafting);
+  const placement = useComponentPlacement((state) => state.pending);
+  if (placement?.surface === '2d') return <div className="canvas-overlay" role="status">{placement.hint}</div>;
+  if ((tool === 'select' || tool === 'pan') && !drafting) return null;
   return (
     <div className="canvas-overlay">
       Tool: {tool.toUpperCase()} {drafting ? `(${drafting.points.length} pt)` : ''}

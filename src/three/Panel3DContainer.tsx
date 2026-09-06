@@ -130,9 +130,6 @@ export function Panel3DContainer({ width = 320, fillParent = false }: Props) {
               state.setStatus(`Selected ${installationEntityLabel(entity)} in 3D`);
             }}
           />
-          <div className="canvas-3d-overlay">
-            3D Panel View • click a part to inspect • drag to orbit • scroll to zoom
-          </div>
           <div className="canvas-3d-controls">
             <div className="group" role="group" aria-label="Installation appearance">
               {(['progress', 'materials'] as const).map((mode) => (

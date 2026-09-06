@@ -23,7 +23,7 @@ OpenCAD Electrical is a browser-first design tool for cable containment systems 
 
 ## Inspect and record an installation
 
-Open **3D → Model explorer**, search a tag or filter by floor/type/status, and select a component. The inspector shows its dimensions, electrical ratings, system and connected cable records. **Focus in 3D** locates the part; **Isolate part** removes surrounding context. The model itself also supports click selection, including equipment, fittings, supports and penetration seals.
+Open **3D → Objects**, search a tag or filter by floor/type/status, and select a component. The inspector shows its dimensions, electrical ratings, system and connected cable records. **Focus in 3D** locates the part; **Isolate part** removes surrounding context. The model itself also supports click selection, including equipment, fittings, supports and penetration seals.
 
 The **Progress** view leaves completed parts in their full material colours. Planned parts are grey and in-progress parts are muted; neither state makes geometry transparent or changes its dimensions. **Materials** restores physical materials for inspection, while **Systems** helps trace services. Use **Open board doors**, **Remove covers**, and the layer controls to inspect internals, routed cables, fixings and fire stops. Project scope also supports separating floors. Legacy panel and single-sheet viewers have the same Progress/Materials states and part selection.
 
@@ -35,11 +35,19 @@ The bundled corporate sample includes dated **Demo team** progress and comments.
 
 ## Try the demo
 
-A hosted build is available at **<https://opencad.pages.dev>**. First launch opens a simple 3D containment layout: open-top tray (300 × 50 mm), trunking (150 × 150 mm) and wire basket (300 × 54 mm), each with a 3 m run and 1.5 m return. Use Iso, Top and Fit to inspect the geometry. This is a generic section study, not a fabrication drawing. Saved projects reopen as before; File → New containment layout creates the new study after a replacement prompt, with an option to save the current project first.
+A hosted build is available at **<https://opencad.pages.dev>**. First launch opens a simple 3D containment layout: open-top tray (300 × 50 mm), trunking (150 × 150 mm) and wire basket (300 × 54 mm), each with a 3 m run and 1.5 m return. Use Iso, Top and Fit to inspect the geometry. This is a generic section study, not a fabrication drawing. Saved projects reopen as before; OpenCAD → New containment layout creates the new study after a replacement prompt, with an option to save the current project first.
+
+## Search and place
+
+Press **⌘K** (Ctrl+K on Windows/Linux) or use the header search to find commands, objects across every sheet, drawings and addable components. Use a tag or part number for an exact match; `find basket` locates an existing object, while `add tray 300` lists 300 mm tray sections. Select a result with the arrow keys and Enter, or click it.
+
+An **Add** result starts a pointer preview. Click the canvas to insert one part, or press Escape to cancel. Trays, trunking and baskets can be placed directly in the simple 3D layout; schematic symbols and other component kinds switch to 2D. Small symbols zoom in for placement without changing their dimensions. Insertions use the normal undo history and respect layer and collaboration permissions. Catalogue records need sufficient dimensions to be addable; other records remain available in the catalogue browser.
+
+The header keeps search, undo/redo, view selection and panel toggles together. The OpenCAD menu contains file actions, imports, exports and secondary tools; calculation, filter and review panels expand when needed.
 
 ## Collaboration (Beta)
 
-OpenCAD ships with optional real-time multi-user editing. Open **File → Collaboration…** and share the generated 128-bit room link. Cursors, selection outlines and entity edits sync live.
+OpenCAD ships with optional real-time multi-user editing. Open **OpenCAD → Collaboration…** and share the generated 128-bit room link. Cursors, selection outlines and entity edits sync live.
 
 - **Authenticated mode (production path).** A Cloudflare Access-protected Worker verifies the Access JWT, resolves owner/editor/viewer roles from configured emails or groups, and routes each room to its own SQLite-backed Durable Object. Viewers are rejected server-side if they attempt a document update. Hibernation WebSockets keep identity and role in serialized connection attachments; updates are persisted before acknowledgement/broadcast and compacted into bounded Yjs snapshots.
 - **Anonymous WebRTC beta (explicit opt-in).** For local evaluation, `VITE_ENABLE_ANONYMOUS_COLLAB=true` enables the original peer-to-peer mode over public signalling servers. It is visually separate and is never used as a fallback when the authenticated backend is missing or unavailable.

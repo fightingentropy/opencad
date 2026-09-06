@@ -140,12 +140,33 @@ const never = (): boolean => false;
 // Shared run() helpers
 // ---------------------------------------------------------------------------
 
+export type View3DCommand = { type: 'fit' } | { type: 'zoom'; factor: number };
+const VIEW_3D_COMMAND_EVENT = 'opencad:view-3d';
+
+/** The mounted viewer owns camera state and removes its subscription on unmount. */
+export const subscribeTo3DViewCommands = (handler: (command: View3DCommand) => void): (() => void) => {
+  const target = window;
+  const listener = (event: Event): void => handler((event as CustomEvent<View3DCommand>).detail);
+  target.addEventListener(VIEW_3D_COMMAND_EVENT, listener);
+  return () => target.removeEventListener(VIEW_3D_COMMAND_EVENT, listener);
+};
+
+const dispatch3DViewCommand = (store: StoreState, command: View3DCommand): boolean => {
+  if (store.editor.viewMode !== '3d') return false;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent<View3DCommand>(VIEW_3D_COMMAND_EVENT, { detail: command }));
+  }
+  return true;
+};
+
 const zoomBy = (store: StoreState, factor: number): void => {
+  if (dispatch3DViewCommand(store, { type: 'zoom', factor })) return;
   const v = store.editor.viewport;
   store.setViewport({ ...v, zoom: Math.max(0.05, Math.min(200, v.zoom * factor)) });
 };
 
 const zoomExtents = (store: StoreState): void => {
+  if (dispatch3DViewCommand(store, { type: 'fit' })) return;
   const sheet = store.project.sheets[store.project.activeSheetId];
   if (!sheet) return;
   // Best-effort canvas size: fall back to window if we can't query the canvas.

@@ -49,6 +49,11 @@ const pushPast = (past: Project[], project: Project): Project[] => {
   return next;
 };
 
+const selectionInProject = (selection: Set<EntityId>, project: Project): Set<EntityId> => {
+  const entities = project.sheets[project.activeSheetId]?.entities ?? {};
+  return new Set([...selection].filter((id) => Object.hasOwn(entities, id)));
+};
+
 // Recursively freeze a committed project (dev only). Frozen subtrees are
 // skipped, so with structural sharing each commit only pays for the objects
 // it actually created — unchanged sheets/entities stay frozen from the
@@ -899,7 +904,7 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   undo: () => {
-    const { project, past, future } = get();
+    const { project, past, future, editor } = get();
     if (past.length === 0) return;
     const prev = past[past.length - 1];
     set({
@@ -908,17 +913,19 @@ export const useStore = create<Store>((set, get) => ({
       // Push the outgoing project by reference — history shares structure
       // in both directions (see pushPast), so no clone is needed.
       future: [project, ...future],
+      editor: { ...editor, selection: selectionInProject(editor.selection, prev) },
     });
   },
 
   redo: () => {
-    const { project, past, future } = get();
+    const { project, past, future, editor } = get();
     if (future.length === 0) return;
     const next = future[0];
     set({
       project: next,
       past: pushPast(past, project),
       future: future.slice(1),
+      editor: { ...editor, selection: selectionInProject(editor.selection, next) },
     });
   },
 
