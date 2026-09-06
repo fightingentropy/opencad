@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../state/store';
+import { createContainmentSampleProject } from '../sample-containment';
 import { exportProjectJSON, importProjectJSON } from '../io/project';
 import { exportSheetSVG } from '../io/svg';
 import { exportSheetPNG } from '../io/png';
@@ -28,6 +29,7 @@ import { generateCostEstimate, costEstimateToCSV } from '../io/cost-estimate';
 import { ViewGeneratorModal, ViewGeneratorKind } from './ViewGeneratorModal';
 
 export function MenuBar({
+  simpleContainment = false,
   onShowBom,
   onShowAbout,
   onShowCableSchedule,
@@ -37,6 +39,7 @@ export function MenuBar({
   onShowCrossSection,
   onShowCollaboration,
 }: {
+  simpleContainment?: boolean;
   onShowBom: () => void;
   onShowAbout: () => void;
   onShowCableSchedule?: () => void;
@@ -68,6 +71,7 @@ export function MenuBar({
   const ifcInputRef = useRef<HTMLInputElement>(null);
   const cablesInputRef = useRef<HTMLInputElement>(null);
 
+  const newLayoutDialogRef = useRef<HTMLDialogElement>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
   const [viewGeneratorKind, setViewGeneratorKind] =
@@ -119,6 +123,15 @@ export function MenuBar({
     const json = exportProjectJSON(project);
     downloadText(json, `${safeProjectName()}.opencad.json`, 'application/json');
     setStatus(`Saved ${project.name}`);
+  };
+
+  const onNewContainment = () => {
+    newLayoutDialogRef.current?.close();
+    setProject(createContainmentSampleProject());
+    const state = useStore.getState();
+    state.clearSelection();
+    state.setViewMode('3d');
+    state.setStatus('Containment layout opened');
   };
 
   const onOpen = () => fileInputRef.current?.click();
@@ -479,6 +492,7 @@ export function MenuBar({
   useEffect(() => {
     registerUiHandlers({
       newProject: onNew,
+      newContainmentProject: () => newLayoutDialogRef.current?.showModal(),
       openProject: onOpen,
       saveProject: onSave,
       exportSVG: onExportSVG,
@@ -512,7 +526,8 @@ export function MenuBar({
       <input ref={ifcInputRef} type="file" accept=".ifc" onChange={onIFCChosen} style={{ display: 'none' }} />
       <input ref={cablesInputRef} type="file" accept=".csv" onChange={onCablesChosen} style={{ display: 'none' }} />
       <MenuButton label="File" open={openMenu === 'file'} onClick={click('file')}>
-        <MenuOpt label="New" onClick={action(onNew)} hint="" />
+        <MenuOpt label="New containment layout" onClick={action(() => newLayoutDialogRef.current?.showModal())} hint="" />
+        <MenuOpt label="New blank project" onClick={action(onNew)} hint="" />
         <MenuOpt label="Open…" onClick={action(onOpen)} hint={shortcutHint('file.open')} />
         <MenuOpt label="Save" onClick={action(onSave)} hint={shortcutHint('file.save')} />
         <Divider />
@@ -551,7 +566,7 @@ export function MenuBar({
           </>
         )}
       </MenuButton>
-      <MenuButton label="Edit" open={openMenu === 'edit'} onClick={click('edit')}>
+      {!simpleContainment && <MenuButton label="Edit" open={openMenu === 'edit'} onClick={click('edit')}>
         <MenuOpt label="Undo" onClick={action(undo)} hint={shortcutHint('edit.undo')} />
         <MenuOpt label="Redo" onClick={action(redo)} hint={shortcutHint('edit.redo')} />
         <Divider />
@@ -571,7 +586,7 @@ export function MenuBar({
         <MenuOpt label="Distribute Vertical" onClick={action(() => useStore.getState().distributeEntities('vertical'))} hint="" disabled={selectionSize < 3} />
         <MenuOpt label="Flip Horizontal" onClick={action(() => useStore.getState().flipEntities('horizontal'))} hint={shortcutHint('edit.flip-horizontal')} disabled={selectionSize < 1} />
         <MenuOpt label="Flip Vertical" onClick={action(() => useStore.getState().flipEntities('vertical'))} hint={shortcutHint('edit.flip-vertical')} disabled={selectionSize < 1} />
-      </MenuButton>
+      </MenuButton>}
       <MenuButton label="View" open={openMenu === 'view'} onClick={click('view')}>
         <MenuOpt label="Zoom Extents" onClick={action(() => runCommand('view.zoom-extents'))} hint="" />
         <MenuOpt label="2D Only" onClick={action(() => useStore.getState().setViewMode('2d'))} hint="" />
@@ -581,7 +596,7 @@ export function MenuBar({
         <MenuOpt label="Toggle Snap" onClick={action(() => useStore.getState().setSnap({ enabled: !useStore.getState().editor.snap.enabled }))} hint={shortcutHint('view.toggle-snap')} />
         <MenuOpt label="Toggle Grid" onClick={action(() => useStore.getState().setSnap({ grid: !useStore.getState().editor.snap.grid }))} hint={shortcutHint('view.toggle-grid')} />
       </MenuButton>
-      <MenuButton label="Tools" open={openMenu === 'tools'} onClick={click('tools')}>
+      {!simpleContainment && <MenuButton label="Tools" open={openMenu === 'tools'} onClick={click('tools')}>
         <MenuOpt label="Auto-Number Wires" onClick={action(onAutoNumber)} hint="" />
         <MenuOpt label="Re-run Auto-Features on Selection" onClick={action(onRerunAutoFeatures)} hint="" />
         <MenuOpt label="Straighten/Space Selected Containments" onClick={action(onStraightenAndSpaceContainments)} hint="" />
@@ -614,12 +629,12 @@ export function MenuBar({
           onClick={action(() => setViewGeneratorKind('isometric'))}
           hint=""
         />
-      </MenuButton>
-      <MenuButton label="Settings" open={openMenu === 'settings'} onClick={click('settings')}>
+      </MenuButton>}
+      {!simpleContainment && <MenuButton label="Settings" open={openMenu === 'settings'} onClick={click('settings')}>
         <div className="settings-pane" onClick={(e) => e.stopPropagation()}>
           <StandardsProfilePicker />
         </div>
-      </MenuButton>
+      </MenuButton>}
       <MenuButton label="Help" open={openMenu === 'help'} onClick={click('help')}>
         <MenuOpt label="Command Palette…" onClick={action(() => runCommand('help.palette'))} hint={shortcutHint('help.palette')} />
         <MenuOpt label="Keyboard Shortcuts" onClick={action(() => runCommand('help.shortcuts'))} hint={shortcutHint('help.shortcuts')} />
@@ -627,8 +642,14 @@ export function MenuBar({
         <MenuOpt label="About OpenCAD Electrical" onClick={action(onShowAbout)} hint="" />
       </MenuButton>
       <div className="menu-spacer" />
-      <span className="menu-info" title={`${projectName} · ${sheetCount} sheets · ${projectStandard}`}><span className="menu-project-name">{projectName}</span><span className="menu-project-meta">{sheetCount} sheets · {projectStandard}</span></span>
+      <span className="menu-info" title={`${projectName} · ${sheetCount} sheets · ${projectStandard}`}><span className="menu-project-name">{projectName}</span>{!simpleContainment && <span className="menu-project-meta">{sheetCount} sheets · {projectStandard}</span>}</span>
       <button type="button" className="menu-command-button" onClick={() => runCommand('help.palette')} title={`Search commands (${shortcutHint('help.palette')})`}><span>Commands</span><kbd>{shortcutHint('help.palette')}</kbd></button>
+      <dialog className="new-layout-dialog" ref={newLayoutDialogRef} aria-labelledby="new-layout-title" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+        <h2 id="new-layout-title">Open a new containment layout?</h2>
+        <p>This replaces the current project. Save a copy first if you want to keep it.</p>
+        <button type="button" className="new-layout-save" onClick={onSave}>Save current project</button>
+        <div><button type="button" autoFocus onClick={() => newLayoutDialogRef.current?.close()}>Cancel</button><button type="button" onClick={onNewContainment}>Open layout</button></div>
+      </dialog>
       {viewGeneratorKind && (
         <ViewGeneratorModal
           kind={viewGeneratorKind}

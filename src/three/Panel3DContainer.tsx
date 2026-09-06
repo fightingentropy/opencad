@@ -39,7 +39,7 @@ const shouldUseSiteViewer = (
   project: ReturnType<typeof useStore.getState>['project'],
 ): boolean => {
   const active = project.sheets[project.activeSheetId];
-  if (active?.sceneStyle === 'site') return true;
+  if (active?.sceneStyle === 'site' || active?.sceneStyle === 'containment') return true;
   const hasSiteHierarchy =
     !!project.sites && Object.keys(project.sites).length > 0;
   if (hasSiteHierarchy && active?.floorId) return true;
@@ -94,11 +94,13 @@ export function Panel3DContainer({ width = 320, fillParent = false }: Props) {
         <Suspense
           fallback={
             <div className="canvas-3d-overlay" style={{ padding: 12 }}>
-              Loading whole-site viewer…
+              Loading 3D view…
             </div>
           }
         >
           <SiteSceneViewer
+            key={project.sheets[project.activeSheetId]?.sceneStyle === 'containment' ? 'containment' : 'site'}
+            containmentOnly={project.sheets[project.activeSheetId]?.sceneStyle === 'containment'}
             project={project}
             width={size.w}
             height={size.h}

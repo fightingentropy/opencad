@@ -63,6 +63,7 @@ export interface CommandUiHandlers {
   // File handling (hidden <input type=file> pickers + download helpers
   // live in MenuBar, so the commands delegate rather than duplicate).
   newProject(): void;
+  newContainmentProject(): void;
   openProject(): void;
   saveProject(): void;
   exportSVG(): void;
@@ -198,6 +199,7 @@ const uiCommand = (
 const commands: CommandDef[] = [
   // ---- File ---------------------------------------------------------------
   uiCommand('file.new', 'New Project', 'File', 'newProject'),
+  uiCommand('file.new-containment', 'New Containment Layout', 'File', 'newContainmentProject'),
   uiCommand('file.open', 'Open Project…', 'File', 'openProject',
     { display: `${MOD}O`, matches: modKey('o') }, true),
   uiCommand('file.save', 'Save Project', 'File', 'saveProject',

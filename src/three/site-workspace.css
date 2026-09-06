@@ -286,3 +286,19 @@
   .site-statusbar { flex-wrap: wrap; row-gap: 4px; }
   .site-selection-status { display: none; }
 }
+
+.site-workspace-containment .site-view-header {
+  flex-wrap: nowrap;
+  gap: 10px;
+  min-height: 40px;
+}
+.site-workspace-containment .site-view-title {
+  display: flex;
+  margin-right: 0;
+  padding-right: 0;
+  border-right: 0;
+}
+.site-workspace-containment .site-view-mode { margin-right: 0; }
+.site-workspace-containment .site-view-actions { margin-left: auto; }
+.site-workspace-containment .site-statusbar { min-height: 24px; }
+.site-workspace-containment .site-selection-status { margin-left: auto; }

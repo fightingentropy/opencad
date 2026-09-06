@@ -85,6 +85,42 @@ const findObject = (root: THREE.Object3D, predicate: (obj: THREE.Object3D) => bo
 };
 
 describe('buildBuildingScene', () => {
+  it('renders a containment-only inspection without changing saved engineering data', () => {
+    const project = createWholeSiteSampleProject();
+    const saved = JSON.stringify(project);
+    const entities = new Map(Object.values(project.sheets).flatMap((sheet) => (
+      Object.values(sheet.entities).map((entity) => [entity.id, entity] as const)
+    )));
+    const { group, controls } = buildBuildingScene(project, { containmentOnly: true });
+    const rendered = new Set<string>();
+    let covers = 0;
+    group.traverse((object) => {
+      if (object.userData.entityId) {
+        const entity = entities.get(object.userData.entityId);
+        expect(entity?.kind).toBe('containment');
+        if (entity?.kind === 'containment') {
+          expect(['tray', 'trunking', 'basket']).toContain(entity.containmentType);
+          rendered.add(entity.containmentType);
+        }
+      }
+      expect(object.userData.layer).not.toBe('floors');
+      if (object.userData.containmentCover) {
+        covers++;
+        expect(object.visible).toBe(false);
+      }
+    });
+    expect(rendered.size).toBeGreaterThan(0);
+    expect(covers).toBeGreaterThan(0);
+    for (const layer of ['walls', 'rooms', 'equipment', 'fittings', 'supports', 'risers', 'cables', 'firestops', 'labels'] as const) {
+      controls.setLayerVisible(layer, true);
+      expect(group.getObjectByName(layer)).toBeUndefined();
+    }
+    expect(group.getObjectByName('ffl-markers')).toBeUndefined();
+    expect(findObject(group, (object) => object.name.startsWith('equipment-drop:'))).toBeUndefined();
+    expect(JSON.stringify(project)).toBe(saved);
+    controls.dispose();
+  });
+
   it('adds a finished-floor datum marker to the rendered floor', () => {
     const { project } = makeProject([]);
 

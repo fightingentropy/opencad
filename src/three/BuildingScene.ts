@@ -43,6 +43,8 @@ import { containmentTouchesPoint } from '../lib/fittings';
 // ---------- Public API ------------------------------------------------------
 
 export interface BuildSceneOptions {
+  /** Draw only open tray, trunking and basket, without building context. */
+  containmentOnly?: boolean;
   /** Material palette overrides (per-system colours, per-material look). */
   materials?: ContainmentRenderOpts['materials'];
   /** Skip rendering elements outside of these floors. */
@@ -1007,7 +1009,11 @@ function renderFloor(
   grp.position.z = floor.ffl;
   grp.userData.floorId = floor.id;
 
-  const layers = options.layers ?? {};
+  const layers = options.containmentOnly ? {
+    ...options.layers,
+    walls: false, rooms: false, floors: false, equipment: false,
+    fittings: false, supports: false, risers: false, labels: false, cables: false, firestops: false,
+  } : options.layers ?? {};
   const wantWalls = layers.walls !== false;
   const wantRooms = layers.rooms !== false;
   const wantContainment = layers.containment !== false;
@@ -1040,7 +1046,7 @@ function renderFloor(
     }
   }
 
-  const shellBounds = floorShellBounds(rooms, walls, options.flipY);
+  const shellBounds = options.containmentOnly ? null : floorShellBounds(rooms, walls, options.flipY);
   const clipBounds = shellBounds ? expandBounds(shellBounds, 350) : null;
   const visibleContainments = clipBounds
     ? containments.filter((c) => {
@@ -1057,7 +1063,10 @@ function renderFloor(
   const visibleEquipment = clipBounds
     ? equipment.filter((eq) => boundsOverlap(equipmentBounds(eq, options.flipY), clipBounds))
     : equipment;
-  const renderContainments = visibleContainments.filter(shouldRenderContainment3D);
+  const renderContainments = visibleContainments.filter((containment) => (
+    shouldRenderContainment3D(containment)
+    && (!options.containmentOnly || ['tray', 'trunking', 'basket'].includes(containment.containmentType))
+  ));
 
   const containmentMap = new Map<string, ContainmentEntity>();
   for (const c of renderContainments) containmentMap.set(c.id, c);
@@ -1098,18 +1107,23 @@ function renderFloor(
         systemId,
         floor,
         flipY: options.flipY,
+        showCovers: options.containmentOnly ? false : undefined,
       });
       obj.userData.systemId = systemId;
       cgrp.add(obj);
     }
-    const equipmentDrops = buildEquipmentDropGroup(
-      renderContainments,
-      visibleEquipment,
-      floor,
-      options,
-    );
-    for (const drop of [...equipmentDrops.children]) cgrp.add(drop);
+    if (wantEquipment) {
+      const equipmentDrops = buildEquipmentDropGroup(
+        renderContainments,
+        visibleEquipment,
+        floor,
+        options,
+      );
+      for (const drop of [...equipmentDrops.children]) cgrp.add(drop);
+    }
     grp.add(cgrp);
+  }
+  if (wantContainment && layers.cables !== false) {
     const cableGroup = new THREE.Group();
     cableGroup.name = 'cables';
     const cables = Object.values(project.cableSchedule?.cables ?? {});
@@ -1199,7 +1213,7 @@ function renderFloor(
     grp.add(egrp);
   }
 
-  if ((options.layers?.risers ?? true) && risers.length > 0) {
+  if ((layers.risers ?? true) && risers.length > 0) {
     const rgrp = new THREE.Group();
     rgrp.name = 'risers';
     for (const r of risers) {
@@ -1215,7 +1229,7 @@ function renderFloor(
     grp.add(rgrp);
   }
 
-  if (options.layers?.firestops !== false) {
+  if (layers.firestops !== false) {
     const seals = new THREE.Group();
     seals.name = 'firestops';
     for (const sheetId of floor.sheetIds) {

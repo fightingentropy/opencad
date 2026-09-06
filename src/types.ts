@@ -745,7 +745,7 @@ export interface Sheet {
   // 3D scene style. 'panel' (default) renders the panel enclosure with door,
   // DIN rails and ducts. 'building' renders a clean floor with no enclosure
   // — useful for showing containment runs in a corridor or open space.
-  sceneStyle?: 'panel' | 'building' | 'site';
+  sceneStyle?: 'panel' | 'building' | 'site' | 'containment';
   // Floor / building / zone this sheet belongs to (whole-site projects)
   floorId?: FloorId;
   buildingId?: BuildingId;

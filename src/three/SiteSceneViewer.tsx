@@ -45,9 +45,11 @@ interface Props {
   project: Project;
   width: number;
   height: number;
+  containmentOnly?: boolean;
 }
 
 type WalkDirection = 'forward' | 'back' | 'left' | 'right';
+type CameraView = 'iso' | 'top';
 
 interface HoverInfo {
   x: number;
@@ -111,7 +113,7 @@ const WALK_KEYS: Record<string, WalkDirection> = {
 
 // Compute the bounding sphere of a Three.js object for camera framing.
 const objectBoundingSphere = (obj: THREE.Object3D): THREE.Sphere => {
-  const box = new THREE.Box3().setFromObject(obj);
+  const box = visibleBoundingBox(obj);
   const sphere = new THREE.Sphere();
   if (box.isEmpty()) {
     sphere.set(new THREE.Vector3(), 5000);
@@ -127,18 +129,21 @@ const frameObject = (
   camera: THREE.PerspectiveCamera,
   controls: OrbitControls,
   obj: THREE.Object3D,
+  view: CameraView = 'iso',
 ): void => {
   const sphere = objectBoundingSphere(obj);
   const fovRad = (camera.fov * Math.PI) / 180;
   const limitingFov = 2 * Math.atan(Math.tan(fovRad / 2) * Math.min(1, camera.aspect));
   const fitDist = (sphere.radius / Math.sin(limitingFov / 2)) * 1.12;
-  const dir = obj.name.startsWith('equipment:')
+  const dir = view === 'top'
+    ? new THREE.Vector3(0, -0.001, 1).normalize()
+    : obj.name.startsWith('equipment:')
     ? new THREE.Vector3(0.6, -1, 0.4).normalize()
-    : new THREE.Vector3(-0.6, -0.6, 0.55).normalize();
+    : new THREE.Vector3(-0.65, -0.8, 1.15).normalize();
   controls.target.copy(sphere.center);
   camera.position.copy(sphere.center).addScaledVector(dir, fitDist);
-  camera.near = Math.max(1, fitDist / 1000);
-  camera.far = fitDist * 10 + sphere.radius * 4;
+  camera.near = Math.max(1, Math.min(100, fitDist / 50));
+  camera.far = fitDist + sphere.radius * 3;
   camera.updateProjectionMatrix();
   controls.update();
 };
@@ -408,7 +413,7 @@ const disposeSelectionHelper = (helper: THREE.BoxHelper): void => {
   }
 };
 
-export function SiteSceneViewer({ project, width, height }: Props) {
+export function SiteSceneViewer({ project, width, height, containmentOnly = false }: Props) {
   const selection = useStore((s) => s.editor.selection);
   const mountRef = useRef<HTMLDivElement>(null);
   const displayMenuRef = useRef<HTMLDetailsElement>(null);
@@ -432,6 +437,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
   // imperatively via SceneControls — these refs/state are just the latest
   // user-driven settings so a rebuild can re-apply them.
   const [viewScope, setViewScope] = useState<ViewScope>('floor');
+  const [cameraView, setCameraView] = useState<CameraView>('iso');
   const singleFloor = viewScope === 'floor';
   const [floorId, setFloorId] = useState<FloorId | ''>(project.activeFloorId ?? '');
   const [systemId, setSystemId] = useState<SystemId | ''>('');
@@ -504,7 +510,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     cancelHoverRef.current?.();
   }, [project, width, height, viewScope, floorId, systemId, wallOpacity,
     appearance, installationFilter, panelsOpen, coversOpen, showCables,
-    showSupports, showLabels, showFirestops, floorSeparation, isolatedId, resetTick]);
+    showSupports, showLabels, showFirestops, floorSeparation, isolatedId, resetTick, containmentOnly, cameraView]);
 
   const entityObject = (entityId: string): THREE.Object3D | null => {
     const root = sceneGroupRef.current;
@@ -615,7 +621,9 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(initialW, initialH, false);
-    renderer.shadowMap.enabled = true;
+    // Millimetre-thin sheet metal and wire mesh are much finer than a site
+    // shadow texel. Direct/environment lighting avoids moving shadow acne.
+    renderer.shadowMap.enabled = !containmentOnly;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
@@ -944,8 +952,9 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     hemi.position.set(0, 0, 2000);
     scene.add(hemi);
     const sun = new THREE.DirectionalLight(0xfff2d8, 1.2);
+    sun.name = 'site-key-light';
     sun.position.set(15000, 20000, 25000);
-    sun.castShadow = true;
+    sun.castShadow = !containmentOnly;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 100;
     sun.shadow.camera.far = 80000;
@@ -972,6 +981,15 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     // Includes damping, WASD, fit/focus and other camera changes. The render
     // loop itself stays independent of hover intent when the camera is still.
     controls.addEventListener('change', cancelHover);
+    const updateClippingPlanes = (): void => {
+      const box = walkBoundsRef.current;
+      if (!box || box.isEmpty()) return;
+      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      camera.near = Math.max(1, Math.min(100, camera.position.distanceTo(controls.target) / 50));
+      camera.far = Math.max(camera.near + 1000, camera.position.distanceTo(sphere.center) + sphere.radius * 3);
+      camera.updateProjectionMatrix();
+    };
+    controls.addEventListener('change', updateClippingPlanes);
     orbitRef.current = controls;
 
     const animate = () => {
@@ -1016,6 +1034,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       document.removeEventListener('visibilitychange', handlePointerLeave);
       controls.removeEventListener('start', cancelHover);
       controls.removeEventListener('change', cancelHover);
+      controls.removeEventListener('change', updateClippingPlanes);
       controls.dispose();
       orbitRef.current = null;
       // Dispose the active scene group via SceneControls
@@ -1036,6 +1055,13 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    framedOnceRef.current = false;
+    if (rendererRef.current) rendererRef.current.shadowMap.enabled = !containmentOnly;
+    const sun = sceneRef.current?.getObjectByName('site-key-light');
+    if (sun instanceof THREE.DirectionalLight) sun.castShadow = !containmentOnly;
+  }, [containmentOnly]);
 
   const moveWalk = (direction: WalkDirection, multiplier = 1): void => {
     const camera = cameraRef.current;
@@ -1074,6 +1100,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     setInstallationFilter('all');
     setFloorId(project.activeFloorId ?? Object.keys(project.floors ?? {})[0] ?? '');
     setViewScope('floor');
+    setCameraView('iso');
     // Saved camera filters belong to the previous model, not a newly opened project.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.id]);
@@ -1100,7 +1127,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       sceneGroupRef.current = null;
     }
 
-    const { group, controls } = buildBuildingScene(project);
+    const { group, controls } = buildBuildingScene(project, { containmentOnly });
     scene.add(group);
     sceneGroupRef.current = group;
     sceneControlsRef.current = controls;
@@ -1111,9 +1138,9 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     if (systemId) controls.filterSystem(systemId);
     else controls.filterSystem(null);
     controls.setTransparency('walls', wallOpacity);
-    controls.setInstallation(project, appearance, installationFilter);
+    controls.setInstallation(project, containmentOnly ? 'materials' : appearance, containmentOnly ? 'all' : installationFilter);
     controls.setPanelsOpen(panelsOpen);
-    controls.setCoversOpen(coversOpen);
+    controls.setCoversOpen(containmentOnly || coversOpen);
     controls.setLayerVisible('cables', showCables);
     controls.setLayerVisible('supports', showSupports);
     controls.setLayerVisible('labels', showLabels);
@@ -1125,13 +1152,13 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     // when sheets get edited but the project structure stays the same.
     if (!framedOnceRef.current) {
       const frameTarget = activeSceneObject() ?? group;
-      frameObject(camera, orbit, frameTarget);
+      frameObject(camera, orbit, frameTarget, cameraView);
       framedOnceRef.current = true;
     }
     refreshWalkBounds();
     syncSelectionHelpers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectSig, resetTick]);
+  }, [projectSig, resetTick, containmentOnly]);
 
   // ---------- Imperatively apply control changes when toolbar shifts ------
   useEffect(() => {
@@ -1145,9 +1172,9 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     const camera = cameraRef.current;
     const orbit = orbitRef.current;
     if (obj && camera && orbit) {
-      frameObject(camera, orbit, obj);
+      frameObject(camera, orbit, obj, cameraView);
     }
-  }, [singleFloor, floorId]);
+  }, [singleFloor, floorId, cameraView]);
 
   useEffect(() => {
     const c = sceneControlsRef.current;
@@ -1166,9 +1193,9 @@ export function SiteSceneViewer({ project, width, height }: Props) {
   useEffect(() => {
     const controls = sceneControlsRef.current;
     if (!controls) return;
-    controls.setInstallation(project, appearance, installationFilter);
+    controls.setInstallation(project, containmentOnly ? 'materials' : appearance, containmentOnly ? 'all' : installationFilter);
     controls.setPanelsOpen(panelsOpen);
-    controls.setCoversOpen(coversOpen);
+    controls.setCoversOpen(containmentOnly || coversOpen);
     controls.setLayerVisible('cables', showCables);
     controls.setLayerVisible('supports', showSupports);
     controls.setLayerVisible('labels', showLabels);
@@ -1176,7 +1203,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     controls.setExploded(singleFloor ? 0 : floorSeparation);
     controls.isolateEntity(isolatedId);
     syncSelectionHelpers();
-  }, [project, appearance, installationFilter, panelsOpen, coversOpen, showCables, showSupports, showLabels, showFirestops, floorSeparation, singleFloor, isolatedId]);
+  }, [project, appearance, installationFilter, panelsOpen, coversOpen, showCables, showSupports, showLabels, showFirestops, floorSeparation, singleFloor, isolatedId, containmentOnly]);
 
   useEffect(() => {
     const onFocus = (event: Event) => {
@@ -1197,20 +1224,20 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       setInstallationFilter('all');
       setSystemId('');
       sceneControlsRef.current?.filterSystem(null);
-      sceneControlsRef.current?.setInstallation(projectRef.current, appearance, 'all');
+      sceneControlsRef.current?.setInstallation(projectRef.current, containmentOnly ? 'materials' : appearance, 'all');
       if (singleFloor && fid) sceneControlsRef.current?.isolateFloor(fid);
       setIsolatedId(isolate ? entityId : null);
       sceneControlsRef.current?.isolateEntity(isolate ? entityId : null);
       // Let the floor scope effect finish before applying the close inspection pose.
       requestAnimationFrame(() => {
-        frameObject(camera, orbit, obj);
+        frameObject(camera, orbit, obj, cameraView);
         refreshWalkBounds();
         syncSelectionHelpers();
       });
     };
     window.addEventListener('opencad:focus-entity', onFocus);
     return () => window.removeEventListener('opencad:focus-entity', onFocus);
-  }, [appearance, singleFloor]);
+  }, [appearance, singleFloor, containmentOnly, cameraView]);
 
   // ---------- Floor / system option lists for the toolbar ------------------
   const floors = useMemo(() => {
@@ -1247,7 +1274,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     const camera = cameraRef.current;
     const orbit = orbitRef.current;
     if (obj && camera && orbit) {
-      frameObject(camera, orbit, obj);
+      frameObject(camera, orbit, obj, cameraView);
       refreshWalkBounds();
     } else {
       framedOnceRef.current = false;
@@ -1256,15 +1283,22 @@ export function SiteSceneViewer({ project, width, height }: Props) {
   };
 
   return (
-    <div className={`site-workspace${width < 850 ? ' site-workspace-compact' : ''}${width < 620 ? ' site-workspace-narrow' : ''}`}>
+    <div className={`site-workspace${containmentOnly ? ' site-workspace-containment' : ''}${width < 850 ? ' site-workspace-compact' : ''}${width < 620 ? ' site-workspace-narrow' : ''}`}>
       <div className="site-view-header" role="toolbar" aria-label="3D model controls">
         <div className="site-view-title">
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
             <path d="m10 1.8 7 4v8.4l-7 4-7-4V5.8l7-4Z M3 5.8l7 4 7-4 M10 9.8v8.4" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" />
           </svg>
-          <span>3D model</span>
+          <span>{containmentOnly ? 'Containment' : '3D model'}</span>
         </div>
         {!renderError && <>
+          {containmentOnly && <div className="site-view-mode" role="group" aria-label="View angle">
+            <button type="button" className={cameraView === 'iso' ? 'active' : ''}
+              aria-pressed={cameraView === 'iso'} onClick={() => setCameraView('iso')} title="View from above at an angle">Iso</button>
+            <button type="button" className={cameraView === 'top' ? 'active' : ''}
+              aria-pressed={cameraView === 'top'} onClick={() => setCameraView('top')} title="Look straight down into the open sections">Top</button>
+          </div>}
+          {!containmentOnly && <>
           <div className="site-scope-control" role="group" aria-label="3D scope">
             <button type="button" className={viewScope === 'site' ? 'active' : ''}
               aria-pressed={viewScope === 'site'} onClick={() => setViewScope('site')} title="Frame the full project">Project</button>
@@ -1293,16 +1327,17 @@ export function SiteSceneViewer({ project, width, height }: Props) {
               </button>
             ))}
           </div>}
+          </>}
           <div className="site-view-actions">
             <div role="group" aria-label="Reset view">
               <button type="button" className="site-toolbar-button" onClick={handleResetView} title="Frame the active 3D view">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M1.5 5V1.5H5 M11 1.5h3.5V5 M14.5 11v3.5H11 M5 14.5H1.5V11 M5 5h6v6H5V5Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
                 </svg>
-                Fit View
+                {containmentOnly ? 'Fit' : 'Fit View'}
               </button>
             </div>
-            <details className="site-controls-detail" ref={displayMenuRef}>
+            {!containmentOnly && <details className="site-controls-detail" ref={displayMenuRef}>
               <summary title="Layers & inspection">
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
                   <path d="M2 4h12 M2 8h12 M2 12h12" stroke="currentColor" strokeWidth="1.2" />
@@ -1379,7 +1414,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
                   <span>WASD or arrow keys</span>
                 </div>
               </div>
-            </details>
+            </details>}
           </div>
         </>}
       </div>
@@ -1403,15 +1438,15 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       </div>
       {!renderError && (
         <div className="site-statusbar">
-          <span className="site-navigation-hint">Drag to orbit · scroll to zoom <span>· WASD to walk</span></span>
+          <span className="site-navigation-hint">Drag to orbit · scroll to zoom {!containmentOnly && <span>· WASD to walk</span>}</span>
           <span className="site-selection-status">{selection.size > 0 ? `${selection.size} selected` : 'Click a part to inspect'}</span>
-          {appearance === 'progress' ? (
+          {!containmentOnly && (appearance === 'progress' ? (
             <div className="site-status-legend" aria-label="Installation status legend">
               <span><i className="site-status-mark completed" />Completed</span>
               <span><i className="site-status-mark in-progress" />In progress</span>
               <span><i className="site-status-mark planned" />Planned</span>
             </div>
-          ) : <span className="site-appearance-status">{appearance === 'materials' ? 'Material finishes' : 'System colours'}</span>}
+          ) : <span className="site-appearance-status">{appearance === 'materials' ? 'Material finishes' : 'System colours'}</span>)}
         </div>
       )}
     </div>

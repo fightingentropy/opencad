@@ -27,7 +27,8 @@ import { ErrorBoundary } from './ui/ErrorBoundary';
 import { dispatchShortcut, registerUiHandlers } from './lib/commands';
 import { notify } from './state/notifications';
 import { createSampleProject } from './sample';
-import { createWholeSiteSampleProject } from './sample-whole-site';
+import { createContainmentSampleProject } from './sample-containment';
+import { ContainmentOutline } from './ui/ContainmentOutline';
 import { loadStoredProjectAsync, saveStoredProjectAsync } from './io/persist';
 import { fitViewportToSheet } from './lib/fit';
 
@@ -38,6 +39,8 @@ export function App() {
   const setProject = useStore((s) => s.setProject);
   const viewMode = useStore((s) => s.editor.viewMode);
   const setViewMode = useStore((s) => s.setViewMode);
+  const containmentSheet = useStore((s) => s.project.sheets[s.project.activeSheetId]?.sceneStyle === 'containment');
+  const simpleContainment = containmentSheet && viewMode === '3d';
   const [inspectorMode, setInspectorMode] = useState<'installation' | 'design'>('installation');
   const [explorerMode, setExplorerMode] = useState<'model' | 'draw'>('model');
   const [bomOpen, setBomOpen] = useState(false);
@@ -89,10 +92,7 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile]);
 
-  // Bootstrap: prefer the atomic IndexedDB snapshot; fall back to a one-time
-  // localStorage migration and then the bundled whole-site demo so a
-  // first-time visitor sees a fully-populated project. The simple sample
-  // remains as a safety net should the whole-site factory ever throw.
+  // Restore saved work; first-time visitors start with an open containment layout.
   useEffect(() => {
     if (bootstrapped) return;
     let cancelled = false;
@@ -101,9 +101,9 @@ export function App() {
       let project = stored;
       if (!project) {
         try {
-          project = createWholeSiteSampleProject();
+          project = createContainmentSampleProject();
         } catch (err) {
-          console.error('[opencad] whole-site sample failed, falling back', err);
+          console.error('[opencad] containment sample failed, falling back', err);
           project = createSampleProject();
         }
       }
@@ -275,8 +275,9 @@ export function App() {
   };
 
   return (
-    <div className={`app${viewMode === '3d' ? ' installation-mode' : ''}`} style={resizing ? { cursor: 'col-resize', userSelect: 'none' } : undefined}>
+    <div className={`app${viewMode === '3d' ? ' installation-mode' : ''}${simpleContainment ? ' containment-mode' : ''}`} style={resizing ? { cursor: 'col-resize', userSelect: 'none' } : undefined}>
       <MenuBar
+        simpleContainment={simpleContainment}
         onShowBom={() => setBomOpen(true)}
         onShowAbout={() => setAboutOpen(true)}
         onShowCableSchedule={() => setCableScheduleOpen(true)}
@@ -286,7 +287,7 @@ export function App() {
         onShowCrossSection={openCrossSection}
         onShowCollaboration={() => setCollabOpen(true)}
       />
-      <Ribbon />
+      {!simpleContainment && <Ribbon />}
       {/* Each major region mounts inside its own error boundary so a crash
           in one (e.g. a malformed entity reaching a properties render)
           leaves the others interactive. The panel boundaries reuse the
@@ -294,8 +295,8 @@ export function App() {
           region's grid slot (and drawer slot on mobile). */}
       <ErrorBoundary label="Left panel" className={`left-panel${leftOpen ? ' open' : ''}`}>
         <div className={`left-panel${leftOpen ? ' open' : ''}`}>
-        {viewMode === '3d' && <div className="workspace-switch" role="group" aria-label="Explorer mode"><button aria-pressed={explorerMode === 'model'} className={explorerMode === 'model' ? 'active' : ''} onClick={() => setExplorerMode('model')}>Model explorer</button><button aria-pressed={explorerMode === 'draw'} className={explorerMode === 'draw' ? 'active' : ''} onClick={() => setExplorerMode('draw')}>Drawing tools</button></div>}
-        {viewMode === '3d' && explorerMode === 'model' ? <InstallationBrowser /> : <LeftPanel open={leftOpen} />}
+        {viewMode === '3d' && !simpleContainment && <div className="workspace-switch" role="group" aria-label="Explorer mode"><button aria-pressed={explorerMode === 'model'} className={explorerMode === 'model' ? 'active' : ''} onClick={() => setExplorerMode('model')}>Model explorer</button><button aria-pressed={explorerMode === 'draw'} className={explorerMode === 'draw' ? 'active' : ''} onClick={() => setExplorerMode('draw')}>Drawing tools</button></div>}
+        {simpleContainment ? <ContainmentOutline /> : viewMode === '3d' && explorerMode === 'model' ? <InstallationBrowser /> : <LeftPanel open={leftOpen} />}
         </div>
       </ErrorBoundary>
       <div className="main">
@@ -316,15 +317,15 @@ export function App() {
             {viewMode === 'split' && !isMobile && <Panel3DContainer width={panel3DWidth} />}
             {viewMode === '3d' && <Panel3DContainer fillParent />}
           </div>
-          {viewMode === '3d' ? <details className="installation-hierarchy"><summary>Sheets, floors & zones</summary><SiteNavigator /></details> : <SiteNavigator />}
+          {simpleContainment ? null : viewMode === '3d' ? <details className="installation-hierarchy"><summary>Sheets, floors & zones</summary><SiteNavigator /></details> : <SiteNavigator />}
         </ErrorBoundary>
       </div>
-      <ErrorBoundary label="Properties panel" className={`right-panel${rightOpen ? ' open' : ''}`}>
+      {!simpleContainment && <ErrorBoundary label="Properties panel" className={`right-panel${rightOpen ? ' open' : ''}`}>
         <div className={`right-panel${rightOpen ? ' open' : ''}`}>
         <div className="workspace-switch" role="group" aria-label="Inspector mode"><button aria-pressed={inspectorMode === 'installation'} className={inspectorMode === 'installation' ? 'active' : ''} onClick={() => setInspectorMode('installation')}>Installation</button><button aria-pressed={inspectorMode === 'design'} className={inspectorMode === 'design' ? 'active' : ''} onClick={() => setInspectorMode('design')}>Design & engineering</button></div>
         {inspectorMode === 'installation' ? <InstallationPanel /> : <RightPanel open={rightOpen} />}
         </div>
-      </ErrorBoundary>
+      </ErrorBoundary>}
       <StatusBar />
 
       {/* Mobile-only floating buttons */}
@@ -343,13 +344,13 @@ export function App() {
             aria-label={viewMode === '3d' ? 'Model explorer' : 'Symbols & Layers'}
             aria-expanded={leftOpen}
           >☰</button>
-          <button
+          {!simpleContainment && <button
             className="mobile-fab fab-right"
             onClick={() => { setRightOpen(!rightOpen); setLeftOpen(false); }}
             title="Properties"
             aria-label="Properties"
             aria-expanded={rightOpen}
-          >ⓘ</button>
+          >ⓘ</button>}
           {viewMode !== '3d' && <><button className="mobile-fab fab-zoomin" onClick={() => zoomBy(1.25)} title="Zoom in">＋</button>
           <button className="mobile-fab fab-zoomout" onClick={() => zoomBy(0.8)} title="Zoom out">−</button>
           <button className="mobile-fab fab-fit" onClick={fitToPage} title="Fit page" style={{ fontSize: 16 }}>⊡</button></>}
