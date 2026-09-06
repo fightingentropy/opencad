@@ -38,6 +38,7 @@ import { useStore } from '../state/store';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { entitySceneRoots, sceneEntities, type InstallationAppearance, type InstallationFilter } from './InstallationAppearance';
 import { installationEntityLabel } from '../models/installation';
+import { createHoverIntent, type HoverPoint } from './HoverIntent';
 import './site-workspace.css';
 
 interface Props {
@@ -420,6 +421,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
   const selectionHelpersRef = useRef<Map<string, THREE.BoxHelper>>(new Map());
   const selectedIdsRef = useRef<Set<string>>(new Set(selection));
   const animationRef = useRef<number | null>(null);
+  const cancelHoverRef = useRef<(() => void) | null>(null);
   const walkHoldRef = useRef<number | null>(null);
   const walkBoundsRef = useRef<THREE.Box3 | null>(null);
   const framedOnceRef = useRef(false);
@@ -497,6 +499,12 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       })) };
     }),
   }), [project]);
+
+  useEffect(() => {
+    cancelHoverRef.current?.();
+  }, [project, width, height, viewScope, floorId, systemId, wallOpacity,
+    appearance, installationFilter, panelsOpen, coversOpen, showCables,
+    showSupports, showLabels, showFirestops, floorSeparation, isolatedId, resetTick]);
 
   const entityObject = (entityId: string): THREE.Object3D | null => {
     const root = sceneGroupRef.current;
@@ -665,7 +673,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       return out;
     };
 
-    const tooltipPosition = (event: PointerEvent): Pick<HoverInfo, 'x' | 'y'> => ({
+    const tooltipPosition = (event: HoverPoint): Pick<HoverInfo, 'x' | 'y'> => ({
       x: Math.min(event.clientX, Math.max(12, window.innerWidth - 380)),
       y: Math.min(event.clientY, Math.max(12, window.innerHeight - 240)),
     });
@@ -715,7 +723,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     };
 
     const clearanceHover = (
-      event: PointerEvent,
+      event: HoverPoint,
       root: THREE.Object3D,
       rect: DOMRect,
     ): HoverInfo | null => {
@@ -781,12 +789,9 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       };
     };
 
-    const handlePointerMove = (event: PointerEvent): void => {
+    const resolveHover = (event: HoverPoint): HoverInfo | null => {
       const root = activePickRoot();
-      if (!root) {
-        setHoverInfo(null);
-        return;
-      }
+      if (!root) return null;
 
       const rect = renderer.domElement.getBoundingClientRect();
       const x = ((event.clientX - rect.left) / Math.max(1, rect.width)) * 2 - 1;
@@ -819,17 +824,30 @@ export function SiteSceneViewer({ project, width, height }: Props) {
           floorIdRef.current || undefined,
         );
         const measurement = containmentMeasurement(projectRef.current, containment, floor);
-        setHoverInfo({
+        return {
           ...tooltipPosition(event),
           title: measurement.title,
           rows: measurement.rows,
-        });
-        renderer.domElement.style.cursor = 'pointer';
-        return;
+        };
       }
 
-      setHoverInfo(clearanceHover(event, root, rect));
-      renderer.domElement.style.cursor = '';
+      return clearanceHover(event, root, rect);
+    };
+
+    const hoverIntent = createHoverIntent({
+      resolve: resolveHover,
+      show: setHoverInfo,
+      hide: () => setHoverInfo(null),
+    });
+    const cancelHover = hoverIntent.cancel;
+    cancelHoverRef.current = cancelHover;
+
+    const handlePointerMove = (event: PointerEvent): void => {
+      if (event.buttons !== 0 || event.pointerType === 'touch') {
+        cancelHover();
+        return;
+      }
+      hoverIntent.move(event);
     };
 
     let pointerDown:
@@ -858,11 +876,13 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     };
 
     const handlePointerDown = (event: PointerEvent): void => {
+      cancelHover();
       if (event.button !== 0) return;
       pointerDown = { x: event.clientX, y: event.clientY };
     };
 
     const handlePointerUp = (event: PointerEvent): void => {
+      cancelHover();
       if (event.button !== 0 || !pointerDown) return;
       const dx = event.clientX - pointerDown.x;
       const dy = event.clientY - pointerDown.y;
@@ -900,14 +920,22 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     };
 
     const handlePointerLeave = (): void => {
-      setHoverInfo(null);
-      renderer.domElement.style.cursor = '';
+      cancelHover();
       pointerDown = null;
+    };
+    const handleHoverKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') cancelHover();
     };
     renderer.domElement.addEventListener('pointerdown', handlePointerDown);
     renderer.domElement.addEventListener('pointerup', handlePointerUp);
     renderer.domElement.addEventListener('pointermove', handlePointerMove);
     renderer.domElement.addEventListener('pointerleave', handlePointerLeave);
+    renderer.domElement.addEventListener('pointercancel', handlePointerLeave);
+    renderer.domElement.addEventListener('lostpointercapture', cancelHover);
+    renderer.domElement.addEventListener('wheel', cancelHover, { passive: true });
+    window.addEventListener('blur', handlePointerLeave);
+    window.addEventListener('keydown', handleHoverKeyDown);
+    document.addEventListener('visibilitychange', handlePointerLeave);
 
     // Lights — a daylight-interior look matching Panel3D's building mode.
     const ambient = new THREE.AmbientLight(0xffffff, 0.55);
@@ -940,6 +968,10 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     controls.minDistance = 100;
     controls.maxDistance = 200000;
     controls.maxPolarAngle = Math.PI * 0.51; // allow a level walkthrough view
+    controls.addEventListener('start', cancelHover);
+    // Includes damping, WASD, fit/focus and other camera changes. The render
+    // loop itself stays independent of hover intent when the camera is still.
+    controls.addEventListener('change', cancelHover);
     orbitRef.current = controls;
 
     const animate = () => {
@@ -950,6 +982,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     animate();
 
     const ro = new ResizeObserver(() => {
+      cancelHover();
       const w = mount.clientWidth || initialW;
       const h = mount.clientHeight || initialH;
       camera.aspect = w / Math.max(1, h);
@@ -959,6 +992,8 @@ export function SiteSceneViewer({ project, width, height }: Props) {
     ro.observe(mount);
 
     return () => {
+      cancelHover();
+      cancelHoverRef.current = null;
       if (animationRef.current !== null) {
         cancelAnimationFrame(animationRef.current);
         animationRef.current = null;
@@ -973,6 +1008,14 @@ export function SiteSceneViewer({ project, width, height }: Props) {
       renderer.domElement.removeEventListener('pointerup', handlePointerUp);
       renderer.domElement.removeEventListener('pointermove', handlePointerMove);
       renderer.domElement.removeEventListener('pointerleave', handlePointerLeave);
+      renderer.domElement.removeEventListener('pointercancel', handlePointerLeave);
+      renderer.domElement.removeEventListener('lostpointercapture', cancelHover);
+      renderer.domElement.removeEventListener('wheel', cancelHover);
+      window.removeEventListener('blur', handlePointerLeave);
+      window.removeEventListener('keydown', handleHoverKeyDown);
+      document.removeEventListener('visibilitychange', handlePointerLeave);
+      controls.removeEventListener('start', cancelHover);
+      controls.removeEventListener('change', cancelHover);
       controls.dispose();
       orbitRef.current = null;
       // Dispose the active scene group via SceneControls
@@ -1350,7 +1393,7 @@ export function SiteSceneViewer({ project, width, height }: Props) {
           </div>
         )}
         {!renderError && hoverInfo && (
-          <div className="canvas-3d-tooltip" style={{ left: hoverInfo.x, top: hoverInfo.y }}>
+          <div className="canvas-3d-tooltip" role="tooltip" style={{ left: hoverInfo.x, top: hoverInfo.y }}>
             <div className="title">{hoverInfo.title}</div>
             {hoverInfo.rows.map((row) => (
               <div className="row" key={`${row.label}:${row.value}`}><span>{row.label}</span><strong>{row.value}</strong></div>
