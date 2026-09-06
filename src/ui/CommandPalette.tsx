@@ -76,6 +76,7 @@ function navigateTo(result: Extract<WorkspaceSearchResult, { kind: 'object' | 's
 export function CommandPalette({ onClose }: { onClose: () => void }) {
   const project = useStore((state) => state.project);
   const selection = useStore((state) => state.editor.selection);
+  const viewMode = useStore((state) => state.editor.viewMode);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -83,7 +84,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const paletteId = useId();
   const listId = `${paletteId}-results`;
-  const index = useMemo(() => buildWorkspaceSearchIndex(project), [project, selection]);
+  const index = useMemo(() => buildWorkspaceSearchIndex(project, undefined, undefined, viewMode), [project, selection, viewMode]);
   const results = useMemo(() => searchWorkspace(index, query), [index, query]);
   const activeIndex = Math.min(active, Math.max(0, results.length - 1));
   const activeResult = results[activeIndex];
@@ -106,7 +107,6 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     rememberWorkspaceResult(result.id);
     onClose();
     if (result.kind === 'command') {
-      if (result.command.id.startsWith('tool.')) useStore.getState().setViewMode('2d');
       runCommand(result.command.id);
     }
     else if (result.kind === 'component') requestAnimationFrame(() => beginComponentPlacement(result.component));

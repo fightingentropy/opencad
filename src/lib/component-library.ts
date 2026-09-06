@@ -65,6 +65,16 @@ const CONTAINMENT_COMPONENTS = [
   containment('Busbar trunking 150 × 100', 'busbar', 150, 100, 'feeder-busbar'),
 ];
 
+/** Common sections used when a tool is chosen without specifying a size. */
+export function getContainmentToolComponent(tool: string): InsertableComponent | undefined {
+  const defaults: Record<string, string> = {
+    tray: 'containment:tray:300:50',
+    trunking: 'containment:trunking:150:150',
+    basket: 'containment:basket:300:54',
+  };
+  return CONTAINMENT_COMPONENTS.find((component) => component.id === defaults[tool]);
+}
+
 // Editable generic envelopes, using the same height conventions as EquipmentRender3D.
 // They deliberately carry no manufacturer identity or electrical ratings.
 const EQUIPMENT: Record<EquipmentKind, [string, string, number, number, number]> = {

@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { AppIcon } from './AppIcon';
 import { runCommand } from '../lib/commands';
+import { activateTool } from '../state/tool-actions';
 import { useStore } from '../state/store';
 import { useActiveLayerId, useLayerOrder, useLayers } from '../state/selectors';
 import { CATEGORY_LABELS, searchSymbols, renderSymbolPreview, symbolsByCategory } from '../symbols';
@@ -94,10 +95,7 @@ function findContainmentLayer(project: ReturnType<typeof useStore.getState>['pro
 
 function ContainmentLibrary() {
   const tool = useStore((s) => s.editor.tool);
-  const viewMode = useStore((s) => s.editor.viewMode);
-  const setTool = useStore((s) => s.setTool);
   const setActiveLayer = useStore((s) => s.setActiveLayer);
-  const setViewMode = useStore((s) => s.setViewMode);
   const setStatus = useStore((s) => s.setStatus);
   const activeContainment = CONTAINMENT_PALETTE.find((item) => item.tool === tool);
 
@@ -105,9 +103,8 @@ function ContainmentLibrary() {
     // Layer lookup happens on click only — no project subscription needed.
     const containmentLayer = findContainmentLayer(useStore.getState().project);
     if (containmentLayer) setActiveLayer(containmentLayer);
-    if (viewMode === '3d') setViewMode('split');
-    setTool(id);
-    setStatus(`${label}: pick first point on the plan`);
+    activateTool(id);
+    if (useStore.getState().editor.tool === id) setStatus(`${label}: pick first point on the plan`);
   };
 
   return (
