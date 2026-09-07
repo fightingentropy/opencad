@@ -85,7 +85,7 @@ const findObject = (root: THREE.Object3D, predicate: (obj: THREE.Object3D) => bo
 };
 
 describe('buildBuildingScene', () => {
-  it('renders a containment-only inspection without changing saved engineering data', () => {
+  it('renders the physical workspace without architecture or changes to saved engineering data', () => {
     const project = createWholeSiteSampleProject();
     const saved = JSON.stringify(project);
     const entities = new Map(Object.values(project.sheets).flatMap((sheet) => (
@@ -97,9 +97,9 @@ describe('buildBuildingScene', () => {
     group.traverse((object) => {
       if (object.userData.entityId) {
         const entity = entities.get(object.userData.entityId);
-        expect(entity?.kind).toBe('containment');
+        expect(['containment', 'equipment', 'support', 'fitting']).toContain(entity?.kind);
         if (entity?.kind === 'containment') {
-          expect(['tray', 'trunking', 'basket']).toContain(entity.containmentType);
+          expect(['tray', 'trunking', 'basket', 'conduit', 'ladder', 'duct', 'busbar']).toContain(entity.containmentType);
           rendered.add(entity.containmentType);
         }
       }
@@ -111,7 +111,7 @@ describe('buildBuildingScene', () => {
     });
     expect(rendered.size).toBeGreaterThan(0);
     expect(covers).toBeGreaterThan(0);
-    for (const layer of ['walls', 'rooms', 'equipment', 'fittings', 'supports', 'risers', 'cables', 'firestops', 'labels'] as const) {
+    for (const layer of ['walls', 'rooms', 'risers', 'cables', 'firestops', 'labels'] as const) {
       controls.setLayerVisible(layer, true);
       expect(group.getObjectByName(layer)).toBeUndefined();
     }

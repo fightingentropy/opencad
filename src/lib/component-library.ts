@@ -1,6 +1,8 @@
 import { nanoid } from 'nanoid';
 import type { CatalogueProduct } from '../models/catalogue';
 import { SYMBOL_LIST } from '../symbols/library';
+import { polylineLength } from './fittings';
+import type { PhysicalEntity } from './scene-edit';
 import type {
   ContainmentEntity, ContainmentFinish, ContainmentMaterial, ContainmentSubType,
   ContainmentType, Entity, EquipmentKind, Project, SupportKind, Vec2,
@@ -66,13 +68,19 @@ const CONTAINMENT_COMPONENTS = [
 ];
 
 /** Common sections used when a tool is chosen without specifying a size. */
-export function getContainmentToolComponent(tool: string): InsertableComponent | undefined {
+export function getSpatialToolComponent(tool: string): InsertableComponent | undefined {
   const defaults: Record<string, string> = {
     tray: 'containment:tray:300:50',
     trunking: 'containment:trunking:150:150',
     basket: 'containment:basket:300:54',
+    conduit: 'containment:conduit:25:round',
+    ladder: 'containment:ladder:300:100',
+    duct: 'containment:duct:150:150',
+    busbar: 'containment:busbar:150:100',
+    equipment: 'equipment:distribution-board',
+    support: 'support:trapeze-hanger',
   };
-  return CONTAINMENT_COMPONENTS.find((component) => component.id === defaults[tool]);
+  return GENERIC_COMPONENTS.find((component) => component.id === defaults[tool]);
 }
 
 // Editable generic envelopes, using the same height conventions as EquipmentRender3D.
@@ -188,6 +196,27 @@ export function getInsertableComponents(project: Project): InsertableComponent[]
     }
   }
   return components;
+}
+
+/** An existing part supplies editable dimensions; copies receive fresh identities. */
+export function componentFromEntity(entity: PhysicalEntity): InsertableComponent {
+  if (entity.kind === 'containment') {
+    const { containmentType, width = 100, height, subType, material, finish } = entity;
+    return {
+      id: `copy:${entity.id}`, kind: 'containment', containmentType,
+      title: entity.label ?? containmentType, detail: '', keywords: '',
+      definition: { kind: 'containment', containmentType, width, height, subType, material, finish, length: polylineLength(entity.points) },
+    };
+  }
+  if (entity.kind === 'equipment') return {
+    id: `copy:${entity.id}`, kind: 'equipment', title: entity.description ?? entity.tag, detail: '', keywords: '',
+    definition: { kind: 'equipment', equipmentKind: entity.equipmentKind, width: Math.abs(entity.b.x - entity.a.x),
+      depth: Math.abs(entity.b.y - entity.a.y), height: entity.height ?? 1000, tagPrefix: EQUIPMENT[entity.equipmentKind][1] },
+  };
+  return {
+    id: `copy:${entity.id}`, kind: 'support', title: SUPPORTS[entity.supportKind], detail: '', keywords: '',
+    definition: { kind: 'support', supportKind: entity.supportKind, channelLength: entity.channelLength, rodLength: entity.rodLength },
+  };
 }
 
 function insertionLayer(project: Project, kind: InsertableComponent['kind']): string {

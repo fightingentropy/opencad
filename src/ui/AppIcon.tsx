@@ -13,6 +13,10 @@ const paths = {
   focus: <path d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6" />,
   more: <><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>,
   app: <><path d="m3 7 9-4 9 4v10l-9 4-9-4ZM3 7l9 4 9-4M12 11v10" /></>,
+  move: <path d="M12 3v18M3 12h18M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3" />,
+  rotate: <><path d="M19 9a8 8 0 1 0 1 6M19 3v6h-6" /></>,
+  duplicate: <><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M15 8V4H4v11h4" /></>,
+  extend: <path d="M3 17h6V7h12M17 3l4 4-4 4" />,
 };
 
 export function AppIcon({ name, size = 18, style }: { name: keyof typeof paths; size?: number; style?: CSSProperties }) {

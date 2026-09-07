@@ -40,16 +40,11 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { entitySceneRoots, sceneEntities, type InstallationAppearance, type InstallationFilter } from './InstallationAppearance';
 import { installationEntityLabel } from '../models/installation';
 import { createHoverIntent, type HoverPoint } from './HoverIntent';
-import {
-  cancelComponentPlacement, commitComponentPlacement, componentPlacementPreview,
-  setComponentPlacementPosition, useComponentPlacement,
-} from '../state/component-placement';
-import { renderContainment3D } from './ContainmentRender3D';
+import { cancelComponentPlacement, useComponentPlacement } from '../state/component-placement';
 import { defaultElevation } from './elevations';
-import {
-  componentPreviewOffset, intersectComponentWorkplane, isPlacementClick,
-  trackPlacementPointer, type ComponentWorkplane, type PlacementPointer,
-} from './ComponentPlacement';
+import { attachScenePlacement, type ScenePointer } from './ScenePlacement';
+import { SceneSelectionOverlay } from './SceneSelectionOverlay';
+import { PlacementControls } from '../ui/PlacementControls';
 import './site-workspace.css';
 
 interface Props {
@@ -431,6 +426,8 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
   const displayMenuRef = useRef<HTMLDetailsElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
+  const groundRef = useRef<THREE.Mesh<THREE.PlaneGeometry, THREE.ShadowMaterial> | null>(null);
+  const placementPointerRef = useRef<ScenePointer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const orbitRef = useRef<OrbitControls | null>(null);
   const sceneGroupRef = useRef<THREE.Group | null>(null);
@@ -563,6 +560,10 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
 
     const keep = new Set<string>();
     for (const entityId of selectedIdsRef.current) {
+      const current = projectRef.current;
+      // The route overlay follows the actual polyline; a second bounding box
+      // would outline empty space around an L-shaped selection.
+      if (selectedIdsRef.current.size === 1 && current.sheets[current.activeSheetId]?.entities[entityId]?.kind === 'containment') continue;
       const target = entityObject(entityId);
       if (!target || !isVisibleWithin(target, group)) continue;
       keep.add(entityId);
@@ -633,9 +634,9 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(initialW, initialH, false);
-    // Millimetre-thin sheet metal and wire mesh are much finer than a site
-    // shadow texel. Direct/environment lighting avoids moving shadow acne.
-    renderer.shadowMap.enabled = !containmentOnly;
+    // The simple workspace receives shadows only on its ground plane, avoiding
+    // self-shadow artefacts on millimetre-thin sheet metal and basket wires.
+    renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
@@ -966,7 +967,7 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     const sun = new THREE.DirectionalLight(0xfff2d8, 1.2);
     sun.name = 'site-key-light';
     sun.position.set(15000, 20000, 25000);
-    sun.castShadow = !containmentOnly;
+    sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
     sun.shadow.camera.near = 100;
     sun.shadow.camera.far = 80000;
@@ -980,6 +981,13 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     const fill = new THREE.DirectionalLight(0xa6c4ff, 0.4);
     fill.position.set(-12000, -8000, 8000);
     scene.add(fill);
+
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShadowMaterial({ opacity: 0.14, depthWrite: false }));
+    ground.name = 'workspace-ground-shadow';
+    ground.receiveShadow = true;
+    ground.visible = containmentOnly;
+    scene.add(ground);
+    groundRef.current = ground;
 
     // OrbitControls from the canonical three example modules.
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -1057,6 +1065,9 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
         sceneGroupRef.current = null;
       }
       environment.dispose();
+      ground.geometry.dispose();
+      ground.material.dispose();
+      groundRef.current = null;
       renderer.dispose();
       if (renderer.domElement.parentElement === mount) {
         mount.removeChild(renderer.domElement);
@@ -1070,143 +1081,18 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
 
   useEffect(() => {
     framedOnceRef.current = false;
-    if (rendererRef.current) rendererRef.current.shadowMap.enabled = !containmentOnly;
+    if (rendererRef.current) rendererRef.current.shadowMap.enabled = true;
     const sun = sceneRef.current?.getObjectByName('site-key-light');
-    if (sun instanceof THREE.DirectionalLight) sun.castShadow = !containmentOnly;
+    if (sun instanceof THREE.DirectionalLight) sun.castShadow = true;
+    if (groundRef.current) groundRef.current.visible = containmentOnly;
   }, [containmentOnly]);
 
   useEffect(() => {
     if (placement?.surface !== '3d') return;
-    const scene = sceneRef.current;
-    const camera = cameraRef.current;
-    const canvas = rendererRef.current?.domElement;
-    const orbit = orbitRef.current;
+    const scene = sceneRef.current, camera = cameraRef.current, canvas = rendererRef.current?.domElement, orbit = orbitRef.current;
     if (!scene || !camera || !canvas || !orbit) return;
-    const sheet = placement.project.sheets[placement.sheetId];
-    const floor = sheet?.floorId ? placement.project.floors?.[sheet.floorId] : undefined;
-    const buildingId = floor?.buildingId ?? sheet?.buildingId;
-    const building = buildingId ? placement.project.buildings?.[buildingId] : undefined;
-    const entity = componentPlacementPreview({ x: 0, y: 0 });
-    if (entity?.kind !== 'containment') return;
-    const workplane: ComponentWorkplane = {
-      originX: building?.gridOriginX ?? 0,
-      originY: building?.gridOriginY ?? 0,
-      floorElevation: floor?.ffl ?? 0,
-      componentElevation: defaultElevation(entity, floor),
-    };
-    // The preview is built once around its local origin. Pointer motion only
-    // translates it, so it cannot rebuild the installation or its materials.
-    const ghost = renderContainment3D(entity, { floor, showCovers: false });
-    ghost.name = 'component-placement-preview';
-    ghost.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) return;
-      object.castShadow = false;
-      object.receiveShadow = false;
-      for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
-        if (!(material instanceof THREE.MeshStandardMaterial)) continue;
-        material.color.setHex(0x629deb);
-        material.metalness = 0;
-        material.roughness = 0.8;
-        material.transparent = true;
-        material.opacity = 0.6;
-        material.depthWrite = false;
-      }
-    });
-    scene.add(ghost);
     cancelHoverRef.current?.();
-    const previousCursor = canvas.style.cursor;
-    canvas.style.cursor = 'crosshair';
-    const raycaster = new THREE.Raycaster();
-    let pointer: PlacementPointer | null = null;
-    const initialRect = canvas.getBoundingClientRect();
-    let lastPointer = { clientX: initialRect.left + initialRect.width / 2, clientY: initialRect.top + initialRect.height / 2 };
-    const previewAtPointer = (): { x: number; y: number } | null => {
-      const rect = canvas.getBoundingClientRect();
-      const inside = lastPointer.clientX >= rect.left && lastPointer.clientX <= rect.right
-        && lastPointer.clientY >= rect.top && lastPointer.clientY <= rect.bottom;
-      if (!inside || rect.width === 0 || rect.height === 0) {
-        ghost.visible = false;
-        setComponentPlacementPosition(null);
-        return null;
-      }
-      raycaster.setFromCamera(new THREE.Vector2(
-        (lastPointer.clientX - rect.left) / rect.width * 2 - 1,
-        -(lastPointer.clientY - rect.top) / rect.height * 2 + 1,
-      ), camera);
-      const position = intersectComponentWorkplane(raycaster.ray, workplane);
-      if (position) {
-        const snap = useStore.getState().editor.snap;
-        if (snap.enabled && snap.grid && snap.gridSize > 0) {
-          position.x = Math.round(position.x / snap.gridSize) * snap.gridSize;
-          position.y = Math.round(position.y / snap.gridSize) * snap.gridSize;
-        }
-        ghost.position.copy(componentPreviewOffset(position, workplane));
-      }
-      ghost.visible = position != null;
-      setComponentPlacementPosition(position);
-      return position;
-    };
-    const onMove = (event: PointerEvent): void => {
-      lastPointer = event;
-      previewAtPointer();
-      if (pointer) {
-        trackPlacementPointer(pointer, event.clientX, event.clientY);
-        event.stopImmediatePropagation();
-      }
-    };
-    const onDown = (event: PointerEvent): void => {
-      if (event.button !== 0) return;
-      pointer = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, dragged: false };
-      lastPointer = event;
-      previewAtPointer();
-      canvas.setPointerCapture(event.pointerId);
-      event.preventDefault();
-      // Capture precedes both OrbitControls and normal entity selection.
-      event.stopImmediatePropagation();
-    };
-    const onUp = (event: PointerEvent): void => {
-      if (!pointer || pointer.pointerId !== event.pointerId) return;
-      const click = isPlacementClick(pointer, event.clientX, event.clientY, event.pointerId);
-      pointer = null;
-      lastPointer = event;
-      const position = previewAtPointer();
-      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
-      if (click && position) commitComponentPlacement(position);
-      event.preventDefault();
-      event.stopImmediatePropagation();
-    };
-    const onLeave = (): void => {
-      ghost.visible = false;
-      setComponentPlacementPosition(null);
-    };
-    const onCancel = (): void => { pointer = null; onLeave(); };
-    canvas.addEventListener('pointerdown', onDown, true);
-    canvas.addEventListener('pointermove', onMove, true);
-    canvas.addEventListener('pointerup', onUp, true);
-    canvas.addEventListener('pointercancel', onCancel, true);
-    canvas.addEventListener('pointerleave', onLeave);
-    orbit.addEventListener('change', previewAtPointer);
-    previewAtPointer();
-    return () => {
-      if (pointer && canvas.hasPointerCapture(pointer.pointerId)) canvas.releasePointerCapture(pointer.pointerId);
-      canvas.removeEventListener('pointerdown', onDown, true);
-      canvas.removeEventListener('pointermove', onMove, true);
-      canvas.removeEventListener('pointerup', onUp, true);
-      canvas.removeEventListener('pointercancel', onCancel, true);
-      canvas.removeEventListener('pointerleave', onLeave);
-      orbit.removeEventListener('change', previewAtPointer);
-      canvas.style.cursor = previousCursor;
-      scene.remove(ghost);
-      const geometries = new Set<THREE.BufferGeometry>();
-      const materials = new Set<THREE.Material>();
-      ghost.traverse((object) => {
-        if (!(object instanceof THREE.Mesh)) return;
-        geometries.add(object.geometry);
-        for (const material of Array.isArray(object.material) ? object.material : [object.material]) materials.add(material);
-      });
-      for (const geometry of geometries) geometry.dispose();
-      for (const material of materials) material.dispose();
-    };
+    return attachScenePlacement({ scene, camera, canvas, orbit, root: sceneGroupRef.current, placement, pointerPosition: placementPointerRef });
   }, [placement]);
 
   const moveWalk = (direction: WalkDirection, multiplier = 1): void => {
@@ -1277,6 +1163,29 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     scene.add(group);
     sceneGroupRef.current = group;
     sceneControlsRef.current = controls;
+
+    if (containmentOnly) {
+      group.traverse(object => { if (object instanceof THREE.Mesh) object.receiveShadow = false; });
+      const box = visibleBoundingBox(group);
+      if (!box.isEmpty() && groundRef.current) {
+        const centre = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3());
+        const extent = Math.max(size.x, size.y, 2000) + 4000;
+        const floor = floorId ? project.floors?.[floorId] : undefined;
+        groundRef.current.position.set(centre.x, centre.y, (floor?.ffl ?? 0) - 2);
+        groundRef.current.scale.set(extent * 3, extent * 3, 1);
+        const sun = scene.getObjectByName('site-key-light');
+        if (sun instanceof THREE.DirectionalLight) {
+          sun.position.set(centre.x + extent, centre.y + extent, centre.z + extent * 2);
+          sun.target.position.copy(centre);
+          scene.add(sun.target);
+          sun.shadow.camera.left = -extent; sun.shadow.camera.right = extent;
+          sun.shadow.camera.top = extent; sun.shadow.camera.bottom = -extent;
+          sun.shadow.camera.far = extent * 5;
+          sun.shadow.camera.updateProjectionMatrix();
+        }
+      }
+    }
 
     // Re-apply user toolbar state to the freshly built scene.
     if (singleFloor && floorId) controls.isolateFloor(floorId);
@@ -1591,10 +1500,8 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
       <div className="site-viewport">
         <div ref={mountRef} className="site-render-surface" />
         {renderError && <div className="canvas-3d-fallback">{renderError}</div>}
-        {placement?.surface === '3d' && <div className="site-placement-hint" role="status">
-          <span>{placement.hint}</span>
-          <button type="button" onClick={() => cancelComponentPlacement()} title="Cancel placement (Esc)" aria-label="Cancel placement">×</button>
-        </div>}
+        <SceneSelectionOverlay project={project} selection={selection} cameraRef={cameraRef} mountRef={mountRef} rootRef={sceneGroupRef} />
+        <PlacementControls />
         {isolatedId && (
           <div className="site-selection-banner">
             <span>Isolated component</span>

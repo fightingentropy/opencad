@@ -140,9 +140,13 @@ describe('workspace target view', () => {
     const project = fixture();
     const sheet = project.sheets.first;
     expect(workspaceTargetView(project, sheet, sheet.entities.route)).toBe('3d');
-    expect(workspaceTargetView(project, sheet, { ...sheet.entities.route as ContainmentEntity, containmentType: 'conduit' })).toBe('2d');
-    expect(workspaceTargetView(project, sheet, { ...sheet.entities.route as ContainmentEntity, containmentType: 'ladder' })).toBe('2d');
+    expect(workspaceTargetView(project, sheet, { ...sheet.entities.route as ContainmentEntity, containmentType: 'conduit', elevation: 0 })).toBe('3d');
+    expect(workspaceTargetView(project, sheet, { ...sheet.entities.route as ContainmentEntity, containmentType: 'ladder' })).toBe('3d');
     expect(workspaceTargetView(project, sheet, sheet.entities.board)).toBe('2d');
+    expect(workspaceTargetView(project, sheet, {
+      id: 'physical-board', kind: 'equipment', equipmentKind: 'distribution-board', tag: 'DB02',
+      layerId: project.activeLayerId, visible: true, locked: false, a: { x: 0, y: 0 }, b: { x: 1200, y: 450 },
+    })).toBe('3d');
     const annotation: Entity = { id: 'note', kind: 'text', layerId: project.activeLayerId, visible: true, locked: false, text: 'Note', position: { x: 0, y: 0 }, fontSize: 10, rotation: 0 };
     expect(workspaceTargetView(project, sheet, annotation)).toBe('2d');
   });

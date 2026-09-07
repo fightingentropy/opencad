@@ -5,8 +5,7 @@
 // must exist on the route:
 //
 //   - Direction changes  → flat-bend (with snapped angle 30/45/60/90)
-//   - Junctions with 1 other containment touching at endpoint → tee
-//   - Junctions with 2 other containments touching at endpoint → cross
+//   - Connected ends → coupler or bend; three/four directions → tee/cross
 //   - Free endpoints  → end-cap
 //   - Stock-length boundaries → coupler
 //
@@ -52,6 +51,8 @@ export interface DetectFittingsOptions {
   stockLength?: number;
   // Layer to assign to fittings. Defaults to the parent containment layer.
   layerId?: LayerId;
+  // A locked reference may be connected to without assigning new parts to it.
+  canOwnJunction?: (containment: ContainmentEntity) => boolean;
 }
 
 // Compute total length of a polyline in mm.
@@ -151,28 +152,34 @@ function endpointConnections(
 export function classifyJunction(
   p: Vec2,
   containments: ContainmentEntity[],
-  selfId?: EntityId
+  selfId?: EntityId,
+  source?: ContainmentEntity,
 ): JunctionClassification {
   const connections = endpointConnections(p, selfId ?? '', containments);
-  if (connections.length === 0) {
-    return { kind: 'end-cap' };
+  if (!connections.length) return { kind: 'end-cap' };
+  const owner = source ?? containments.find(entity => entity.id === selfId);
+  const directions: Vec2[] = [];
+  const addDirection = (point: Vec2) => {
+    const length = dist(p, point);
+    if (length <= ENDPOINT_TOL_MM) return;
+    const direction = { x: (point.x - p.x) / length, y: (point.y - p.y) / length };
+    if (!directions.some(other => other.x * direction.x + other.y * direction.y > Math.cos(ANGLE_NOOP_DEG * Math.PI / 180))) directions.push(direction);
+  };
+  for (const route of owner ? [owner, ...connections] : connections) {
+    for (let index = 1; index < route.points.length; index++) {
+      const a = route.points[index - 1], b = route.points[index];
+      if (pointToSegmentDistance(p, a, b) <= ENDPOINT_TOL_MM) { addDirection(a); addDirection(b); }
+    }
   }
-  if (connections.length === 1) {
-    return { kind: 'tee' };
+  const branches = directions.length + (owner ? 0 : 1);
+  if (branches >= 4) return { kind: 'cross' };
+  if (branches === 3) return { kind: 'tee' };
+  if (directions.length === 2 && owner) {
+    const dot = directions[0].x * directions[1].x + directions[0].y * directions[1].y;
+    const deflection = 180 - Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI;
+    if (deflection >= ANGLE_NOOP_DEG) return { kind: 'flat-bend', angleDeg: snapAngleToStandard(deflection) };
   }
-  // 2+ touching: treat as a cross fitting
-  return { kind: 'cross' };
-}
-
-// Pick the larger or equal sized neighbour. We only place tees / crosses
-// when the connecting containment is the same or larger than the parent.
-function isSameOrLarger(self: ContainmentEntity, other: ContainmentEntity): boolean {
-  const selfW = self.width ?? 0;
-  const selfH = self.height ?? 0;
-  const otherW = other.width ?? 0;
-  const otherH = other.height ?? 0;
-  // Compare cross-section area as a simple proxy
-  return otherW * otherH >= selfW * selfH;
+  return { kind: 'coupler' };
 }
 
 // Auto-detect every fitting required by a containment polyline.
@@ -194,6 +201,7 @@ export function detectFittings(
 
   // 1) Direction changes → flat-bend
   for (let i = 1; i < points.length - 1; i++) {
+    if (endpointConnections(points[i], containment.id, otherContainments).length) continue;
     const deflection = deflectionAt(points, i);
     if (deflection < ANGLE_NOOP_DEG) continue;
     const angleDeg = snapAngleToStandard(deflection);
@@ -215,7 +223,7 @@ export function detectFittings(
     });
   }
 
-  // 2) Endpoints → end-cap, tee, or cross
+  // 2) Network joints include branches landing midway along a straight spine.
   const endpoints: { p: Vec2; rot: number }[] = [
     { p: points[0], rot: segAngle(points[1], points[0]) },
     {
@@ -223,29 +231,25 @@ export function detectFittings(
       rot: segAngle(points[points.length - 2], points[points.length - 1]),
     },
   ];
-  for (const ep of endpoints) {
-    const cls = classifyJunction(ep.p, otherContainments, containment.id);
-    let fittingKind: FittingKind = cls.kind;
-    if (fittingKind === 'tee' || fittingKind === 'cross') {
-      // Only count tees/crosses where neighbours are same/larger size.
-      const neighbours = endpointConnections(
-        ep.p,
-        containment.id,
-        otherContainments
-      );
-      const compatible = neighbours.filter((n) => isSameOrLarger(containment, n));
-      if (compatible.length === 0) {
-        fittingKind = 'end-cap';
-      } else if (compatible.length === 1) {
-        fittingKind = 'tee';
-      } else {
-        fittingKind = 'cross';
-      }
+  for (const other of otherContainments) {
+    for (const point of [other.points[0], other.points.at(-1)]) {
+      if (!point || !containmentTouchesPoint(containment, point) || endpoints.some(ep => nearlyEqual(ep.p, point))) continue;
+      const segment = points.findIndex((p, i) => i > 0 && pointToSegmentDistance(point, points[i - 1], p) <= ENDPOINT_TOL_MM);
+      if (segment > 0) endpoints.push({ p: point, rot: segAngle(points[segment - 1], points[segment]) });
     }
+  }
+  for (const ep of endpoints) {
+    const neighbours = endpointConnections(ep.p, containment.id, otherContainments);
+    // One saved joint per physical connection, with a stable owner across regenerations.
+    const owners = [containment, ...neighbours].filter(route => options.canOwnJunction?.(route) ?? true);
+    if (neighbours.length && owners.map(route => route.id).sort()[0] !== containment.id) continue;
+    const cls = classifyJunction(ep.p, otherContainments, containment.id, containment);
+    const fittingKind: FittingKind = cls.kind;
     fittings.push({
       id: nanoid(),
       kind: 'fitting',
       fittingKind,
+      ...(cls.angleDeg != null ? { angleDeg: cls.angleDeg } : {}),
       layerId,
       visible: true,
       locked: false,
@@ -276,7 +280,8 @@ export function detectFittings(
       };
       // Skip if this coupler position is too close to a vertex (bend
       // point) — the bend already serves as a joint.
-      const nearVertex = points.some((p) => nearlyEqual(p, couplerPos, 100));
+      const nearVertex = points.some((p) => nearlyEqual(p, couplerPos, 100))
+        || fittings.some(fitting => nearlyEqual(fitting.position, couplerPos, 100));
       if (!nearVertex) {
         fittings.push({
           id: nanoid(),

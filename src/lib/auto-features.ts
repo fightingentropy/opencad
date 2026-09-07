@@ -22,6 +22,7 @@ import type {
 import { detectFittings } from './fittings';
 import { placeSupportsForContainment } from './support-placer';
 import { segIntersect } from './math';
+import { defaultElevation } from '../three/elevations';
 
 const findContainment = (
   project: Project,
@@ -42,10 +43,16 @@ const otherContainmentsOnSheet = (
 ): ContainmentEntity[] => {
   const sheet = project.sheets[sheetId];
   if (!sheet) return [];
+  const source = sheet.entities[selfId];
+  const floor = sheet.floorId ? project.floors?.[sheet.floorId] : undefined;
   const out: ContainmentEntity[] = [];
   for (const id of sheet.entityOrder) {
     const e = sheet.entities[id];
-    if (e && e.kind === 'containment' && e.id !== selfId) out.push(e);
+    if (e && e.kind === 'containment' && e.id !== selfId && source?.kind === 'containment'
+      && e.containmentType === source.containmentType
+      && Math.abs(defaultElevation(e, floor) - defaultElevation(source, floor)) <= 1
+      && Math.abs((e.width ?? 0) - (source.width ?? 0)) <= 0.1
+      && Math.abs((e.height ?? 0) - (source.height ?? 0)) <= 0.1) out.push(e);
   }
   return out;
 };
@@ -85,7 +92,10 @@ export const autoPlaceFittingsForContainment = (
   const containment = findContainment(project, sheetId, containmentId);
   if (!containment) return [];
   const others = otherContainmentsOnSheet(project, sheetId, containmentId);
-  return detectFittings(containment, others);
+  return detectFittings(containment, others, {
+    canOwnJunction: route => !route.locked && !project.layers[route.layerId]?.locked
+      && route.visible !== false && project.layers[route.layerId]?.visible !== false,
+  });
 };
 
 export const autoPlaceSupportsForContainment = (
