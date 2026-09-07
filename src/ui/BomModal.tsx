@@ -53,7 +53,11 @@ export function BomModal({ onClose }: { onClose: () => void }) {
   const catalogues = useCatalogues();
   const standardsProfile = useStandardsProfile();
   const projectName = useProjectName();
-  const [tab, setTab] = useState<BomTab>('symbols');
+  const [tab, setTab] = useState<BomTab>(() => {
+    const project = useStore.getState().project;
+    return project.sheets[project.activeSheetId]?.sceneStyle === 'containment'
+      ? 'containment' : 'symbols';
+  });
 
   // Each tab dataset is memoised so switching tabs after generation is cheap
   // and re-renders don't recompute everything from scratch. Deps mirror the
@@ -148,6 +152,7 @@ export function BomModal({ onClose }: { onClose: () => void }) {
             <button
               key={t}
               className={`bom-tab${tab === t ? ' active' : ''}`}
+              aria-pressed={tab === t}
               onClick={() => setTab(t)}
             >
               {TAB_LABEL[t]}
