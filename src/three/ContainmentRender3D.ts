@@ -85,6 +85,8 @@ export interface RenderOpts {
   showCovers?: boolean;
   /** Render conduit even when its placement uses an inferred elevation. */
   renderConduit?: boolean;
+  /** Fine section edges improve readability against a light workspace. */
+  showEdges?: boolean;
 }
 
 // ---------- Helpers ----------------------------------------------------------
@@ -630,6 +632,17 @@ export function renderContainment3D(containment: ContainmentEntity, opts: Render
       body.rotation.z = seg.heading;
       root.add(body);
     }
+  }
+  if (opts.showEdges && containment.containmentType !== 'basket' && containment.containmentType !== 'conduit') {
+    const meshes: THREE.Mesh[] = [];
+    root.traverse(object => { if (object instanceof THREE.Mesh && !(object instanceof THREE.InstancedMesh)) meshes.push(object); });
+    const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x596571, transparent: true, opacity: 0.36, depthWrite: false });
+    for (const mesh of meshes) {
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 35), edgeMaterial);
+      edges.name = 'section-edges';
+      mesh.add(edges);
+    }
+    if (!meshes.length) edgeMaterial.dispose();
   }
   tagPicking(root, containment.id);
   return root;

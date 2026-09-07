@@ -31,7 +31,7 @@ afterEach(() => {
 describe('component placement', () => {
   it('previews without changing the project, then places once with normal selection and undo', () => {
     const before = useStore.getState().project;
-    const count = activeSheet().entityOrder.length;
+    const count = Object.values(activeSheet().entities).filter(entity => entity.kind === 'containment').length;
     expect(beginComponentPlacement(tray())).toBe(true);
     expect(useComponentPlacement.getState().pending?.surface).toBe('3d');
     const preview = componentPlacementPreview({ x: 1700, y: 2200 });
@@ -41,12 +41,13 @@ describe('component placement', () => {
 
     const inserted = commitComponentPlacement({ x: 1700, y: 2200 });
     expect(inserted?.kind).toBe('containment');
-    expect(activeSheet().entityOrder).toHaveLength(count + 1);
+    expect(Object.values(activeSheet().entities).filter(entity => entity.kind === 'containment')).toHaveLength(count + 1);
+    expect(Object.values(activeSheet().entities).some(entity => entity.kind === 'fitting' && entity.containmentId === inserted!.id)).toBe(true);
     expect(useStore.getState().editor.selection).toEqual(new Set([inserted!.id]));
     expect(useStore.getState().past).toHaveLength(1);
     expect(useComponentPlacement.getState().pending).toBeNull();
     expect(commitComponentPlacement({ x: 3000, y: 3000 })).toBeNull();
-    expect(activeSheet().entityOrder).toHaveLength(count + 1);
+    expect(Object.values(activeSheet().entities).filter(entity => entity.kind === 'containment')).toHaveLength(count + 1);
     useStore.getState().undo();
     expect(useStore.getState().project).toBe(before);
     useStore.getState().redo();

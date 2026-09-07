@@ -43,7 +43,7 @@ import { containmentTouchesPoint } from '../lib/fittings';
 // ---------- Public API ------------------------------------------------------
 
 export interface BuildSceneOptions {
-  /** Draw only open tray, trunking and basket, without building context. */
+  /** A workspace for physical parts, without architectural context or covers. */
   containmentOnly?: boolean;
   /** Material palette overrides (per-system colours, per-material look). */
   materials?: ContainmentRenderOpts['materials'];
@@ -1011,8 +1011,8 @@ function renderFloor(
 
   const layers = options.containmentOnly ? {
     ...options.layers,
-    walls: false, rooms: false, floors: false, equipment: false,
-    fittings: false, supports: false, risers: false, labels: false, cables: false, firestops: false,
+    walls: false, rooms: false, floors: false,
+    risers: false, labels: false, cables: false, firestops: false,
   } : options.layers ?? {};
   const wantWalls = layers.walls !== false;
   const wantRooms = layers.rooms !== false;
@@ -1064,8 +1064,7 @@ function renderFloor(
     ? equipment.filter((eq) => boundsOverlap(equipmentBounds(eq, options.flipY), clipBounds))
     : equipment;
   const renderContainments = visibleContainments.filter((containment) => (
-    shouldRenderContainment3D(containment)
-    && (!options.containmentOnly || ['tray', 'trunking', 'basket'].includes(containment.containmentType))
+    options.containmentOnly || shouldRenderContainment3D(containment)
   ));
 
   const containmentMap = new Map<string, ContainmentEntity>();
@@ -1108,11 +1107,12 @@ function renderFloor(
         floor,
         flipY: options.flipY,
         showCovers: options.containmentOnly ? false : undefined,
+        showEdges: options.containmentOnly,
       });
       obj.userData.systemId = systemId;
       cgrp.add(obj);
     }
-    if (wantEquipment) {
+    if (wantEquipment && !options.containmentOnly) {
       const equipmentDrops = buildEquipmentDropGroup(
         renderContainments,
         visibleEquipment,

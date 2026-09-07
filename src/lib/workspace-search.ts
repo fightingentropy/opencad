@@ -178,11 +178,10 @@ export function workspaceTargetView(project: Project, sheet: Sheet, entity?: Ent
     || (!!sheet.floorId && !!Object.keys(project.sites ?? {}).length);
   if (!entity) return site || sheet.kind === 'panel-layout' || sheet.sceneStyle === 'building' ? '3d' : '2d';
   if (entity.visible === false || project.layers[entity.layerId]?.visible === false) return '2d';
-  if (sheet.sceneStyle === 'containment') return entity.kind === 'containment'
-    && ['tray', 'trunking', 'basket'].includes(entity.containmentType) ? '3d' : '2d';
+  if (site && entity.kind === 'containment' && entity.containmentType === 'conduit' && !Number.isFinite(entity.elevation)) return '2d';
+  if (sheet.sceneStyle === 'containment') return ['containment', 'equipment', 'support', 'fitting'].includes(entity.kind) ? '3d' : '2d';
   if (site) {
-    if (entity.kind === 'containment' && (entity.subType === 'underground-duct'
-      || (entity.containmentType === 'conduit' && !Number.isFinite(entity.elevation)))) return '2d';
+    if (entity.kind === 'containment' && entity.subType === 'underground-duct') return '2d';
     return ['containment', 'wall', 'room', 'equipment', 'fitting', 'support', 'riser', 'penetration'].includes(entity.kind) ? '3d' : '2d';
   }
   if (sheet.kind !== 'panel-layout' && Object.values(project.sheets).some((item) => item.kind === 'panel-layout')) return '2d';
