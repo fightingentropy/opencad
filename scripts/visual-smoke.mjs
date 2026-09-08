@@ -128,10 +128,10 @@ async function waitForCanvas(client) {
   const deadline = Date.now() + 15000;
   let latest;
   while (Date.now() < deadline) {
-    latest = await evaluate(client, `(() => {
-      const canvas = document.querySelector('canvas');
+    latest = await evaluate(client, `new Promise(resolve => requestAnimationFrame(() => {
+      const canvas = document.querySelector('.site-render-surface canvas');
       const bodyText = document.body?.innerText || '';
-      if (!canvas) return { ready: false, reason: 'no canvas', bodyText: bodyText.slice(0, 160) };
+      if (!canvas) return resolve({ ready: false, reason: '3D renderer not mounted', bodyText: bodyText.slice(0, 160) });
       const rect = canvas.getBoundingClientRect();
       let pixelSignal = null;
       try {
@@ -152,13 +152,14 @@ async function waitForCanvas(client) {
       } catch (error) {
         pixelSignal = String(error?.message || error);
       }
-      return {
-        ready: rect.width > 200 && rect.height > 200,
+      resolve({
+        ready: rect.width > 200 && rect.height > 200 && Array.isArray(pixelSignal) && pixelSignal[3] > 0
+          && !document.querySelector('.canvas-3d-fallback'),
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
         pixelSignal,
         bodyText: bodyText.slice(0, 160)
-      };
-    })()`);
+      });
+    }))`);
     if (latest?.ready) return latest;
     await sleep(250);
   }
