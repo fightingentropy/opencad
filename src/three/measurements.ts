@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { ContainmentEntity, Project } from '../types';
 import type { Floor } from '../models/site';
 import { defaultElevation } from './elevations';
+import { routeLength, routePath } from '../lib/route-path';
 
 export interface MeasurementRow {
   label: string;
@@ -25,15 +26,7 @@ export function formatSignedMm(value: number): string {
   return `${rounded > 0 ? '+' : '-'}${Math.abs(rounded).toLocaleString('en-GB')} mm`;
 }
 
-export function containmentRouteLength(containment: ContainmentEntity): number {
-  let length = 0;
-  for (let i = 0; i < containment.points.length - 1; i++) {
-    const a = containment.points[i];
-    const b = containment.points[i + 1];
-    length += Math.hypot(b.x - a.x, b.y - a.y);
-  }
-  return length;
-}
+export const containmentRouteLength = routeLength;
 
 export function containmentSizeLabel(containment: ContainmentEntity): string {
   const width = containment.width ?? 100;
@@ -75,9 +68,10 @@ export function containmentMeasurement(
   containment: ContainmentEntity,
   floor?: Floor,
 ): ContainmentMeasurement {
-  const baseZ = defaultElevation(containment, floor);
+  const path = routePath(containment, floor);
+  const baseZ = path.length ? Math.min(...path.map(p => p.z)) : defaultElevation(containment, floor);
   const height = containment.containmentType === 'conduit' ? (containment.width ?? 100) : (containment.height ?? 50);
-  const topZ = baseZ + height;
+  const topZ = (path.length ? Math.max(...path.map(p => p.z)) : baseZ) + height;
   const systemName = containment.systemId ? project.systems?.[containment.systemId]?.name : undefined;
   const subType = containment.subType ? containment.subType.replaceAll('-', ' ') : undefined;
   const typeLabel = [containment.containmentType, subType].filter(Boolean).join(' · ');

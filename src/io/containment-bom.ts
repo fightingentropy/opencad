@@ -5,7 +5,7 @@
 // fittings (every direction change in `points` is a flat-bend; tees and
 // crosses are detected where containments meet; couplers join stock
 // pieces; end-caps cap unconnected terminations) and the supports
-// (length / max span from SUPPORT_SPANS_HORIZONTAL_MM). Trunking also
+// (horizontal sections only). Trunking also
 // gets covers/lids by length. Rows are then aggregated by manufacturer +
 // part number + size + material — one BOM row per unique product.
 
@@ -13,11 +13,11 @@ import type {
   Project,
   ContainmentEntity,
   ContainmentMaterial,
-  Vec2,
-  EntityId,
+  Sheet,
 } from '../types';
-import { dist } from '../lib/math';
-import { SUPPORT_SPANS_HORIZONTAL_MM } from '../models/standards';
+import { detectFittings } from '../lib/fittings';
+import { distance3, equipmentPorts, routeLength, routePath } from '../lib/route-path';
+import { placeSupportsForContainment } from '../lib/support-placer';
 import { prependCSVExportMetadata } from './export-metadata';
 
 export interface ContainmentBOMRow {
@@ -38,139 +38,6 @@ export interface ContainmentBOMRow {
 
 const STOCK_LENGTH_DEFAULT_MM = 3000;
 const WASTAGE_FACTOR = 1.05;
-const ENDPOINT_TOLERANCE_MM = 5;
-
-interface RouteMetrics {
-  lengthMm: number;
-  bends: number;
-  segments: number;
-}
-
-const routeLengthMm = (points: Vec2[]): number => {
-  if (points.length < 2) return 0;
-  let total = 0;
-  for (let i = 1; i < points.length; i++) {
-    total += dist(points[i - 1], points[i]);
-  }
-  return total;
-};
-
-const directionChanges = (points: Vec2[]): number => {
-  if (points.length < 3) return 0;
-  let count = 0;
-  for (let i = 1; i < points.length - 1; i++) {
-    const ax = points[i].x - points[i - 1].x;
-    const ay = points[i].y - points[i - 1].y;
-    const bx = points[i + 1].x - points[i].x;
-    const by = points[i + 1].y - points[i].y;
-    // Cross product magnitude — non-zero means direction changed
-    const cross = ax * by - ay * bx;
-    if (Math.abs(cross) > 1e-3) count++;
-  }
-  return count;
-};
-
-const computeMetrics = (points: Vec2[]): RouteMetrics => ({
-  lengthMm: routeLengthMm(points),
-  bends: directionChanges(points),
-  segments: Math.max(0, points.length - 1),
-});
-
-// Approximate max support span for a containment based on its kind/width.
-const supportSpanMm = (c: ContainmentEntity): number => {
-  const spans = SUPPORT_SPANS_HORIZONTAL_MM as Record<
-    string,
-    Record<number, number>
-  >;
-  const widthKey = c.width ?? 100;
-  const lookup = (table: Record<number, number>): number => {
-    // Largest tabulated width <= widthKey (else smallest)
-    const widths = Object.keys(table)
-      .map(Number)
-      .sort((a, b) => a - b);
-    let pick = widths[0] ?? widthKey;
-    for (const w of widths) if (w <= widthKey) pick = w;
-    return table[pick] ?? 1500;
-  };
-  switch (c.containmentType) {
-    case 'tray':
-      return lookup(spans.tray);
-    case 'ladder':
-      return lookup(spans.ladder);
-    case 'basket':
-      return lookup(spans.basket);
-    case 'trunking':
-      return lookup(spans.trunking);
-    case 'conduit': {
-      const isPvc =
-        c.material === 'pvc' ||
-        c.material === 'lsoh' ||
-        c.subType === 'rigid-pvc' ||
-        c.subType === 'lsoh-conduit';
-      return lookup(isPvc ? spans.conduit_pvc : spans.conduit_steel);
-    }
-    case 'duct':
-      return 1500;
-    case 'busbar':
-      return 3000;
-    default:
-      return 1500;
-  }
-};
-
-// Detect tees / crosses by counting how many other containments share
-// each interior endpoint of every containment in the project.
-const collectJunctions = (
-  containments: ContainmentEntity[],
-): Map<EntityId, { tees: number; crosses: number; openEnds: number }> => {
-  const out = new Map<
-    EntityId,
-    { tees: number; crosses: number; openEnds: number }
-  >();
-  // Bin endpoints to avoid O(n²) point comparisons across all entities
-  const buckets = new Map<string, Array<{ id: EntityId; idx: number; p: Vec2 }>>();
-  const key = (p: Vec2) =>
-    `${Math.round(p.x / ENDPOINT_TOLERANCE_MM)}:${Math.round(p.y / ENDPOINT_TOLERANCE_MM)}`;
-  for (const c of containments) {
-    if (!c.points || c.points.length < 2) continue;
-    const ends = [0, c.points.length - 1];
-    for (const idx of ends) {
-      const p = c.points[idx];
-      const k = key(p);
-      const list = buckets.get(k) ?? [];
-      list.push({ id: c.id, idx, p });
-      buckets.set(k, list);
-    }
-  }
-  for (const c of containments) {
-    out.set(c.id, { tees: 0, crosses: 0, openEnds: 0 });
-  }
-  for (const c of containments) {
-    if (!c.points || c.points.length < 2) continue;
-    const stats = out.get(c.id)!;
-    for (const endIdx of [0, c.points.length - 1]) {
-      const p = c.points[endIdx];
-      // Look at neighbouring buckets (±1) to catch points near a boundary
-      let touching = 0;
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dy = -1; dy <= 1; dy++) {
-          const k = `${Math.round(p.x / ENDPOINT_TOLERANCE_MM) + dx}:${Math.round(p.y / ENDPOINT_TOLERANCE_MM) + dy}`;
-          const list = buckets.get(k);
-          if (!list) continue;
-          for (const e of list) {
-            if (e.id === c.id) continue;
-            if (dist(e.p, p) <= ENDPOINT_TOLERANCE_MM) touching++;
-          }
-        }
-      }
-      if (touching === 0) stats.openEnds++;
-      else if (touching === 1) stats.tees++;
-      else if (touching >= 2) stats.crosses++;
-    }
-  }
-  return out;
-};
-
 // Build a stable BOM key for aggregation.
 const bomKey = (parts: Array<string | number | undefined>): string =>
   parts.map((p) => (p ?? '').toString()).join('|');
@@ -231,10 +98,11 @@ const upsert = (
 
 export const generateContainmentBOM = (
   project: Project,
+  selectedIds?: ReadonlySet<string>,
 ): ContainmentBOMRow[] => {
   const containments: Array<{
     e: ContainmentEntity;
-    sheetNumber: string;
+    sheet: Sheet;
   }> = [];
   for (const sheetId of project.sheetOrder) {
     const sheet = project.sheets[sheetId];
@@ -242,30 +110,31 @@ export const generateContainmentBOM = (
     for (const id of sheet.entityOrder) {
       const e = sheet.entities[id];
       if (e && e.kind === 'containment') {
-        containments.push({ e: e as ContainmentEntity, sheetNumber: sheet.number });
+        containments.push({ e: { ...e, points: routePath(e, project.floors?.[sheet.floorId ?? '']) }, sheet });
       }
     }
   }
-  const junctions = collectJunctions(containments.map((c) => c.e));
 
   const rows = new Map<string, ContainmentBOMRow>();
   let auto = 1;
 
-  for (const { e: c, sheetNumber } of containments) {
-    const metrics = computeMetrics(c.points ?? []);
-    if (metrics.lengthMm === 0) continue;
-    const stock = STOCK_LENGTH_DEFAULT_MM;
-    const piecesNeeded = Math.ceil((metrics.lengthMm * WASTAGE_FACTOR) / stock);
-    const lengthMetres = +(metrics.lengthMm / 1000).toFixed(2);
-    const span = supportSpanMm(c);
-    const supports = Math.max(1, Math.ceil(metrics.lengthMm / span) + 1);
-    const j = junctions.get(c.id) ?? { tees: 0, crosses: 0, openEnds: 0 };
-    const bends = metrics.bends;
-    // A coupler connects each adjacent pair of stock pieces — pieces - 1
-    const couplers = Math.max(0, piecesNeeded - 1);
-    const endCaps = j.openEnds;
-    const tees = j.tees;
-    const crosses = j.crosses;
+  for (const { e: c, sheet } of containments) {
+    if (selectedIds && !selectedIds.has(c.id)) continue;
+    const sheetNumber = sheet.number;
+    const lengthMm = routeLength(c);
+    if (lengthMm === 0) continue;
+    const piecesNeeded = Math.ceil((lengthMm * WASTAGE_FACTOR) / STOCK_LENGTH_DEFAULT_MM);
+    const lengthMetres = +(lengthMm / 1000).toFixed(3);
+    const supports = placeSupportsForContainment(c).length;
+    const neighbours = containments.filter(other => other.sheet.id === sheet.id && other.e.id !== c.id
+      && other.e.containmentType === c.containmentType && other.e.width === c.width && other.e.height === c.height).map(other => other.e);
+    const ports = Object.values(sheet.entities).flatMap(e => e.kind === 'equipment' ? equipmentPorts(e) : []);
+    const counts = new Map<string, number>();
+    const fittings = detectFittings(c, neighbours, { canOwnJunction: route => !selectedIds || selectedIds.has(route.id) });
+    for (const fitting of fittings) {
+      if (fitting.fittingKind === 'end-cap' && ports.some(port => distance3(port.position, { ...fitting.position, z: fitting.elevation }) < 10)) continue;
+      counts.set(fitting.fittingKind, (counts.get(fitting.fittingKind) ?? 0) + 1);
+    }
 
     const manufacturer = c.manufacturer ?? '';
     const partNumber = c.catalogPartNumber ?? '';
@@ -347,11 +216,13 @@ export const generateContainmentBOM = (
       desc: string;
       qty: number;
     }> = [
-      { sub: 'flat-bend', desc: 'Flat bend', qty: bends },
-      { sub: 'tee', desc: 'Tee', qty: tees },
-      { sub: 'cross', desc: 'Cross', qty: crosses },
-      { sub: 'coupler', desc: 'Coupler', qty: couplers },
-      { sub: 'end-cap', desc: 'End cap', qty: endCaps },
+      { sub: 'flat-bend', desc: 'Flat bend', qty: counts.get('flat-bend') ?? 0 },
+      { sub: 'inside-riser', desc: 'Inside vertical bend', qty: counts.get('inside-riser') ?? 0 },
+      { sub: 'outside-riser', desc: 'Outside vertical bend', qty: counts.get('outside-riser') ?? 0 },
+      { sub: 'tee', desc: 'Tee', qty: counts.get('tee') ?? 0 },
+      { sub: 'cross', desc: 'Cross', qty: counts.get('cross') ?? 0 },
+      { sub: 'coupler', desc: 'Coupler', qty: counts.get('coupler') ?? 0 },
+      { sub: 'end-cap', desc: 'End cap', qty: counts.get('end-cap') ?? 0 },
     ];
     for (const f of fittingTypes) {
       if (f.qty <= 0) continue;
@@ -395,7 +266,7 @@ export const generateContainmentBOM = (
       size,
       material,
     ]);
-    upsert(
+    if (supports > 0) upsert(
       rows,
       skey,
       {
@@ -403,7 +274,7 @@ export const generateContainmentBOM = (
         kind: `${c.containmentType} support`,
         manufacturer,
         partNumber: '',
-        description: `Bracket / hanger for ${size || c.containmentType}`,
+        description: `Horizontal bracket / hanger estimate for ${size || c.containmentType}`,
         size,
         material,
         unit: 'pcs',

@@ -95,7 +95,7 @@ export const generateIsometric = (opts: IsometricOpts): Entity[] => {
         const c = e as ContainmentEntity;
         const z = c.elevation ?? defaultContainmentElevation(c);
         const projected = c.points.map((p) =>
-          isoProject({ x: p.x, y: p.y, z }, scale, originX, originY),
+          isoProject({ x: p.x, y: p.y, z: p.z ?? z }, scale, originX, originY),
         );
         if (projected.length < 2) continue;
         const poly: PolylineEntity = {

@@ -10,6 +10,7 @@ import { checkSegregation } from './segregation';
 import { polylineLength, computeSupportSpacing } from './supports';
 import { computeVoltageDrop } from './voltage-drop';
 import { checkProtectiveDeviceCoordination } from './protective-device';
+import { analyzeSceneClearance } from '../lib/scene-clearance';
 
 export type IssueSeverity = 'info' | 'warning' | 'error';
 export type IssueKind =
@@ -113,143 +114,20 @@ const supportsByContainment = (project: Project): Map<EntityId, SupportEntity[]>
   return out;
 };
 
-const verticalRangeForContainment = (c: ContainmentEntity): { min: number; max: number } => {
-  const base = c.elevation ?? 2200;
-  const height = c.containmentType === 'conduit'
-    ? (c.width ?? 25)
-    : (c.height ?? 50);
-  return { min: base, max: base + Math.max(1, height) };
-};
-
-const overlapAmount = (aMin: number, aMax: number, bMin: number, bMax: number): number =>
-  Math.min(aMax, bMax) - Math.max(aMin, bMin);
-
-const halfWidthForContainment = (c: ContainmentEntity): number =>
-  Math.max(1, (c.width ?? 100) / 2);
-
-const pointSegmentDistance = (
-  point: { x: number; y: number },
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-): number => {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq === 0) return Math.hypot(point.x - a.x, point.y - a.y);
-  const t = Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.y - a.y) * dy) / lenSq));
-  const closest = { x: a.x + t * dx, y: a.y + t * dy };
-  return Math.hypot(point.x - closest.x, point.y - closest.y);
-};
-
-const orientation = (
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-  c: { x: number; y: number },
-): number => (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
-
-const onSegment = (
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-  c: { x: number; y: number },
-): boolean =>
-  b.x <= Math.max(a.x, c.x) &&
-  b.x >= Math.min(a.x, c.x) &&
-  b.y <= Math.max(a.y, c.y) &&
-  b.y >= Math.min(a.y, c.y);
-
-const segmentsIntersect = (
-  a1: { x: number; y: number },
-  a2: { x: number; y: number },
-  b1: { x: number; y: number },
-  b2: { x: number; y: number },
-): boolean => {
-  const o1 = orientation(a1, a2, b1);
-  const o2 = orientation(a1, a2, b2);
-  const o3 = orientation(b1, b2, a1);
-  const o4 = orientation(b1, b2, a2);
-  if ((o1 > 0) !== (o2 > 0) && (o3 > 0) !== (o4 > 0)) return true;
-  const eps = 0.001;
-  if (Math.abs(o1) < eps && onSegment(a1, b1, a2)) return true;
-  if (Math.abs(o2) < eps && onSegment(a1, b2, a2)) return true;
-  if (Math.abs(o3) < eps && onSegment(b1, a1, b2)) return true;
-  if (Math.abs(o4) < eps && onSegment(b1, a2, b2)) return true;
-  return false;
-};
-
-const segmentDistance = (
-  a1: { x: number; y: number },
-  a2: { x: number; y: number },
-  b1: { x: number; y: number },
-  b2: { x: number; y: number },
-): number => {
-  if (segmentsIntersect(a1, a2, b1, b2)) return 0;
-  return Math.min(
-    pointSegmentDistance(a1, b1, b2),
-    pointSegmentDistance(a2, b1, b2),
-    pointSegmentDistance(b1, a1, a2),
-    pointSegmentDistance(b2, a1, a2),
-  );
-};
-
-const minimumFaceGap = (a: ContainmentEntity, b: ContainmentEntity): number | null => {
-  if (a.points.length < 2 || b.points.length < 2) return null;
-  let min = Infinity;
-  for (let i = 0; i < a.points.length - 1; i++) {
-    for (let j = 0; j < b.points.length - 1; j++) {
-      const centerlineGap = segmentDistance(a.points[i], a.points[i + 1], b.points[j], b.points[j + 1]);
-      min = Math.min(min, centerlineGap - halfWidthForContainment(a) - halfWidthForContainment(b));
-    }
-  }
-  return Number.isFinite(min) ? min : null;
-};
-
-const MIN_CONTAINMENT_CLEARANCE_MM = 150;
-
-const checkContainmentClearance = (
-  project: Project,
-  issues: ComplianceIssue[],
-): void => {
-  const entries = containmentsBySheet(project);
-  for (let i = 0; i < entries.length; i++) {
-    const a = entries[i];
-    const aZ = verticalRangeForContainment(a.containment);
-    for (let j = i + 1; j < entries.length; j++) {
-      const b = entries[j];
-      if (a.sheetId !== b.sheetId) continue;
-      const bZ = verticalRangeForContainment(b.containment);
-      if (overlapAmount(aZ.min, aZ.max, bZ.min, bZ.max) <= 0) continue;
-
-      const faceGap = minimumFaceGap(a.containment, b.containment);
-      if (faceGap === null) continue;
-      const labelA = a.containment.label ?? a.containment.containmentType;
-      const labelB = b.containment.label ?? b.containment.containmentType;
-
-      if (faceGap < 0) {
-        issues.push({
-          entityId: a.containment.id,
-          sheetId: a.sheetId,
-          kind: 'clearance',
-          severity: 'error',
-          message: `Containments overlap at same elevation: ${labelA} and ${labelB}`,
-          measured: 0,
-          limit: MIN_CONTAINMENT_CLEARANCE_MM,
-          unit: 'mm',
-        });
-        continue;
-      }
-
-      if (faceGap < MIN_CONTAINMENT_CLEARANCE_MM) {
-        issues.push({
-          entityId: a.containment.id,
-          sheetId: a.sheetId,
-          kind: 'clearance',
-          severity: 'warning',
-          message: `Containment clearance below ${MIN_CONTAINMENT_CLEARANCE_MM}mm: ${labelA} to ${labelB} is ${faceGap.toFixed(0)}mm`,
-          measured: faceGap,
-          limit: MIN_CONTAINMENT_CLEARANCE_MM,
-          unit: 'mm',
-        });
-      }
+const checkContainmentClearance = (project: Project, issues: ComplianceIssue[]): void => {
+  const seen = new Set<string>();
+  for (const { containment, sheetId } of containmentsBySheet(project)) {
+    for (const issue of analyzeSceneClearance({ ...project, activeSheetId: sheetId }, containment)) {
+      const key = [issue.sourceId, issue.targetId].sort().join(':') + ':' + issue.kind;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const source = containment.label ?? containment.containmentType;
+      issues.push({ entityId: containment.id, sheetId, kind: 'clearance',
+        severity: issue.kind === 'clearance' ? 'warning' : 'error',
+        message: issue.kind === 'access' ? `${source} enters equipment access space: ${issue.targetLabel}`
+          : issue.kind === 'overlap' ? `${source} overlaps ${issue.targetLabel}`
+          : `${source} to ${issue.targetLabel}: ${Math.round(issue.gap)} mm clearance (guide ${issue.limit} mm)`,
+        measured: Math.max(0, issue.gap), limit: issue.limit, unit: 'mm' });
     }
   }
 };

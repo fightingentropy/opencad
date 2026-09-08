@@ -19,11 +19,12 @@ import type {
   ContainmentEntity,
   FittingEntity,
   FittingKind,
-  Vec2,
+  RoutePoint,
   EntityId,
   LayerId,
 } from '../types';
-import { dist, sub, RAD2DEG } from './math';
+import { RAD2DEG } from './math';
+import { closestOnPath, distance3 as dist, pathLength, routePath } from './route-path';
 
 // Angular tolerance for "no direction change" (degrees).
 // Anything less than this is treated as a straight run.
@@ -56,12 +57,8 @@ export interface DetectFittingsOptions {
 }
 
 // Compute total length of a polyline in mm.
-export function polylineLength(points: Vec2[]): number {
-  let total = 0;
-  for (let i = 1; i < points.length; i++) {
-    total += dist(points[i - 1], points[i]);
-  }
-  return total;
+export function polylineLength(points: RoutePoint[]): number {
+  return pathLength(points);
 }
 
 // Snap a deflection magnitude (in degrees) to the nearest standard
@@ -81,49 +78,45 @@ function snapAngleToStandard(deflectionDeg: number): number {
 
 // Magnitude of direction change at vertex i of a polyline.
 // Returns 0 for a straight run, up to 180 for a U-turn.
-function deflectionAt(points: Vec2[], i: number): number {
+function deflectionAt(points: RoutePoint[], i: number): number {
   if (i <= 0 || i >= points.length - 1) return 0;
-  const a = sub(points[i], points[i - 1]);
-  const b = sub(points[i + 1], points[i]);
-  const la = Math.hypot(a.x, a.y);
-  const lb = Math.hypot(b.x, b.y);
+  const a = { x: points[i].x - points[i - 1].x, y: points[i].y - points[i - 1].y, z: (points[i].z ?? 0) - (points[i - 1].z ?? 0) };
+  const b = { x: points[i + 1].x - points[i].x, y: points[i + 1].y - points[i].y, z: (points[i + 1].z ?? 0) - (points[i].z ?? 0) };
+  const la = Math.hypot(a.x, a.y, a.z);
+  const lb = Math.hypot(b.x, b.y, b.z);
   if (la < 1e-6 || lb < 1e-6) return 0;
-  const cosTheta = (a.x * b.x + a.y * b.y) / (la * lb);
+  const cosTheta = (a.x * b.x + a.y * b.y + a.z * b.z) / (la * lb);
   // Clamp for numerical safety
   const c = Math.min(1, Math.max(-1, cosTheta));
   return Math.acos(c) * RAD2DEG;
 }
 
 // Direction angle in radians from segment a→b.
-function segAngle(a: Vec2, b: Vec2): number {
+function segAngle(a: RoutePoint, b: RoutePoint): number {
   return Math.atan2(b.y - a.y, b.x - a.x);
 }
 
 // Test if two points are coincident within tolerance.
-function nearlyEqual(a: Vec2, b: Vec2, tol = ENDPOINT_TOL_MM): boolean {
+function nearlyEqual(a: RoutePoint, b: RoutePoint, tol = ENDPOINT_TOL_MM): boolean {
   return dist(a, b) <= tol;
 }
 
-function pointToSegmentDistance(p: Vec2, a: Vec2, b: Vec2): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lenSq = dx * dx + dy * dy;
-  if (lenSq < 1e-9) return dist(p, a);
-  const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
-  return dist(p, { x: a.x + dx * t, y: a.y + dy * t });
+function pointToSegmentDistance(p: RoutePoint, a: RoutePoint, b: RoutePoint): number {
+  return closestOnPath({ ...p, z: p.z ?? 0 }, [{ ...a, z: a.z ?? 0 }, { ...b, z: b.z ?? 0 }])?.distance ?? dist(p, a);
 }
 
 export function containmentTouchesPoint(
   containment: ContainmentEntity,
-  p: Vec2,
+  p: RoutePoint,
   tol = ENDPOINT_TOL_MM,
 ): boolean {
   if (!containment.points || containment.points.length < 2) return false;
-  for (const vertex of containment.points) {
+  const points = p.z == null ? containment.points.map(({ x, y }) => ({ x, y })) : routePath(containment);
+  for (const vertex of points) {
     if (nearlyEqual(p, vertex, tol)) return true;
   }
-  for (let i = 0; i < containment.points.length - 1; i++) {
-    if (pointToSegmentDistance(p, containment.points[i], containment.points[i + 1]) <= tol) {
+  for (let i = 0; i < points.length - 1; i++) {
+    if (pointToSegmentDistance(p, points[i], points[i + 1]) <= tol) {
       return true;
     }
   }
@@ -134,7 +127,7 @@ export function containmentTouchesPoint(
 // often join a spine at an interior vertex or along a straight segment, not
 // only at the spine endpoint.
 function endpointConnections(
-  p: Vec2,
+  p: RoutePoint,
   selfId: EntityId,
   others: ContainmentEntity[]
 ): ContainmentEntity[] {
@@ -150,7 +143,7 @@ function endpointConnections(
 // surrounding containments. Used both for endpoints (end-cap / tee /
 // cross) and for direction changes (flat-bend).
 export function classifyJunction(
-  p: Vec2,
+  p: RoutePoint,
   containments: ContainmentEntity[],
   selfId?: EntityId,
   source?: ContainmentEntity,
@@ -158,16 +151,17 @@ export function classifyJunction(
   const connections = endpointConnections(p, selfId ?? '', containments);
   if (!connections.length) return { kind: 'end-cap' };
   const owner = source ?? containments.find(entity => entity.id === selfId);
-  const directions: Vec2[] = [];
-  const addDirection = (point: Vec2) => {
+  const directions: { x: number; y: number; z: number }[] = [];
+  const addDirection = (point: RoutePoint) => {
     const length = dist(p, point);
     if (length <= ENDPOINT_TOL_MM) return;
-    const direction = { x: (point.x - p.x) / length, y: (point.y - p.y) / length };
-    if (!directions.some(other => other.x * direction.x + other.y * direction.y > Math.cos(ANGLE_NOOP_DEG * Math.PI / 180))) directions.push(direction);
+    const direction = { x: (point.x - p.x) / length, y: (point.y - p.y) / length, z: ((point.z ?? 0) - (p.z ?? 0)) / length };
+    if (!directions.some(other => other.x * direction.x + other.y * direction.y + other.z * direction.z > Math.cos(ANGLE_NOOP_DEG * Math.PI / 180))) directions.push(direction);
   };
   for (const route of owner ? [owner, ...connections] : connections) {
-    for (let index = 1; index < route.points.length; index++) {
-      const a = route.points[index - 1], b = route.points[index];
+    const path = p.z == null ? route.points.map(({ x, y }) => ({ x, y })) : routePath(route);
+    for (let index = 1; index < path.length; index++) {
+      const a = path[index - 1], b = path[index];
       if (pointToSegmentDistance(p, a, b) <= ENDPOINT_TOL_MM) { addDirection(a); addDirection(b); }
     }
   }
@@ -175,9 +169,9 @@ export function classifyJunction(
   if (branches >= 4) return { kind: 'cross' };
   if (branches === 3) return { kind: 'tee' };
   if (directions.length === 2 && owner) {
-    const dot = directions[0].x * directions[1].x + directions[0].y * directions[1].y;
+    const dot = directions[0].x * directions[1].x + directions[0].y * directions[1].y + directions[0].z * directions[1].z;
     const deflection = 180 - Math.acos(Math.max(-1, Math.min(1, dot))) * 180 / Math.PI;
-    if (deflection >= ANGLE_NOOP_DEG) return { kind: 'flat-bend', angleDeg: snapAngleToStandard(deflection) };
+    if (deflection >= ANGLE_NOOP_DEG) return { kind: directions.some(d => Math.abs(d.z) > 0.01) ? 'inside-riser' : 'flat-bend', angleDeg: snapAngleToStandard(deflection) };
   }
   return { kind: 'coupler' };
 }
@@ -192,6 +186,8 @@ export function detectFittings(
   otherContainments: ContainmentEntity[] = [],
   options: DetectFittingsOptions = {}
 ): FittingEntity[] {
+  containment = { ...containment, points: routePath(containment) };
+  otherContainments = otherContainments.map(route => ({ ...route, points: routePath(route) }));
   const { points } = containment;
   if (!points || points.length < 2) return [];
 
@@ -206,14 +202,17 @@ export function detectFittings(
     if (deflection < ANGLE_NOOP_DEG) continue;
     const angleDeg = snapAngleToStandard(deflection);
     const incoming = segAngle(points[i - 1], points[i]);
+    const incomingZ = (points[i].z ?? 0) - (points[i - 1].z ?? 0);
+    const outgoingZ = (points[i + 1].z ?? 0) - (points[i].z ?? 0);
     fittings.push({
       id: nanoid(),
       kind: 'fitting',
-      fittingKind: 'flat-bend',
+      fittingKind: Math.abs(incomingZ) + Math.abs(outgoingZ) < 0.01 ? 'flat-bend' : outgoingZ > incomingZ ? 'inside-riser' : 'outside-riser',
       layerId,
       visible: true,
       locked: false,
       position: { x: points[i].x, y: points[i].y },
+      elevation: points[i].z,
       rotation: incoming,
       angleDeg,
       containmentId: containment.id,
@@ -224,7 +223,7 @@ export function detectFittings(
   }
 
   // 2) Network joints include branches landing midway along a straight spine.
-  const endpoints: { p: Vec2; rot: number }[] = [
+  const endpoints: { p: RoutePoint; rot: number }[] = [
     { p: points[0], rot: segAngle(points[1], points[0]) },
     {
       p: points[points.length - 1],
@@ -254,6 +253,7 @@ export function detectFittings(
       visible: true,
       locked: false,
       position: { x: ep.p.x, y: ep.p.y },
+      elevation: ep.p.z,
       rotation: ep.rot,
       containmentId: containment.id,
       width: containment.width,
@@ -274,14 +274,15 @@ export function detectFittings(
     if (segLen < 1e-6) continue;
     while (cumulative + segLen >= nextCouplerAt) {
       const tInSeg = (nextCouplerAt - cumulative) / segLen;
-      const couplerPos: Vec2 = {
+      const couplerPos: RoutePoint = {
         x: a.x + (b.x - a.x) * tInSeg,
         y: a.y + (b.y - a.y) * tInSeg,
+        z: (a.z ?? 0) + ((b.z ?? 0) - (a.z ?? 0)) * tInSeg,
       };
       // Skip if this coupler position is too close to a vertex (bend
       // point) — the bend already serves as a joint.
       const nearVertex = points.some((p) => nearlyEqual(p, couplerPos, 100))
-        || fittings.some(fitting => nearlyEqual(fitting.position, couplerPos, 100));
+        || fittings.some(fitting => nearlyEqual({ ...fitting.position, z: fitting.elevation }, couplerPos, 100));
       if (!nearVertex) {
         fittings.push({
           id: nanoid(),
@@ -290,7 +291,8 @@ export function detectFittings(
           layerId,
           visible: true,
           locked: false,
-          position: couplerPos,
+          position: { x: couplerPos.x, y: couplerPos.y },
+          elevation: couplerPos.z,
           rotation: segAngle(a, b),
           containmentId: containment.id,
           width: containment.width,

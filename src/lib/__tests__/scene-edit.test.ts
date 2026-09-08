@@ -55,7 +55,8 @@ describe('physical connection snapping', () => {
     const { project, target } = fixture();
     const next = route(project, 'next', [{ x: 3010, y: 5 }, { x: 6010, y: 5 }]);
     expect(snapPhysicalConnection(next, physicalAnchor(next), project, 20)).toEqual({
-      position: { x: 4500, y: 0 }, target: target.points[1], entityId: 'target', label: 'Endpoint',
+      position: { x: 4500, y: 0 }, target: { ...target.points[1], z: target.elevation }, entityId: 'target', label: 'Endpoint',
+      sourceEnd: 'start', attachment: { kind: 'route', anchor: 'end' },
     });
   });
 

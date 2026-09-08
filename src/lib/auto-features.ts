@@ -22,7 +22,7 @@ import type {
 import { detectFittings } from './fittings';
 import { placeSupportsForContainment } from './support-placer';
 import { segIntersect } from './math';
-import { defaultElevation } from '../three/elevations';
+import { distance3, equipmentPorts, routePath } from './route-path';
 
 const findContainment = (
   project: Project,
@@ -50,9 +50,8 @@ const otherContainmentsOnSheet = (
     const e = sheet.entities[id];
     if (e && e.kind === 'containment' && e.id !== selfId && source?.kind === 'containment'
       && e.containmentType === source.containmentType
-      && Math.abs(defaultElevation(e, floor) - defaultElevation(source, floor)) <= 1
       && Math.abs((e.width ?? 0) - (source.width ?? 0)) <= 0.1
-      && Math.abs((e.height ?? 0) - (source.height ?? 0)) <= 0.1) out.push(e);
+      && Math.abs((e.height ?? 0) - (source.height ?? 0)) <= 0.1) out.push({ ...e, points: routePath(e, floor) });
   }
   return out;
 };
@@ -92,10 +91,12 @@ export const autoPlaceFittingsForContainment = (
   const containment = findContainment(project, sheetId, containmentId);
   if (!containment) return [];
   const others = otherContainmentsOnSheet(project, sheetId, containmentId);
-  return detectFittings(containment, others, {
+  const floor = project.floors?.[project.sheets[sheetId].floorId ?? ''];
+  const ports = Object.values(project.sheets[sheetId].entities).flatMap(e => e.kind === 'equipment' ? equipmentPorts(e) : []);
+  return detectFittings({ ...containment, points: routePath(containment, floor) }, others, {
     canOwnJunction: route => !route.locked && !project.layers[route.layerId]?.locked
       && route.visible !== false && project.layers[route.layerId]?.visible !== false,
-  });
+  }).filter(f => f.fittingKind !== 'end-cap' || !ports.some(port => distance3(port.position, { ...f.position, z: f.elevation }) < 10));
 };
 
 export const autoPlaceSupportsForContainment = (
@@ -130,16 +131,20 @@ export const autoDetectPenetrationsForContainment = (
   const seals: Record<string, PenetrationSeal> = {};
   const existing = { ...(project.penetrationSeals ?? {}) };
 
+  const path = routePath(containment, project.floors?.[project.sheets[sheetId].floorId ?? '']);
   for (const wall of walls) {
     if (wall.points.length < 2) continue;
     for (let i = 0; i < containment.points.length - 1; i++) {
-      const a1 = containment.points[i];
-      const a2 = containment.points[i + 1];
+      const a1 = path[i];
+      const a2 = path[i + 1];
       for (let j = 0; j < wall.points.length - 1; j++) {
         const b1 = wall.points[j];
         const b2 = wall.points[j + 1];
         const hit = segmentsIntersect(a1, a2, b1, b2);
         if (!hit) continue;
+        const fraction = Math.hypot(hit.x - a1.x, hit.y - a1.y) / Math.max(0.001, Math.hypot(a2.x - a1.x, a2.y - a1.y));
+        const elevation = a1.z + (a2.z - a1.z) * fraction;
+        if (elevation > (wall.elevation ?? 0) + (wall.height ?? 3000) || elevation + (containment.height ?? 50) < (wall.elevation ?? 0)) continue;
 
         const sealId = nanoid(10);
         const reference = nextSealReference({ ...existing, ...seals });
@@ -151,6 +156,7 @@ export const autoDetectPenetrationsForContainment = (
           visible: true,
           locked: false,
           position: hit,
+          elevation,
           barrierEntityId: wall.id,
           penetrationOf: containment.id,
           sealId,

@@ -115,17 +115,18 @@ export function joinedProfileGeometry(
  * unlike a Catmull-Rom spline they never overshoot the ends of the route.
  */
 export function roundedRoute(
-  points: { x: number; y: number }[],
+  points: { x: number; y: number; z?: number }[],
   z: number,
   radius: number,
   flipY?: number,
   offset = 0,
+  pointElevationOffset = 0,
 ): THREE.CurvePath<THREE.Vector3> | null {
   if (!Number.isFinite(z)) return null;
   const clean: THREE.Vector3[] = [];
   for (const p of points) {
     if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue;
-    const point = new THREE.Vector3(p.x, flipY != null ? flipY - p.y : p.y, z);
+    const point = new THREE.Vector3(p.x, flipY != null ? flipY - p.y : p.y, p.z == null ? z : p.z + pointElevationOffset);
     if (!clean.length || clean[clean.length - 1].distanceToSquared(point) > 0.01) clean.push(point);
   }
   if (clean.length < 2) return null;

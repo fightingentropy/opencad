@@ -19,6 +19,8 @@ import type { SystemId } from '../models/site';
 import { defaultElevation } from './elevations';
 import type { Floor } from '../models/site';
 import { detailBoxes, finiteDimension, joinedProfileGeometry, joinedRouteFrames, roundedRoute, solidBox, type DetailBox } from './ContainmentGeometry';
+import { hasHeightChanges } from '../lib/route-path';
+import { renderSpatialContainment } from './SpatialContainmentGeometry';
 
 // ---------- Material palette -------------------------------------------------
 
@@ -541,7 +543,7 @@ function addSplicePlates(wrap: THREE.Group, width: number, height: number, len: 
 function buildConduit(containment: ContainmentEntity, opts: RenderOpts, diameter: number, baseZ: number, mat: THREE.MeshStandardMaterial): THREE.Group {
   const wrap = new THREE.Group();
   const radius = diameter / 2;
-  const curve = roundedRoute(containment.points, baseZ + radius, diameter * 3, opts.flipY);
+  const curve = roundedRoute(containment.points, baseZ + radius, diameter * 3, opts.flipY, 0, radius);
   if (!curve) return wrap;
   const steps = Math.max(16, Math.min(512, Math.ceil(curve.getLength() / 100) + containment.points.length * 12));
   const radial = opts.detail === 'overview' ? 8 : 16;
@@ -589,12 +591,15 @@ export function renderContainment3D(containment: ContainmentEntity, opts: Render
     : defaultElevation(containment, opts.floor);
   if (!Number.isFinite(baseZ)) return root;
   const segments = [...iterSegments(containment.points, opts.flipY)];
-  if (!segments.length) return root;
+  if (!segments.length && !hasHeightChanges(containment)) return root;
   if (containment.containmentType === 'conduit' && !opts.renderConduit
     && !Number.isFinite(containment.elevation) && !Number.isFinite(opts.forceElevation)) return root;
   const colorSpec = pickColor(containment, opts);
   const baseMat = makeMat(colorSpec);
-  if (containment.containmentType === 'conduit') {
+  if (hasHeightChanges(containment)) {
+    root.add(renderSpatialContainment(containment, baseMat, { baseElevation: baseZ, flipY: opts.flipY,
+      detailed: opts.detail !== 'overview', showCovers: opts.showCovers }));
+  } else if (containment.containmentType === 'conduit') {
     root.add(buildConduit(containment, opts, w, baseZ, baseMat));
   } else if (containment.containmentType === 'trunking'
     || (segments.length > 1 && (containment.containmentType === 'tray' || containment.containmentType === 'basket'))) {

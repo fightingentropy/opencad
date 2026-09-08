@@ -44,7 +44,9 @@ import { cancelComponentPlacement, useComponentPlacement } from '../state/compon
 import { defaultElevation } from './elevations';
 import { attachScenePlacement, type ScenePointer } from './ScenePlacement';
 import { SceneSelectionOverlay } from './SceneSelectionOverlay';
+import { SceneClearanceOverlay } from './SceneClearanceOverlay';
 import { PlacementControls } from '../ui/PlacementControls';
+import { RunDrawingDialog } from '../ui/RunDrawingDialog';
 import './site-workspace.css';
 
 interface Props {
@@ -1192,7 +1194,7 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     else controls.isolateFloor(null);
     if (systemId) controls.filterSystem(systemId);
     else controls.filterSystem(null);
-    controls.setTransparency('walls', wallOpacity);
+    controls.setTransparency('walls', containmentOnly ? 1 : wallOpacity);
     controls.setInstallation(project, containmentOnly ? 'materials' : appearance, containmentOnly ? 'all' : installationFilter);
     controls.setPanelsOpen(panelsOpen);
     controls.setCoversOpen(containmentOnly || coversOpen);
@@ -1242,8 +1244,8 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
   useEffect(() => {
     const c = sceneControlsRef.current;
     if (!c) return;
-    c.setTransparency('walls', wallOpacity);
-  }, [wallOpacity]);
+    c.setTransparency('walls', containmentOnly ? 1 : wallOpacity);
+  }, [wallOpacity, containmentOnly]);
 
   useEffect(() => {
     const controls = sceneControlsRef.current;
@@ -1501,7 +1503,9 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
         <div ref={mountRef} className="site-render-surface" />
         {renderError && <div className="canvas-3d-fallback">{renderError}</div>}
         <SceneSelectionOverlay project={project} selection={selection} cameraRef={cameraRef} mountRef={mountRef} rootRef={sceneGroupRef} />
+        <SceneClearanceOverlay project={project} selection={selection} cameraRef={cameraRef} mountRef={mountRef} rootRef={sceneGroupRef} />
         <PlacementControls />
+        <RunDrawingDialog project={project} />
         {isolatedId && (
           <div className="site-selection-banner">
             <span>Isolated component</span>

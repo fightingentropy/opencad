@@ -8,17 +8,9 @@ import {
   type StandardsTrace,
 } from '../models/standards';
 
-const dist = (a: Vec2, b: Vec2): number => {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return Math.sqrt(dx * dx + dy * dy);
-};
+import { distance3 as dist, pathLength, hasHeightChanges, horizontalRouteSections } from '../lib/route-path';
 
-export const polylineLength = (points: Vec2[]): number => {
-  let total = 0;
-  for (let i = 1; i < points.length; i++) total += dist(points[i - 1], points[i]);
-  return total;
-};
+export const polylineLength = pathLength;
 
 const lookupSpan = (table: Record<number, number>, size: number): number => {
   if (table[size] !== undefined) return table[size];
@@ -73,6 +65,8 @@ const NEAR_BEND_MM = 300;
 const ANGLE_TOL = 0.087; // ~5 degrees
 
 export const placeSupportPositions = (containment: ContainmentEntity): SupportPlacement[] => {
+  if (hasHeightChanges(containment)) return horizontalRouteSections(containment).flatMap(section =>
+    placeSupportPositions(section.route).map(item => ({ ...item, distanceAlong: item.distanceAlong + section.distanceAlong })));
   const pts = containment.points;
   if (!pts || pts.length < 2) return [];
   const maxSpan = computeSupportSpacing(containment);

@@ -31,6 +31,8 @@ const parentIds = (entity: Accessory): string[] =>
 function matchesPart(a: Accessory, b: Accessory): boolean {
   if (a.kind !== b.kind || parentIds(a).join('\0') !== parentIds(b).join('\0')) return false;
   if (Math.hypot(a.position.x - b.position.x, a.position.y - b.position.y) > POSITION_TOLERANCE_MM) return false;
+  if ('elevation' in a && 'elevation' in b && a.elevation != null && b.elevation != null
+    && Math.abs(a.elevation - b.elevation) > POSITION_TOLERANCE_MM) return false;
   if (a.kind === 'fitting' && b.kind === 'fitting') return a.fittingKind === b.fittingKind;
   if (a.kind === 'support' && b.kind === 'support') {
     return a.supportKind === b.supportKind

@@ -17,4 +17,6 @@ dist-ssr
 .dev.vars.*
 tsconfig.tsbuildinfo
 visual-artifacts/
+output/pdf/
+tmp/pdfs/
 .wrangler/

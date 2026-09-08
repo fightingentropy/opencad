@@ -47,6 +47,14 @@ Select a physical part to edit its dimensions in the sidebar. **Enter** or leavi
 
 The selected route's **Design checks** show its existing capacity calculation, support count, spacing guide, fittings and linear quantity, with access to cable assignment and the materials list. **Lay out supports** uses the app's existing support dataset. These are design aids; the selected manufacturer's requirements and recorded site information remain necessary for verification.
 
+Use **Draw route** after adding a containment component, or **Extend → Draw from end / start** on a selected run. Click successive points, enter an exact leg length and angle, then **Finish** (Enter). Change **Elevation** to introduce a rise or drop; **Add rise / drop** adds a vertical leg at the current point. **Backspace** removes the last draft leg and **Escape** cancels the draft. The whole completed route is one undo step. Port markers let a route connect directly to a board at a different height, adding the horizontal approach and vertical drop together.
+
+**Keep connections joined** records route endpoints and equipment ports. Moving a connected board or section previews and updates its connecting legs in the same undo step. Locked or hidden connected parts prevent the edit. The inspector lists each point's elevation; selected ends show **Open end** or **Disconnected** when a recorded connection is lost. Route lengths, fittings, schedules and material quantities include vertical legs. Automatic support layouts cover horizontal sections; vertical and sloping fixings require a separate support design.
+
+The **Clearances** card shows overlaps, measured face gaps and occupied equipment access space for selected parts and placement previews. **Structure → Add beam or wall** adds measured obstructions, with editable size, position and bottom elevation. The default 150 mm separation and 600 mm front access are editable project guides; individual equipment can override its **Front access**. These values are coordination aids, not compliance certification. Checks use straight leg envelopes around curved fittings and only visible objects on the active sheet.
+
+**Drawings** on a selected route opens dimensioned plan, elevation and section previews plus matching materials and true 3D leg schedules. Choose the elevation direction and section leg, optionally include connected runs, and export the same pages as a vector A3 PDF. The pack contains source units, standards-profile metadata and the project update date. Nominal sections and fittings remain generic; use manufacturer details for fabrication.
+
 The header keeps search, undo/redo, view selection and panel toggles together. The OpenCAD menu contains file actions, imports, exports and secondary tools; calculation, filter and review panels expand when needed.
 
 ## Collaboration (Beta)

@@ -20,6 +20,9 @@ import { emptyCableSchedule } from '../models/cable';
 import type { SheetMeta } from '../models/revision';
 import { assembleDrawingNumber, nextSequenceNumber } from '../drawing/numbering';
 import { shouldRejectLocalProjectMutation } from './collaboration-guard';
+import { keepRouteConnections } from '../lib/route-connections';
+import { projectWithAutoFeatures } from '../lib/auto-feature-actions';
+import { notify } from './notifications';
 
 const newId = () => nanoid(10);
 
@@ -149,7 +152,8 @@ const moveEntityDeep = (e: Entity, dx: number, dy: number): Entity => {
   if (cp.b) cp.b = { x: cp.b.x + dx, y: cp.b.y + dy };
   if (cp.center) cp.center = { x: cp.center.x + dx, y: cp.center.y + dy };
   if (cp.position) cp.position = { x: cp.position.x + dx, y: cp.position.y + dy };
-  if (cp.points) cp.points = cp.points.map((p: Vec2) => ({ x: p.x + dx, y: p.y + dy }));
+  if (cp.kind === 'equipment' && cp.connections) cp.connections = cp.connections.map((c: any) => ({ ...c, position: { x: c.position.x + dx, y: c.position.y + dy } }));
+  if (cp.points) cp.points = cp.points.map((p: Vec2) => ({ ...p, x: p.x + dx, y: p.y + dy }));
   return cp;
 };
 
@@ -291,6 +295,7 @@ const reflectEntity = (e: Entity, axis: 'horizontal' | 'vertical', center: numbe
     if (cp.b) cp.b = { ...cp.b, x: rx(cp.b.x) };
     if (cp.center) cp.center = { ...cp.center, x: rx(cp.center.x) };
     if (cp.position) cp.position = { ...cp.position, x: rx(cp.position.x) };
+    if (cp.kind === 'equipment' && cp.connections) cp.connections = cp.connections.map((c: any) => ({ ...c, position: { ...c.position, x: rx(c.position.x) } }));
     if (cp.points) cp.points = cp.points.map((p: Vec2) => ({ ...p, x: rx(p.x) }));
   } else {
     const ry = (v: number) => 2 * center - v;
@@ -298,6 +303,7 @@ const reflectEntity = (e: Entity, axis: 'horizontal' | 'vertical', center: numbe
     if (cp.b) cp.b = { ...cp.b, y: ry(cp.b.y) };
     if (cp.center) cp.center = { ...cp.center, y: ry(cp.center.y) };
     if (cp.position) cp.position = { ...cp.position, y: ry(cp.position.y) };
+    if (cp.kind === 'equipment' && cp.connections) cp.connections = cp.connections.map((c: any) => ({ ...c, position: { ...c.position, y: ry(c.position.y) } }));
     if (cp.points) cp.points = cp.points.map((p: Vec2) => ({ ...p, y: ry(p.y) }));
   }
   return cp;
@@ -529,7 +535,39 @@ interface Store {
   setAutoRoute: (on: boolean) => void;
 }
 
-export const useStore = create<Store>((set, get) => ({
+export const useStore = create<Store>((rawSet, get) => {
+  // All history-bearing geometry edits share the same locked-joint rule,
+  // including legacy plan tools. Loads, remote snapshots and undo/redo
+  // restore their exact saved geometry without re-solving constraints.
+  const set = (partial: Partial<Store> | ((state: Store) => Partial<Store>)) => {
+    const previous = get();
+    let next = typeof partial === 'function' ? partial(previous) : partial;
+    if (next.project && next.project !== previous.project && next.past?.at(-1) === previous.project) {
+      const before = previous.project.sheets[previous.project.activeSheetId];
+      const after = next.project.sheets[previous.project.activeSheetId];
+      if (before && after && Object.values(after.entities).some(e => e.kind === 'containment' && e.connectionsLocked)) {
+        const geometry = (e: Entity) => e.kind === 'containment' ? [e.points, e.elevation]
+          : e.kind === 'equipment' ? [e.a, e.b, e.elevation, e.height, e.rotation, e.connections] : null;
+        const changed = Object.values(after.entities).filter(e => before.entities[e.id] && geometry(e)
+          && JSON.stringify(geometry(e)) !== JSON.stringify(geometry(before.entities[e.id]))).map(e => e.id);
+        if (changed.length) {
+          try {
+            const constrained = keepRouteConnections(previous.project, next.project, changed);
+            if (constrained.changedIds.length) {
+              const updated = projectWithAutoFeatures(constrained.project, [...new Set([...changed, ...constrained.changedIds])], { supports: 'existing' });
+              next = { ...next, project: updated.project };
+            }
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'The joined route cannot follow this edit.';
+            notify('warning', message, { id: 'scene-edit', timeoutMs: 5000 });
+            rawSet({ editor: { ...previous.editor, statusMessage: message } }); return;
+          }
+        }
+      }
+    }
+    rawSet(next);
+  };
+  return ({
   project: createEmptyProject(),
   editor: initialEditor(),
   past: [],
@@ -1220,7 +1258,8 @@ export const useStore = create<Store>((set, get) => ({
     });
   },
   setAutoRoute: (on) => set({ autoRoute: on }),
-}));
+  });
+});
 
 // Authenticated viewers may still pan, zoom and select, but any action that
 // would replace the project is synchronously rolled back. The collaboration

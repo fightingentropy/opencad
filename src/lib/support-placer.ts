@@ -20,6 +20,7 @@ import type {
 import { SUPPORT_SPANS_HORIZONTAL_MM } from '../models/standards';
 import { dist } from './math';
 import { polylineLength } from './fittings';
+import { hasHeightChanges, horizontalRouteSections } from './route-path';
 
 // Distance from a vertex (bend / tee / end) within which a support must
 // be placed in addition to the regular span supports (mm).
@@ -150,6 +151,9 @@ export function placeSupportsForContainment(
   containment: ContainmentEntity,
   options: SupportPlacerOptions = {}
 ): SupportEntity[] {
+  if (hasHeightChanges(containment)) {
+    return horizontalRouteSections(containment).flatMap(section => placeSupportsForContainment(section.route, options));
+  }
   const { points } = containment;
   if (!points || points.length < 2) return [];
 
