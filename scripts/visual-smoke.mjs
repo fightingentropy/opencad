@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -21,27 +21,37 @@ const height = Number(process.env.VISUAL_HEIGHT || 1000);
 
 const sleep = (ms) => new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
 
-async function waitForDevtoolsUrl(proc) {
+async function waitForDevtoolsUrl(proc, profileDir) {
   let buffer = '';
-  return new Promise((resolveReady, rejectReady) => {
-    const timeout = setTimeout(() => {
-      rejectReady(new Error('Chrome did not expose a DevTools websocket in time.'));
-    }, 12000);
-
-    proc.stderr.on('data', (chunk) => {
-      buffer += chunk.toString();
-      const match = buffer.match(/DevTools listening on (ws:\/\/[^\s]+)/);
-      if (match) {
-        clearTimeout(timeout);
-        resolveReady(match[1]);
-      }
-    });
-
-    proc.on('exit', (code) => {
-      clearTimeout(timeout);
-      rejectReady(new Error(`Chrome exited before DevTools was ready (code ${code ?? 'unknown'}).`));
-    });
+  let failure;
+  proc.stderr.on('data', (chunk) => { buffer = (buffer + chunk.toString()).slice(-20000); });
+  proc.once('error', (error) => { failure = error; });
+  proc.once('exit', (code, signal) => {
+    failure = new Error(`Chrome exited before DevTools was ready (code ${code ?? signal ?? 'unknown'}).`);
   });
+  const deadline = Date.now() + 30000;
+  try {
+    while (Date.now() < deadline) {
+      if (failure) throw failure;
+      const logged = buffer.match(/DevTools listening on (ws:\/\/[^\s]+)/);
+      if (logged) return logged[1];
+      // Chrome can publish its endpoint before (or without) the stderr banner.
+      try {
+        const [port, browserPath] = (await readFile(join(profileDir, 'DevToolsActivePort'), 'utf8')).trim().split(/\r?\n/);
+        if (/^\d+$/.test(port) && Number(port) > 0 && Number(port) <= 65535 && browserPath?.startsWith('/devtools/browser/')) {
+          return `ws://127.0.0.1:${port}${browserPath}`;
+        }
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+      await sleep(100);
+    }
+    throw new Error('Chrome did not expose a DevTools websocket within 30 seconds.');
+  } catch (error) {
+    throw new Error(`${error.message}\nChrome startup output:\n${buffer || '(no output)'}`);
+  } finally {
+    await writeFile(join(outDir, 'chrome-startup.log'), buffer || '(no startup output)\n');
+  }
 }
 
 async function openPageTarget(browserWsUrl) {
@@ -178,7 +188,7 @@ async function main() {
   ], { stdio: ['ignore', 'ignore', 'pipe'] });
 
   try {
-    const browserWsUrl = await waitForDevtoolsUrl(chrome);
+    const browserWsUrl = await waitForDevtoolsUrl(chrome, profileDir);
     const pageWsUrl = await openPageTarget(browserWsUrl);
     const client = createCdpClient(pageWsUrl);
     await client.send('Page.enable');
