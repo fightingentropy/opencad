@@ -256,11 +256,21 @@ export type IpRating =
 
 export type LoadClass = 'A' | 'B' | 'C' | 'D'; // IEC 61537 load classes
 
+/** Route elevations are millimetres above the sheet's finished floor level. */
+export interface RoutePoint extends Vec2 { z?: number; }
+
+export interface RouteConnection {
+  end: 'start' | 'end';
+  targetId: EntityId;
+  target: { kind: 'route'; anchor: 'start' | 'end' | 'fraction'; fraction?: number }
+    | { kind: 'equipment'; port: string };
+}
+
 export interface ContainmentEntity extends BaseEntity {
   kind: 'containment';
   containmentType: ContainmentType;
   subType?: ContainmentSubType;
-  points: Vec2[];
+  points: RoutePoint[];
   // Cross-section dimensions (mm). For round conduit, `width` is the
   // outside diameter and `height` is ignored.
   width?: number;
@@ -289,6 +299,9 @@ export interface ContainmentEntity extends BaseEntity {
   catalogPartNumber?: string;
   // Cables routed through this segment (list of CableId)
   assignedCableIds?: string[];
+  /** Explicit joints survive save/reload; locking is opt-in for existing runs. */
+  connections?: RouteConnection[];
+  connectionsLocked?: boolean;
 }
 
 // ---------- Architectural ----------
@@ -310,6 +323,10 @@ export interface WallEntity extends BaseEntity {
   construction?: 'masonry' | 'concrete' | 'metal-stud' | 'timber-stud' | 'glazed' | 'other';
   // External vs internal
   external?: boolean;
+  /** Structural beams use the same swept rectangular footprint, above FFL. */
+  structuralRole?: 'wall' | 'beam';
+  label?: string;
+  elevation?: number;
 }
 
 // Labeled room footprint. In 2D it's a translucent floor patch with the
@@ -361,6 +378,8 @@ export interface FittingEntity extends BaseEntity {
   angleDeg?: number;
   // Containment entity this fitting belongs to (or first if at junction)
   containmentId: EntityId;
+  /** Bottom of the connected section above FFL; legacy records inherit the parent. */
+  elevation?: number;
   // Width / height of the fitting (matches parent containment by default)
   width?: number;
   height?: number;
@@ -429,6 +448,7 @@ export interface FireBarrierEntity extends BaseEntity {
 export interface PenetrationEntity extends BaseEntity {
   kind: 'penetration';
   position: Vec2;
+  elevation?: number;
   // The fire barrier being penetrated
   barrierEntityId: EntityId;
   // The containment / cable causing the penetration
@@ -464,6 +484,8 @@ export type EquipmentKind =
 
 export interface EquipmentEntity extends BaseEntity {
   kind: 'equipment';
+  /** Working space in front of the door; 0 disables this guide. */
+  accessDepth?: number;
   equipmentKind: EquipmentKind;
   // Footprint corners (axis-aligned rectangle)
   a: Vec2;
@@ -488,7 +510,7 @@ export interface EquipmentEntity extends BaseEntity {
   catalogProductId?: string;
   // Connection points — locations on the equipment where containment
   // connects. Used by the cable router to know where to terminate.
-  connections?: { name: string; position: Vec2; type?: 'top' | 'bottom' | 'side' }[];
+  connections?: { name: string; position: Vec2; type?: 'top' | 'bottom' | 'side'; elevation?: number }[];
 }
 
 // Vertical containment between floors. Risers are special-cased so the
@@ -773,6 +795,8 @@ export interface Project {
   // EPSG/URN/WKT identifier when georeferenced; otherwise exports state the
   // explicit LOCAL-CARTESIAN-2D fallback.
   coordinateReferenceSystem?: string;
+  /** Coordination guides in mm; project assumptions, not a compliance certificate. */
+  coordination?: { clearanceMm?: number; equipmentAccessMm?: number };
   standard: 'IEEE' | 'IEC';
 
   // -------- Whole-site extensions (all optional, backward compat) --------

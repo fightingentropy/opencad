@@ -4,8 +4,7 @@
 // Cross-section answers "what does the cut look like at this slice".
 // Elevation answers "what does the wall look like from across the room"
 // — every containment passing through the depth-prism is shown as a
-// horizontal band at its elevation, length = its projected length onto
-// the view direction.
+// band following its individual leg elevations and projected direction.
 
 import { nanoid } from 'nanoid';
 import type {
@@ -16,7 +15,7 @@ import type {
   TextEntity,
   Vec2,
 } from '../types';
-import { distToSegment } from '../lib/math';
+import { interpolate3, routePath, type Point3 } from '../lib/route-path';
 
 const LAYER_ANN = 'Annotation';
 const LAYER_CONT = 'Containment';
@@ -57,59 +56,18 @@ const projectOnto = (
   return { s, perp, len };
 };
 
-// For an N-point polyline, return the [minS, maxS] range covered when
-// projected onto the view line, or null if the polyline doesn't lie
-// within the depth prism.
-const polylineSRange = (
-  points: Vec2[],
-  from: Vec2,
-  to: Vec2,
-  depth: number,
-): { sMin: number; sMax: number; len: number } | null => {
-  if (points.length < 2) return null;
-  let sMin = Infinity;
-  let sMax = -Infinity;
-  let any = false;
-  let len = 0;
-  for (const p of points) {
-    const proj = projectOnto(p, from, to);
-    len = proj.len;
-    // Inside depth prism: 0..depth in front, and within 0..len along.
-    if (proj.perp < -25 || proj.perp > depth) continue;
-    if (proj.s < -25 || proj.s > len + 25) continue;
-    sMin = Math.min(sMin, proj.s);
-    sMax = Math.max(sMax, proj.s);
-    any = true;
+// Clip each leg against the view prism, preserving its interpolated height.
+const clipLeg = (a: Point3, b: Point3, from: Vec2, to: Vec2, depth: number): [Point3, Point3] | null => {
+  const pa = projectOnto(a, from, to), pb = projectOnto(b, from, to);
+  let enter = 0, leave = 1;
+  for (const [start, end, min, max] of [[pa.s, pb.s, 0, pa.len], [pa.perp, pb.perp, -25, depth]]) {
+    const delta = end - start;
+    if (Math.abs(delta) < 1e-9) { if (start < min || start > max) return null; continue; }
+    const t0 = (min - start) / delta, t1 = (max - start) / delta;
+    enter = Math.max(enter, Math.min(t0, t1)); leave = Math.min(leave, Math.max(t0, t1));
+    if (enter > leave) return null;
   }
-  // Also consider segments that pass through the prism but no vertex
-  // is inside — sample midpoint for robustness on long runs.
-  if (!any) {
-    for (let i = 0; i < points.length - 1; i++) {
-      const mid = {
-        x: (points[i].x + points[i + 1].x) / 2,
-        y: (points[i].y + points[i + 1].y) / 2,
-      };
-      const proj = projectOnto(mid, from, to);
-      if (
-        proj.perp >= -25 &&
-        proj.perp <= depth &&
-        proj.s >= -25 &&
-        proj.s <= proj.len + 25
-      ) {
-        sMin = Math.min(sMin, proj.s);
-        sMax = Math.max(sMax, proj.s);
-        any = true;
-        // Approximate range by ±half-segment length.
-        const segLen =
-          distToSegment(points[i], points[i], points[i + 1]) +
-          distToSegment(points[i + 1], points[i], points[i + 1]);
-        sMin = Math.min(sMin, proj.s - segLen / 2);
-        sMax = Math.max(sMax, proj.s + segLen / 2);
-      }
-    }
-  }
-  if (!any) return null;
-  return { sMin, sMax, len };
+  return [interpolate3(a, b, enter), interpolate3(a, b, leave)];
 };
 
 const allEntities = (project: Project): Entity[] => {
@@ -123,24 +81,6 @@ const allEntities = (project: Project): Entity[] => {
     }
   }
   return out;
-};
-
-const defaultContainmentElevation = (c: ContainmentEntity): number => {
-  switch (c.containmentType) {
-    case 'busbar':
-    case 'tray':
-    case 'ladder':
-    case 'basket':
-      return 2400;
-    case 'trunking':
-      return 2200;
-    case 'conduit':
-      return 2300;
-    case 'duct':
-      return -300;
-    default:
-      return 2200;
-  }
 };
 
 export const generateElevationView = (opts: ElevationOpts): Entity[] => {
@@ -167,31 +107,29 @@ export const generateElevationView = (opts: ElevationOpts): Entity[] => {
   for (const e of entities) {
     if (e.kind !== 'containment') continue;
     const c = e as ContainmentEntity;
-    const range = polylineSRange(c.points, from, to, depth);
-    if (!range) continue;
-    const elevation = c.elevation ?? defaultContainmentElevation(c);
-    const ch = c.height ?? 50;
-    const sMin = Math.max(0, Math.min(range.sMin, range.sMax));
-    const sMax = Math.max(range.sMin, range.sMax);
-    const x0 = ox + sMin;
-    const x1 = ox + Math.min(len, sMax);
-    if (x1 - x0 < 1) continue;
-    const y0 = oy + elevation;
-    const y1 = y0 + ch;
-    out.push(rect(x0, y0, x1, y1, LAYER_CONT));
-
-    // Container ref label inside the band when it fits.
-    const refLabel = c.label ?? c.containmentType.toUpperCase();
-    out.push(
-      text(
-        refLabel,
-        (x0 + x1) / 2,
-        (y0 + y1) / 2,
-        'center',
-        Math.min(2.4, (y1 - y0) * 0.6),
-      ),
-    );
-    tiers.add(elevation);
+    const sourceSheet = Object.values(project.sheets).find(sheet => sheet.entities[c.id] === c);
+    const path = routePath(c, project.floors?.[sourceSheet?.floorId ?? '']);
+    const ch = c.containmentType === 'conduit' ? c.width ?? 25 : c.height ?? 50;
+    let labelled = false;
+    for (let i = 1; i < path.length; i++) {
+      const clipped = clipLeg(path[i - 1], path[i], from, to, depth);
+      if (!clipped) continue;
+      const [a, b] = clipped;
+      const x0 = ox + projectOnto(a, from, to).s, x1 = ox + projectOnto(b, from, to).s;
+      const y0 = oy + a.z, y1 = oy + b.z;
+      if (Math.abs(x1 - x0) < 1) {
+        if (Math.abs(y1 - y0) < 1) continue;
+        const halfWidth = (c.width ?? 100) / 2;
+        out.push(rect(x0 - halfWidth, Math.min(y0, y1), x0 + halfWidth, Math.max(y0, y1) + ch, LAYER_CONT));
+      } else if (Math.abs(y1 - y0) < 0.01) out.push(rect(Math.min(x0, x1), y0, Math.max(x0, x1), y0 + ch, LAYER_CONT));
+      else out.push({ id: newId(), kind: 'polyline', layerId: LAYER_CONT, visible: true, locked: false, closed: true,
+        points: [{ x: x0, y: y0 }, { x: x1, y: y1 }, { x: x1, y: y1 + ch }, { x: x0, y: y0 + ch }] });
+      if (!labelled && Math.abs(x1 - x0) > 100) {
+        out.push(text(c.label ?? c.containmentType.toUpperCase(), (x0 + x1) / 2, (y0 + y1 + ch) / 2, 'center', Math.min(2.4, ch * 0.6)));
+        labelled = true;
+      }
+      tiers.add(a.z); tiers.add(b.z);
+    }
   }
 
   // Tier labels along the right edge.
@@ -199,7 +137,7 @@ export const generateElevationView = (opts: ElevationOpts): Entity[] => {
   for (const t of sortedTiers) {
     out.push(
       text(
-        `+${t} TIER`,
+        `${t >= 0 ? '+' : ''}${Math.round(t)} TIER`,
         ox + len + 10,
         oy + t,
         'left',

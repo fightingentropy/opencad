@@ -1,4 +1,4 @@
-import type { Project, Vec2 } from '../types';
+import type { Project, RoutePoint } from '../types';
 import { projectWithAutoFeatures } from '../lib/auto-feature-actions';
 import { containmentTouchesPoint } from '../lib/fittings';
 import {
@@ -7,6 +7,8 @@ import {
 import { shouldRejectLocalProjectMutation } from './collaboration-guard';
 import { notify } from './notifications';
 import { useStore } from './store';
+import { distance3, routePath, withRoutePath } from '../lib/route-path';
+import { discoverRouteConnections, keepRouteConnections } from '../lib/route-connections';
 
 export function physicalEditProblem(entity: PhysicalEntity, project: Project): string | null {
   if (shouldRejectLocalProjectMutation()) return 'This collaboration session is read-only.';
@@ -23,13 +25,15 @@ export function reportSceneEditProblem(message: string): void {
 
 function connectedRoutes(entity: PhysicalEntity, project: Project): string[] {
   if (entity.kind !== 'containment' || entity.points.length < 2) return [];
-  const ends = [entity.points[0], entity.points.at(-1)!];
+  const floor = project.floors?.[project.sheets[project.activeSheetId]?.floorId ?? ''];
+  const path = routePath(entity, floor);
+  const ends = [path[0], path.at(-1)!];
   return Object.values(project.sheets[project.activeSheetId].entities).flatMap(other => {
     if (other.kind !== 'containment' || other.id === entity.id || other.points.length < 2
-      || other.containmentType !== entity.containmentType
-      || Math.abs(physicalElevation(other, project) - physicalElevation(entity, project)) > 1) return [];
+      || other.containmentType !== entity.containmentType) return [];
+    const otherPath = routePath(other, floor);
     return ends.some(point => containmentTouchesPoint(other, point))
-      || [other.points[0], other.points.at(-1)!].some(point => containmentTouchesPoint(entity, point)) ? [other.id] : [];
+      || [otherPath[0], otherPath.at(-1)!].some(point => containmentTouchesPoint(entity, point)) ? [other.id] : [];
   });
 }
 
@@ -43,7 +47,8 @@ export function commitPhysicalEntity(entity: PhysicalEntity, expectedProject: Pr
   const problem = physicalEditProblem(add ? entity : previous as PhysicalEntity, expectedProject);
   if (problem) { reportSceneEditProblem(problem); return null; }
   if (entity.kind === 'containment' && (entity.points.length < 2 || entity.points.some((p, i, points) =>
-    !Number.isFinite(p.x) || !Number.isFinite(p.y) || (i > 0 && Math.hypot(p.x - points[i - 1].x, p.y - points[i - 1].y) < 1)))) {
+    !Number.isFinite(p.x) || !Number.isFinite(p.y) || (p.z != null && (!Number.isFinite(p.z) || Math.abs(p.z) > 100_000))
+    || (i > 0 && distance3(p, points[i - 1]) < 1)))) {
     reportSceneEditProblem('Keep at least 1 mm between route points.'); return null;
   }
   if (!add && JSON.stringify(previous) === JSON.stringify(entity)) return previous as PhysicalEntity;
@@ -53,12 +58,17 @@ export function commitPhysicalEntity(entity: PhysicalEntity, expectedProject: Pr
   let staged = { ...expectedProject, sheets: { ...expectedProject.sheets, [sheet.id]: updatedSheet } };
   let retainedParts = 0;
   try {
-    if (entity.kind === 'containment') {
+    const connected = keepRouteConnections(expectedProject, staged, [entity.id]);
+    staged = connected.project;
+    if (entity.kind === 'containment' || connected.changedIds.length) {
       // Junctions on either side of a changed route must refresh too. Locked
       // routes keep their recorded accessories and are never edited indirectly.
-      const ids = [...new Set([entity.id, ...connectedRoutes(entity, staged),
-        ...(isPhysicalEntity(previous) ? connectedRoutes(previous, expectedProject) : [])])]
-        .filter(id => { const route = updatedSheet.entities[id]; return isPhysicalEntity(route) && !physicalEditProblem(route, staged); });
+      const edited = [entity.id, ...connected.changedIds];
+      const ids = [...new Set(edited.flatMap(id => {
+        const route = staged.sheets[sheet.id].entities[id], old = expectedProject.sheets[sheet.id].entities[id];
+        return [id, ...(isPhysicalEntity(route) ? connectedRoutes(route, staged) : []),
+          ...(isPhysicalEntity(old) ? connectedRoutes(old, expectedProject) : [])];
+      }))].filter(id => { const route = staged.sheets[sheet.id].entities[id]; return isPhysicalEntity(route) && !physicalEditProblem(route, staged); });
       const regeneration = projectWithAutoFeatures(staged, ids, { supports: 'existing' });
       staged = regeneration.project;
       retainedParts = regeneration.result.retainedCount;
@@ -72,24 +82,35 @@ export function commitPhysicalEntity(entity: PhysicalEntity, expectedProject: Pr
   return useStore.getState().project.sheets[sheet.id]?.entities[entity.id] as PhysicalEntity ?? null;
 }
 
-export type PhysicalProperty = 'width' | 'depth' | 'height' | 'length' | 'elevation' | 'rotation' | 'x' | 'y';
+export type PhysicalProperty = 'width' | 'depth' | 'height' | 'length' | 'elevation' | 'rotation' | 'x' | 'y' | 'accessDepth';
 export function updatePhysicalProperty(id: string, property: PhysicalProperty, value: number): boolean {
   const { project } = useStore.getState();
   const entity = project.sheets[project.activeSheetId]?.entities[id];
   if (!isPhysicalEntity(entity)) return false;
   if (!Number.isFinite(value) || Math.abs(value) > 1_000_000
-    || (['width', 'depth', 'height', 'length'].includes(property) && value <= 0)) {
+    || (['width', 'depth', 'height', 'length'].includes(property) && value <= 0)
+    || (property === 'accessDepth' && value < 0)) {
     reportSceneEditProblem('Enter a valid dimension in millimetres.'); return false;
   }
   let updated: PhysicalEntity = entity;
   const anchor = physicalAnchor(entity);
   try {
-    if (property === 'rotation') updated = transformPhysicalEntity(entity, anchor, value * Math.PI / 180 - physicalHeading(entity));
+    if (property === 'accessDepth') {
+      if (entity.kind !== 'equipment') return false;
+      updated = { ...entity, accessDepth: value };
+    } else if (property === 'rotation') updated = transformPhysicalEntity(entity, anchor, value * Math.PI / 180 - physicalHeading(entity));
     else if (property === 'x' || property === 'y') {
       updated = transformPhysicalEntity(entity, { ...anchor, [property]: value });
       if (updated.kind === 'support') updated = { ...updated, supportingContainmentIds: [] };
     }
-    else if (property === 'elevation') updated = { ...entity, elevation: value };
+    else if (property === 'elevation') {
+      const delta = value - physicalElevation(entity, project);
+      updated = entity.kind === 'containment' && entity.points.some(p => p.z != null)
+        ? withRoutePath(entity, routePath(entity).map(p => ({ ...p, z: p.z + delta }))) : { ...entity, elevation: value };
+      if (updated.kind === 'equipment' && updated.connections) updated = { ...updated, connections: updated.connections.map(connection => ({
+        ...connection, ...(connection.elevation != null ? { elevation: connection.elevation + delta } : {}),
+      })) };
+    }
     else if (entity.kind === 'containment') {
       if (property === 'length') updated = resizeRoute(entity, value);
       else {
@@ -130,10 +151,29 @@ export function addRouteSupports(id: string): void {
   } catch (error) { reportSceneEditProblem(error instanceof Error ? error.message : 'Could not lay out supports.'); }
 }
 
-export function routePointEdit(entity: PhysicalEntity, index: number, point: Vec2, extend: boolean): PhysicalEntity {
+export function routePointEdit(entity: PhysicalEntity, index: number, point: RoutePoint, extend: boolean): PhysicalEntity {
   if (entity.kind !== 'containment') return entity;
   const points = [...entity.points];
-  if (extend) { if (index === 0) points.unshift(point); else points.push(point); }
-  else points[index] = point;
-  return { ...entity, points };
+  const edited = { ...point, ...(point.z == null && points[index]?.z != null ? { z: points[index].z } : {}) };
+  if (extend) { if (index === 0) points.unshift(edited); else points.push(edited); }
+  else points[index] = edited;
+  const updated = { ...entity, points };
+  return points.some(p => p.z != null) ? withRoutePath(updated, routePath(updated)) : updated;
+}
+
+export function setRouteConnectionsLocked(id: string, locked: boolean): boolean {
+  const { project } = useStore.getState();
+  const entity = project.sheets[project.activeSheetId]?.entities[id];
+  if (entity?.kind !== 'containment') return false;
+  return !!commitPhysicalEntity({ ...entity, connectionsLocked: locked,
+    connections: locked ? discoverRouteConnections(entity, project) : entity.connections }, project);
+}
+
+export function updateRoutePointElevation(id: string, index: number, elevation: number): boolean {
+  const { project } = useStore.getState();
+  const entity = project.sheets[project.activeSheetId]?.entities[id];
+  if (entity?.kind !== 'containment' || !entity.points[index] || !Number.isFinite(elevation) || Math.abs(elevation) > 100_000) return false;
+  const path = routePath(entity, project.floors?.[project.sheets[project.activeSheetId].floorId ?? '']);
+  path[index] = { ...path[index], z: elevation };
+  return !!commitPhysicalEntity(withRoutePath(entity, path), project);
 }

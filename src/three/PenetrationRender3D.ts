@@ -73,7 +73,7 @@ export function renderPenetration3D(
   const openingWidth = dimension(seal?.openingWidth, width + (circular ? 40 : 80));
   const openingHeight = dimension(seal?.openingHeight, height + (circular ? 40 : 80));
   if (openingWidth == null || openingHeight == null) return root;
-  const bottom = defaultElevation(parent, floor);
+  const bottom = entity.elevation ?? defaultElevation(parent, floor);
   if (!Number.isFinite(bottom) || Math.abs(bottom) >= 1e9) return root;
   const wallThickness = dimension(wall?.thickness, 100);
   if (wallThickness == null) return root;

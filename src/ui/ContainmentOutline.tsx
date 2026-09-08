@@ -7,11 +7,15 @@ import { AppIcon } from './AppIcon';
 import { runCommand } from '../lib/commands';
 import { isPhysicalEntity, physicalAnchor, physicalElevation, physicalHeading, type PhysicalEntity } from '../lib/scene-edit';
 import { polylineLength } from '../lib/fittings';
-import { addRouteSupports, physicalEditProblem, updatePhysicalProperty, type PhysicalProperty } from '../state/scene-actions';
+import { addRouteSupports, physicalEditProblem, setRouteConnectionsLocked, updatePhysicalProperty, updateRoutePointElevation, type PhysicalProperty } from '../state/scene-actions';
 import { DimensionInput } from './DimensionInput';
 import { computeContainmentFill } from '../calc/fill';
 import { computeSupportSpacingWithTrace } from '../calc/supports';
 import { DEFAULT_STANDARDS } from '../models/standards';
+import { hasHeightChanges, routePath } from '../lib/route-path';
+import { routeEndStates } from '../lib/route-connections';
+import { StructureControls } from './StructureControls';
+import { openRunDrawings } from './RunDrawingDialog';
 
 const names: Record<string, string> = {
   tray: 'Cable tray', trunking: 'Trunking', basket: 'Wire basket', conduit: 'Conduit',
@@ -47,6 +51,7 @@ function RouteFeedback({ entity, project, disabled }: { entity: ContainmentEntit
       {fill.fillStatus === 'over' ? 'Fill exceeds the selected profile limit.' : 'Fill is approaching the selected profile limit.'} Review →
     </button>}
     <div className="scene-feedback-row"><span>Supports</span><strong>{supports.length} placed</strong></div>
+    {hasHeightChanges(entity) && <p className="scene-check-message">Vertical and sloping fixings require a separate support design.</p>}
     {missingSupports && <p className="scene-check-message">This elevated route has no supports.</p>}
     <p className="scene-check-note" title="Existing BS 7671 support dataset. Verify spacing against the chosen manufacturer's system.">Spacing guide: {(spacing.spacingMm / 1000).toFixed(2)} m</p>
     <button type="button" className="scene-inline-action" disabled={disabled} onClick={() => addRouteSupports(entity.id)}>{supports.length ? 'Update support layout' : 'Lay out supports'}</button>
@@ -78,6 +83,7 @@ function PhysicalProperties({ selected, project }: { selected: PhysicalEntity; p
         {field('Width', 'width', Math.abs(selected.b.x - selected.a.x))}
         {field('Depth', 'depth', Math.abs(selected.b.y - selected.a.y))}
         {field('Height', 'height', selected.height ?? 1000)}
+        {field('Front access', 'accessDepth', selected.accessDepth ?? project.coordination?.equipmentAccessMm ?? 600)}
       </>}
       {selected.kind === 'support' && <>
         {field('Channel length', 'length', selected.channelLength ?? 600)}
@@ -90,8 +96,18 @@ function PhysicalProperties({ selected, project }: { selected: PhysicalEntity; p
       {field('X', 'x', anchor.x)}{field('Y', 'y', anchor.y)}
       {field('Rotation', 'rotation', physicalHeading(selected) * 180 / Math.PI, '°')}
     </details>
+    {selected.kind === 'containment' && <details className="scene-position-fields">
+      <summary>Route points & connections</summary>
+      <label className="scene-join-choice"><input type="checkbox" disabled={disabled} checked={!!selected.connectionsLocked}
+        onChange={event => setRouteConnectionsLocked(selected.id, event.target.checked)} />Keep connections joined</label>
+      <p className="scene-check-note">{routeEndStates(selected, project).filter(end => end.connected).length} connected · {routeEndStates(selected, project).filter(end => !end.connected).length} open ends</p>
+      {routePath(selected, project.floors?.[project.sheets[project.activeSheetId].floorId ?? '']).map((point, index) => <DimensionInput
+        key={selected.id + ':' + index} label={'Point ' + (index + 1) + ' elevation'} value={point.z} disabled={disabled}
+        onCommit={value => updateRoutePointElevation(selected.id, index, value)} />)}
+    </details>}
     {selected.kind === 'containment' && <>
       {(selected.finish || selected.material) && <div className="scene-material-line">{pretty(selected.finish ?? selected.material!)}</div>}
+      <button type="button" className="scene-inline-action scene-drawing-action" onClick={() => openRunDrawings(selected.id)}>Create run drawings →</button>
       <RouteFeedback entity={selected} project={project} disabled={disabled} />
     </>}
   </section>;
@@ -123,6 +139,7 @@ export function ContainmentOutline() {
       </svg>
       <span><strong>{nameFor(part)}</strong><small>{sizeFor(part)}</small></span>
     </button>)}</div>
+    <StructureControls project={project} selection={selection} />
     {selected && <PhysicalProperties selected={selected} project={project} />}
   </aside>;
 }

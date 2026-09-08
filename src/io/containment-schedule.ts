@@ -5,7 +5,7 @@
 
 import type { Project, ContainmentEntity } from '../types';
 import type { Cable } from '../models/cable';
-import { dist } from '../lib/math';
+import { routeLength } from '../lib/route-path';
 import { FILL_LIMITS } from '../models/standards';
 import { prependCSVExportMetadata } from './export-metadata';
 
@@ -85,15 +85,6 @@ const fillLimitFor = (project: Project, c: ContainmentEntity): number => {
   }
 };
 
-const routeLengthMm = (c: ContainmentEntity): number => {
-  if (!c.points || c.points.length < 2) return 0;
-  let total = 0;
-  for (let i = 1; i < c.points.length; i++) {
-    total += dist(c.points[i - 1], c.points[i]);
-  }
-  return total;
-};
-
 const systemName = (project: Project, systemId?: string): string => {
   if (!systemId) return '';
   return project.systems?.[systemId]?.name ?? systemId;
@@ -126,7 +117,7 @@ export const exportContainmentSchedule = (
         subType: c.subType ?? '',
         size: sizeLabel(c),
         material: c.material ?? '',
-        length: +(routeLengthMm(c) / 1000).toFixed(2),
+        length: +(routeLength(c, project.floors?.[sheet.floorId ?? '']) / 1000).toFixed(2),
         elevation: c.elevation ?? 0,
         system: systemName(project, c.systemId),
         fillPct,

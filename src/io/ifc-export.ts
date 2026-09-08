@@ -199,7 +199,7 @@ const containmentToIfc = (
   const pts = (c.points ?? []).map((p) => ({
     x: p.x,
     y: p.y,
-    z: storeyZ + (c.elevation ?? 0),
+    z: storeyZ + (p.z ?? c.elevation ?? 0),
   }));
   if (pts.length < 2) {
     pts.push({ x: 0, y: 0, z: storeyZ });

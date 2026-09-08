@@ -7,8 +7,8 @@
 //
 // Tradeoff: only entities whose 2D footprint intersects the cut line
 // are included. Containment crosses the cut as a rectangle the size of
-// its cross-section at the elevation of its `elevation` property; we
-// don't try to interpolate sloped runs.
+// its cross-section at the interpolated crossing height. Vertical legs
+// within the cut are shown over their full height.
 
 import { nanoid } from 'nanoid';
 import type {
@@ -24,6 +24,7 @@ import type {
   WallEntity,
 } from '../types';
 import { distToSegment, segIntersect } from '../lib/math';
+import { routePath } from '../lib/route-path';
 
 const LAYER_ANN = 'Annotation';
 const LAYER_DIM = 'Dimensions';
@@ -144,9 +145,9 @@ export const generateCrossSection = (opts: CrossSectionOpts): Entity[] => {
     out.push(
       rect(
         x,
-        oy + DEFAULT_FFL,
+        oy + (w.elevation ?? DEFAULT_FFL),
         x + w.thickness,
-        oy + DEFAULT_FFL + wallHeight,
+        oy + (w.elevation ?? DEFAULT_FFL) + wallHeight,
         LAYER_WALL,
       ),
     );
@@ -159,41 +160,28 @@ export const generateCrossSection = (opts: CrossSectionOpts): Entity[] => {
   for (const e of entities) {
     if (e.kind !== 'containment') continue;
     const c = e as ContainmentEntity;
-    const s = polylineCrossingS(c.points, cutA, cutB);
-    if (s === null) continue;
-    const elevation = c.elevation ?? defaultContainmentElevation(c);
-    const cw = c.width ?? 100;
-    const ch = c.height ?? 50;
-    // Conduit is round — but keep the rectangle for the section view;
-    // the renderer will paint a rectangle either way.
-    const x = ox + s - cw / 2;
-    const y = oy + elevation;
-    out.push(rect(x, y, x + cw, y + ch, LAYER_CONT));
-
-    // Label the run with its ref / size.
-    const refLabel = c.label ?? c.containmentType.toUpperCase();
-    const sizeLabel = `${cw}×${ch}`;
-    const labelText = `${refLabel} ${sizeLabel}`;
-    // Leader from above the rectangle out to a callout on the right.
-    out.push(
-      leader(
-        { x: x + cw / 2, y: y + ch },
-        { x: x + cw / 2 + 30, y: y + ch + 80 },
-        { x: x + cw / 2 + 90, y: y + ch + 80 },
-        labelText,
-      ),
-    );
-
-    // Elevation tick — small horizontal mark + level value.
-    out.push(
-      text(
-        `+${elevation}`,
-        ox - 8,
-        y + ch / 2,
-        'right',
-        2.0,
-      ),
-    );
+    const sourceSheet = Object.values(project.sheets).find(sheet => sheet.entities[c.id] === c);
+    const path = routePath(c, project.floors?.[sourceSheet?.floorId ?? '']);
+    const cw = c.width ?? 100, ch = c.containmentType === 'conduit' ? cw : c.height ?? 50;
+    const seen = new Set<string>();
+    for (let i = 1; i < path.length; i++) {
+      const a = path[i - 1], b = path[i];
+      const hit = segIntersect(cutA, cutB, a, b) ?? (distToSegment(a, cutA, cutB) < CUT_TOLERANCE ? a : null);
+      if (!hit) continue;
+      const s = distanceAlong(hit, cutA, cutB);
+      if (s === null) continue;
+      const length2 = (b.x - a.x) ** 2 + (b.y - a.y) ** 2;
+      const t = length2 > 1e-9 ? Math.max(0, Math.min(1, ((hit.x - a.x) * (b.x - a.x) + (hit.y - a.y) * (b.y - a.y)) / length2)) : 0;
+      const elevation = length2 < 1e-9 ? Math.min(a.z, b.z) : a.z + (b.z - a.z) * t;
+      const height = length2 < 1e-9 ? Math.abs(b.z - a.z) + ch : ch;
+      const key = `${Math.round(s)}:${Math.round(elevation)}:${Math.round(height)}`;
+      if (seen.has(key)) continue; seen.add(key);
+      const x = ox + s - cw / 2, y = oy + elevation;
+      out.push(rect(x, y, x + cw, y + height, LAYER_CONT));
+      out.push(leader({ x: x + cw / 2, y: y + height }, { x: x + cw / 2 + 30, y: y + height + 80 },
+        { x: x + cw / 2 + 90, y: y + height + 80 }, `${c.label ?? c.containmentType.toUpperCase()} ${cw}×${ch}`));
+      out.push(text(`${elevation >= 0 ? '+' : ''}${Math.round(elevation)}`, ox - 8, y + height / 2, 'right', 2));
+    }
   }
 
   // ---------- Equipment ----------------------------------------------
@@ -255,27 +243,6 @@ export const generateCrossSection = (opts: CrossSectionOpts): Entity[] => {
   );
 
   return out;
-};
-
-// Default elevation when a containment entity doesn't store one — pick
-// a value typical for the type so cross-sections still place runs in
-// roughly the right strata.
-const defaultContainmentElevation = (c: ContainmentEntity): number => {
-  switch (c.containmentType) {
-    case 'busbar':
-    case 'tray':
-    case 'ladder':
-    case 'basket':
-      return 2400; // ceiling void
-    case 'trunking':
-      return 2200;
-    case 'conduit':
-      return 2300;
-    case 'duct':
-      return -300; // underground
-    default:
-      return 2200;
-  }
 };
 
 // --- helpers --------------------------------------------------------------

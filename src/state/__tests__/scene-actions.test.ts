@@ -167,7 +167,7 @@ describe('3D placement and editing sessions', () => {
   it('moves the existing identity, and cancels a reshape without changing geometry', () => {
     const before = state().project;
     beginEntityPlacement('route', 'endpoint', 1);
-    expect((componentPlacementPreview({ x: 5000, y: 1000 }) as ContainmentEntity).points[1]).toEqual({ x: 5000, y: 1000 });
+    expect((componentPlacementPreview({ x: 5000, y: 1000 }) as ContainmentEntity).points[1]).toEqual({ x: 5000, y: 1000, z: 0 });
     cancelComponentPlacement(); expect(state().project).toBe(before);
     beginEntityPlacement('route', 'move');
     const moved = commitComponentPlacement({ x: 4000, y: 2000 }) as ContainmentEntity;
@@ -197,7 +197,7 @@ describe('3D placement and editing sessions', () => {
     const before = state().project;
     beginEntityPlacement('route', 'extend', 1);
     const extended = commitComponentPlacement({ x: 3000, y: 2000 }) as ContainmentEntity;
-    expect(extended.points).toEqual([{ x: 0, y: 0 }, { x: 3000, y: 0 }, { x: 3000, y: 2000 }]);
+    expect(extended.points).toEqual([{ x: 0, y: 0, z: 0 }, { x: 3000, y: 0, z: 0 }, { x: 3000, y: 2000, z: 0 }]);
     expect(partsFor('route')).toContainEqual(expect.objectContaining({ fittingKind: 'flat-bend', angleDeg: 90 }));
     state().undo(); expect(state().project).toBe(before);
   });
@@ -206,7 +206,7 @@ describe('3D placement and editing sessions', () => {
     beginComponentPlacement(component('containment:tray:300:50'));
     const resolved = resolvePlacementPosition({ x: 4510, y: 3 }, 30);
     expect(resolved.connection?.label).toBe('Endpoint');
-    expect(resolved.position).toEqual({ x: 4500, y: 0 });
+    expect(resolved.position).toEqual({ x: 4500, y: 0, z: 0 });
     setComponentPlacementPosition(resolved.position, resolved.connection);
     const inserted = commitComponentPlacement(resolved.position) as ContainmentEntity;
     expect(inserted.points[0]).toEqual({ x: 3000, y: 0 });

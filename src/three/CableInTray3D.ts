@@ -6,6 +6,8 @@ import type { Cable, CableCircuitType } from '../models/cable';
 import { defaultElevation } from './elevations';
 import type { Floor } from '../models/site';
 import { finiteDimension, roundedRoute } from './ContainmentGeometry';
+import { hasHeightChanges } from '../lib/route-path';
+import { offsetSpatialCurve, spatialContainmentCurve } from './SpatialContainmentGeometry';
 
 export interface CableInTrayOpts {
   /** Maximum visible cables (bounded to 256). Overflow is reported in userData. */
@@ -124,9 +126,10 @@ export function renderCablesInContainment(containment: ContainmentEntity, cables
   const rotation = new THREE.Quaternion();
   const materialByCircuit = new Map<CableCircuitType, THREE.MeshStandardMaterial>();
   let endMaterial: THREE.MeshStandardMaterial | undefined;
+  const spatialCurve = hasHeightChanges(containment) ? spatialContainmentCurve(containment, bottom, opts.flipY) : null;
   for (const pack of packs) {
     const bendRadius = Math.max(width * 0.5, pack.r * 8);
-    const curve = roundedRoute(containment.points, centerZ + pack.z, bendRadius, opts.flipY, pack.y);
+    const curve = spatialCurve ? offsetSpatialCurve(spatialCurve, pack.y, pack.z) : roundedRoute(containment.points, centerZ + pack.z, bendRadius, opts.flipY, pack.y, height / 2 + pack.z);
     if (!curve) continue;
     const length = curve.getLength();
     const steps = Math.max(12, Math.min(detailed ? 384 : 160, Math.ceil(length / (detailed ? 90 : 200)) + containment.points.length * 8));
