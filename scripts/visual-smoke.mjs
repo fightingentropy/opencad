@@ -48,7 +48,7 @@ async function waitForDevtoolsUrl(proc, profileDir) {
     }
     throw new Error('Chrome did not expose a DevTools websocket within 30 seconds.');
   } catch (error) {
-    throw new Error(`${error.message}\nChrome startup output:\n${buffer || '(no output)'}`);
+    throw new Error(`${error.message}\nChrome startup output:\n${buffer || '(no output)'}`, { cause: error });
   } finally {
     await writeFile(join(outDir, 'chrome-startup.log'), buffer || '(no startup output)\n');
   }
