@@ -142,7 +142,7 @@ npm run build
 npm run deploy
 ```
 
-`npm run deploy` calls `wrangler pages deploy dist --project-name=opencad`. Install Wrangler globally (`npm i -g wrangler`) and `wrangler login` once before first deploy.
+`npm run deploy` calls `wrangler pages deploy dist --project-name=opencad`. Use the pinned project Wrangler and run `npx --no-install wrangler login` before the first Pages deploy.
 
 ### Authenticated collaboration service
 
@@ -160,7 +160,7 @@ npm run collab:types
 npm run check
 ```
 
-The production Worker is restricted by the `opencad-collaboration - Cloudflare Workers` Access application. After reviewing its hostname, audience, policy, and role bindings, deploy with `wrangler deploy --config wrangler.collab.jsonc`. The Access audience and team domain are configuration rather than credentials; Access JWTs, service tokens, private keys, and private email allowlists do not belong in the repository.
+The production Worker is restricted by the `opencad-collaboration - Cloudflare Workers` Access application. After reviewing its hostname, audience, policy, and role bindings, deploy with `npm run collab:deploy`. The Access audience and team domain are configuration rather than credentials; Access JWTs, service tokens, private keys, and private email allowlists do not belong in the repository.
 
 The protocol deliberately caps one update at 1.5 MiB, one materialized room snapshot at 16 MiB, presence selection size, and per-connection message rate. Snapshots are split into 1 MiB SQLite rows so they stay below Durable Object row limits. Larger projects should be partitioned at the application layer rather than raising these values past platform limits.
 
@@ -171,3 +171,12 @@ Pull requests are welcome. GitHub Actions enforce TypeScript, ESLint/import boun
 ## License
 
 MIT — see `LICENSE`.
+
+
+## Cloudflare CLI
+
+The collaboration Worker uses `npm run collab:build`, `npm run collab:dry-run`, and `npm run collab:deploy`. Its `CollaborationRoom` export keeps SQLite storage. The separate static site remains on legacy Pages: `npm run deploy` uses the pinned Wrangler.
+
+Pinned CLI: `cf@1.0.0-beta.12` on Node 22.18 or newer. `cf auth login` is separate from Wrangler login. Verify the selected account before remote operations. Deployment settings live in `cloudflare.config.ts`; keep the original Wrangler configuration for local data and any remaining Wrangler commands.
+
+The explicit Wrangler builder reads the new TypeScript configuration and writes `.cloudflare/output/v0/` using `--experimental-new-config --experimental-cf-build-output`. Deployment then uses `cf deploy --prebuilt`. This preserves custom build steps and avoids beta.12 framework detection choosing an unrelated frontend build. Use the package scripts rather than bare `cf build` or `cf deploy` in these mixed projects.
