@@ -20,3 +20,6 @@ visual-artifacts/
 output/pdf/
 tmp/pdfs/
 .wrangler/
+
+# Cloudflare CLI generated build output
+.cloudflare/
