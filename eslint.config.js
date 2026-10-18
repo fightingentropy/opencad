@@ -23,6 +23,7 @@ export default [
       'visual-artifacts/**',
       'coverage/**',
       '.wrangler/**',
+      '.cloudflare/**',
       'worker/worker-configuration.d.ts',
     ],
   },
