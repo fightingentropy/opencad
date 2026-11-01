@@ -274,6 +274,10 @@ export function App() {
     state.setViewport(fitViewportToSheet(sheet, w, h));
   };
 
+  // Hold the shell until the restored (or sample) project is installed, so
+  // the store's placeholder empty project never paints its own layout first.
+  if (!bootstrapped) return null;
+
   return (
     <div className={`app${viewMode === '3d' ? ' installation-mode' : ''}${simpleContainment ? ' containment-mode' : ''}${!isMobile && !sidebarVisible ? ' hide-left' : ''}${!isMobile && !inspectorVisible ? ' hide-right' : ''}`} style={resizing ? { cursor: 'col-resize', userSelect: 'none' } : undefined}>
       <MenuBar
