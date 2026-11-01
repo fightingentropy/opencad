@@ -146,6 +146,21 @@ export function MenuBar({
     state.setStatus('Containment layout opened');
   };
 
+  const onOpenDemoSite = async () => {
+    if (!confirm('Replace the current project with the Corporate HQ demonstration model? Save a copy first if you want to keep it.')) return;
+    try {
+      // Loaded on demand so the large demonstration model stays out of the main bundle.
+      const { createWholeSiteSampleProject } = await import('../sample-whole-site');
+      setProject(createWholeSiteSampleProject());
+      const state = useStore.getState();
+      state.clearSelection();
+      state.setViewMode('3d');
+      state.setStatus('Corporate HQ demonstration model opened');
+    } catch (err) {
+      notify('error', 'Failed to open the demonstration model', { detail: (err as Error).message });
+    }
+  };
+
   const onOpen = () => fileInputRef.current?.click();
 
   const onFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -536,6 +551,7 @@ export function MenuBar({
       <MenuButton label="OpenCAD" open={openMenu === 'app'} onClick={click('app')}>
         <MenuOpt label="New containment layout" onClick={action(() => newLayoutDialogRef.current?.showModal())} hint="" />
         <MenuOpt label="New blank project" onClick={action(onNew)} hint="" />
+        <MenuOpt label="Open demonstration site…" onClick={action(() => void onOpenDemoSite())} hint="" />
         <MenuOpt label="Open project…" onClick={action(onOpen)} hint={shortcutHint('file.open')} />
         <MenuOpt label="Save a copy…" onClick={action(onSave)} hint={shortcutHint('file.save')} />
         <Divider />
