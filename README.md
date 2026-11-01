@@ -4,7 +4,7 @@ Web-native CAD for electrical containment design, with engineering calculations 
 
 OpenCAD Electrical is a browser-first design tool for cable containment systems — trays, ladders, baskets, trunking and conduit — with traceable engineering seed calculations and a parametric product catalogue. It treats fill, derating, voltage drop and segregation as first-class model data. The calculator is design assistance, not certification software; a competent designer must verify outputs against the licensed standard, local amendments, installation method and manufacturer data.
 
-![2D plan view](docs/screenshot-2d.png)
+![2D plan detail of the Corporate HQ demonstration model ground floor](docs/screenshot-2d.png)
 
 ## What's inside
 
@@ -19,7 +19,7 @@ OpenCAD Electrical is a browser-first design tool for cable containment systems 
 - **Installation workspace** with searchable components, progress colours, specifications, connected cables, site comments and a dated project timeline
 - **Detailed equipment and containment** with hinged board doors, DIN rails, breakers, busbars, cable glands, mechanical equipment, perforated trays, basket wires, support fixings and fire-stop sleeves
 
-![3D site view](docs/screenshot-3d.png)
+![3D ground floor of the Corporate HQ demonstration model, coloured by system](docs/screenshot-3d.png)
 
 ## Inspect and record an installation
 
@@ -31,11 +31,13 @@ Each component can be marked **Planned**, **In progress**, or **Completed** and 
 
 Equipment internals are representative procedural models, not manufacturer-certified CAD or a circuit assembly schedule. Sizes, ratings, route elevations, cable assignments and seal records come from the project; missing catalogue/manufacturer details are not inferred as verified. Conduit needs an explicit elevation to be exposed in the site view. Automatically generated hanger assemblies that physically clash with a route are omitted from the rendered scene and retain their records for coordination; this is not a substitute for a support design check. Fire-stop geometry illustrates the recorded opening and seal without certifying its installation. Installation completion is separate from electrical testing, approval or energisation.
 
-The bundled corporate sample includes dated **Demo team** progress and comments. Existing projects start unrecorded parts as planned and never receive those demonstration records. Activity history is stored per entity (up to 2,000 events and 4,000 characters per comment); the existing simultaneous same-entity collaboration conflict behaviour still applies.
+The Corporate HQ demonstration model (**OpenCAD → Open demonstration site…**) includes dated **Demo team** progress and comments; they are fictional examples. Existing projects start unrecorded parts as planned and never receive those demonstration records. Activity history is stored per entity (up to 2,000 events and 4,000 characters per comment); the existing simultaneous same-entity collaboration conflict behaviour still applies.
 
 ## Try it locally
 
 There is no hosted demo at the moment. To try OpenCAD, [run it locally](#run-locally) (Node 22.18 or newer): `npm install`, `npm run dev`, then open `http://localhost:5173`. First launch opens a simple 3D containment layout: open-top tray (300 × 50 mm), trunking (150 × 150 mm) and wire basket (300 × 54 mm), each with a 3 m run and 1.5 m return. Use Iso, Top and Fit to inspect the geometry. This is a generic section study, not a fabrication drawing. Saved projects reopen as before; OpenCAD → New containment layout creates the new study after a replacement prompt, with an option to save the current project first.
+
+For a larger example, choose **OpenCAD → Open demonstration site…**. It replaces the current project after a confirmation prompt (use **Save a copy…** first to keep it) and loads the Corporate HQ demonstration model from `src/sample-whole-site.ts`: a five-level office with containment, boards, risers and roof plant. The screenshots in this README were captured from that model, not from the first-launch layout.
 
 ## Search and place
 
@@ -99,8 +101,6 @@ src/
 ├── data/catalogues  Parametric product catalogue (trays, ladders, baskets, trunking, conduit, supports, fittings, fire stops)
 └── ui/             React panels, modals and ribbon — calculations, BOM, compliance, cable schedule
 ```
-
-![Compliance dashboard](docs/screenshot-compliance.png)
 
 ## Built with
 
