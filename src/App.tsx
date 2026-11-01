@@ -30,6 +30,7 @@ import { createContainmentSampleProject } from './sample-containment';
 import { ContainmentOutline } from './ui/ContainmentOutline';
 import { loadStoredProjectAsync, saveStoredProjectAsync } from './io/persist';
 import { fitViewportToSheet } from './lib/fit';
+import { clampZoom } from './lib/viewport';
 
 const STORED_3D_WIDTH_KEY = 'opencad.panel3dWidth';
 const MOBILE_BREAKPOINT = 900;
@@ -261,7 +262,7 @@ export function App() {
     const v = useStore.getState().editor.viewport;
     useStore.getState().setViewport({
       ...v,
-      zoom: Math.max(0.05, Math.min(200, v.zoom * factor)),
+      zoom: clampZoom(v.zoom * factor),
     });
   };
   const fitToPage = () => {

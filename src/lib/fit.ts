@@ -2,6 +2,7 @@ import type { Sheet, Viewport, Bounds, Entity } from '../types';
 import { entityBounds, emptyBounds, expandBounds } from './math';
 import { transformSymbolPoint } from './hittest';
 import { getSymbol } from '../symbols';
+import { MIN_ZOOM } from './viewport';
 
 const accumulateBounds = (
   bounds: Bounds,
@@ -70,6 +71,6 @@ export const fitViewportToSheet = (
   const cy = (bounds.minY + bounds.maxY) / 2;
   const zx = (canvasW - paddingPx * 2) / w;
   const zy = (canvasH - paddingPx * 2) / h;
-  const zoom = Math.max(0.1, Math.min(80, Math.min(zx, zy)));
+  const zoom = Math.max(MIN_ZOOM, Math.min(80, Math.min(zx, zy)));
   return { x: cx, y: cy, zoom };
 };

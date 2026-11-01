@@ -59,7 +59,7 @@ export function StatusBar() {
       {isModel && <span className="status-message" title={editor.statusMessage}>{editor.statusMessage}</span>}
       <span className="status-spacer" />
       <SaveIndicator />
-      <span className="status-section status-zoom">{!isModel && <><span className="status-value">{editor.viewport.zoom.toFixed(2)}×</span><span>·</span></>}{units}</span>
+      <span className="status-section status-zoom">{!isModel && <><span className="status-value">{editor.viewport.zoom < 0.1 ? editor.viewport.zoom.toPrecision(2) : editor.viewport.zoom.toFixed(2)}×</span><span>·</span></>}{units}</span>
     </div>
   );
 }

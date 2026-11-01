@@ -9,7 +9,7 @@ import {
   useStandardsProfile,
 } from '../state/selectors';
 import { render2d } from '../render/render2d';
-import { screenToWorld, zoomAtPoint } from '../lib/viewport';
+import { MAX_ZOOM, clampZoom, screenToWorld, zoomAtPoint } from '../lib/viewport';
 import { computeSnap } from '../lib/snap';
 import { findEntityAt, findEntitiesInRect } from '../lib/hittest';
 import { onToolClick, onToolCommit } from './tools';
@@ -169,7 +169,7 @@ export function CadCanvas() {
         const bounds = getSymbol(preview.symbolId)?.bounds;
         const span = bounds ? Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) * preview.scale : 0;
         if (span > 0 && span * viewport.zoom < 48) {
-          state.setViewport({ ...viewport, zoom: Math.min(200, 48 / span) });
+          state.setViewport({ ...viewport, zoom: Math.min(MAX_ZOOM, 48 / span) });
         }
       }
       setComponentPlacementPosition({ x: viewport.x, y: viewport.y });
@@ -684,7 +684,7 @@ export function CadCanvas() {
       const cy = (t1.clientY + t2.clientY) / 2;
       const d = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
       const factor = d / Math.max(1, st.startPinchDist);
-      const newZoom = Math.max(0.05, Math.min(200, st.startViewport.zoom * factor));
+      const newZoom = clampZoom(st.startViewport.zoom * factor);
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) return;
       const sw = size.w;

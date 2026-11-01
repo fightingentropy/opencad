@@ -1,5 +1,6 @@
 import { useStore } from '../state/store';
 import { fitViewportToSheet } from './fit';
+import { clampZoom } from './viewport';
 import type { ToolId } from '../types';
 import { activateTool } from '../state/tool-actions';
 
@@ -163,7 +164,7 @@ const dispatch3DViewCommand = (store: StoreState, command: View3DCommand): boole
 const zoomBy = (store: StoreState, factor: number): void => {
   if (dispatch3DViewCommand(store, { type: 'zoom', factor })) return;
   const v = store.editor.viewport;
-  store.setViewport({ ...v, zoom: Math.max(0.05, Math.min(200, v.zoom * factor)) });
+  store.setViewport({ ...v, zoom: clampZoom(v.zoom * factor) });
 };
 
 const zoomExtents = (store: StoreState): void => {

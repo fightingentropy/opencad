@@ -1,6 +1,12 @@
 import type { Vec2, Viewport, Bounds } from '../types';
 import { clamp } from './math';
 
+// 2D zoom limits in screen pixels per world mm. The floor of 1 px per metre
+// fits a site-scale plan on screen; the ceiling inspects terminal detail.
+export const MIN_ZOOM = 0.001;
+export const MAX_ZOOM = 200;
+export const clampZoom = (zoom: number): number => clamp(zoom, MIN_ZOOM, MAX_ZOOM);
+
 // Convert screen pixel coordinates to world (mm) coordinates
 export const screenToWorld = (
   screen: Vec2,
@@ -29,7 +35,7 @@ export const zoomAtPoint = (
   canvasHeight: number,
   factor: number
 ): Viewport => {
-  const newZoom = clamp(viewport.zoom * factor, 0.05, 200);
+  const newZoom = clampZoom(viewport.zoom * factor);
   const ratio = newZoom / viewport.zoom;
   // Keep the world point under the cursor stationary
   const wx = (screenPoint.x - canvasWidth / 2) / viewport.zoom + viewport.x;
