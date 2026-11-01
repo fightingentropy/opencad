@@ -448,6 +448,12 @@ const initialViewHistory = (v: Viewport): { stack: Viewport[]; index: number } =
   index: 0,
 });
 
+// The project and undo stack at the start of a multi-step gesture.
+export interface HistoryMark {
+  project: Project;
+  past: Project[];
+}
+
 interface Store {
   project: Project;
   editor: EditorState;
@@ -518,6 +524,7 @@ interface Store {
 
   // History
   beginUndo: () => void;
+  squashHistory: (start: HistoryMark) => void;
   undo: () => void;
   redo: () => void;
 
@@ -939,6 +946,15 @@ export const useStore = create<Store>((rawSet, get) => {
   beginUndo: () => {
     const { project, past } = get();
     set({ past: pushPast(past, project), future: [] });
+  },
+
+  // A gesture such as a drag edits the project on every pointer move, and each
+  // edit records its own undo step. Replacing everything recorded since the
+  // gesture began with one step keeps the earlier history (which the per-move
+  // steps would otherwise push past MAX_HISTORY) and undoes the gesture whole.
+  squashHistory: (start) => {
+    if (get().project === start.project) return;
+    set({ past: pushPast(start.past, start.project), future: [] });
   },
 
   undo: () => {

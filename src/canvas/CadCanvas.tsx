@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useStore } from '../state/store';
+import { useStore, type HistoryMark } from '../state/store';
 import {
   useActiveLayerId,
   useActiveSheet,
@@ -78,6 +78,15 @@ export function CadCanvas() {
     start: Vec2;
     initial: Map<string, Entity>;
   } | null>(null);
+  // Undo state when the current selection drag began; the drag's per-move
+  // edits collapse back to this as one undo step when the drag ends.
+  const dragHistoryRef = useRef<HistoryMark | null>(null);
+  const endSelectionDrag = () => {
+    const mark = dragHistoryRef.current;
+    dragHistoryRef.current = null;
+    if (mark) useStore.getState().squashHistory(mark);
+    setDraggingSelection(null);
+  };
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   // Inline text editor — replaces window.prompt for the text tool. Anchored
   // in screen space so we keep visible while the user pans/zooms.
@@ -151,7 +160,7 @@ export function CadCanvas() {
     if (placement?.surface !== '2d') return;
     setPanning(false);
     setMarquee(null);
-    setDraggingSelection(null);
+    endSelectionDrag();
     const frame = requestAnimationFrame(() => {
       const state = useStore.getState();
       const viewport = state.editor.viewport;
@@ -441,6 +450,8 @@ export function CadCanvas() {
         if (!editor.selection.has(hit)) {
           initial.set(hit, structuredClone(sheet.entities[hit]));
         }
+        const { project: dragProject, past: dragPast } = useStore.getState();
+        dragHistoryRef.current = { project: dragProject, past: dragPast };
         setDraggingSelection({ start: snapped, initial });
       } else {
         if (!e.shiftKey) clearSelection();
@@ -580,9 +591,7 @@ export function CadCanvas() {
       setMarquee(null);
       return;
     }
-    if (draggingSelection) {
-      setDraggingSelection(null);
-    }
+    if (draggingSelection) endSelectionDrag();
   };
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -849,7 +858,7 @@ export function CadCanvas() {
         onMouseMove={handleMouseMove}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
-        onMouseLeave={() => { placementDownRef.current = null; setComponentPlacementPosition(null); setHover(null); setPanning(false); setMarquee(null); setDraggingSelection(null); }}
+        onMouseLeave={() => { placementDownRef.current = null; setComponentPlacementPosition(null); setHover(null); setPanning(false); setMarquee(null); endSelectionDrag(); }}
         onWheel={handleWheel}
         onContextMenu={(e) => e.preventDefault()}
         onTouchStart={handleTouchStart}

@@ -279,6 +279,40 @@ describe('MAX_HISTORY trim', () => {
   });
 });
 
+describe('squashHistory', () => {
+  it('turns a long drag into one undo step and keeps the earlier history', () => {
+    state().addEntity(makeLine('e1'));
+    state().addEntity(makeLine('e2'));
+    const beforeDrag = state().project;
+    const earlier = state().past;
+    const { project, past } = state();
+    const mark = { project, past };
+
+    // Far more per-move edits than the stack holds, as a 2D drag produces.
+    for (let i = 1; i <= MAX_HISTORY * 2; i++) {
+      state().updateEntity('e1', { a: { x: i, y: 0 }, b: { x: 10 + i, y: 10 } } as Partial<LineEntity>);
+    }
+    state().squashHistory(mark);
+
+    expect(state().past).toEqual([...earlier, beforeDrag]);
+    const dragged = state().project;
+    state().undo();
+    expect(state().project).toBe(beforeDrag);
+    state().redo();
+    expect(state().project).toBe(dragged);
+    state().undo();
+    state().undo();
+    expect(activeSheet().entities.e2).toBeUndefined();
+  });
+
+  it('leaves history alone when the gesture changed nothing', () => {
+    state().addEntity(makeLine('e1'));
+    const { project, past } = state();
+    state().squashHistory({ project, past });
+    expect(state().past).toBe(past);
+  });
+});
+
 describe('DEV deep-freeze guard', () => {
   it('is active under vitest (import.meta.env.DEV)', () => {
     expect(import.meta.env.DEV).toBe(true);
