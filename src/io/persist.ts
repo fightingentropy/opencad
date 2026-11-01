@@ -39,7 +39,7 @@ export function migrateProject(parsed: Project): Project {
   next.standardsProfile = normalizeStandardsProfile(next.standardsProfile);
   // Catalogues are large but bundled with the app — we always rehydrate
   // them so the Catalogue Browser populates after a reload (saved
-  // projects don't need to round-trip 366 products through browser storage).
+  // projects don't need to round-trip 350-plus items through browser storage).
   if (!next.catalogues || Object.keys(next.catalogues).length === 0) {
     next.catalogues = loadDefaultCatalogues();
   }

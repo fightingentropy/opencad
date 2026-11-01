@@ -18,13 +18,14 @@ export function AboutModal({ onClose }: { onClose: () => void }) {
             }}>⌬</div>
             <div>
               <div style={{ fontSize: 18, fontWeight: 600 }}>OpenCAD Electrical</div>
-              <div style={{ fontSize: 12, color: 'var(--text-mute)' }}>Browser-based electrical CAD • v0.1</div>
+              <div style={{ fontSize: 12, color: 'var(--text-mute)' }}>Browser-based cable containment CAD • v0.1</div>
             </div>
           </div>
           <p style={{ marginBottom: 14, lineHeight: 1.6, color: 'var(--text-dim)' }}>
-            Open-source electrical schematic and panel layout tool, with a 3D panel
-            preview powered by Three.js. Built as an alternative to AutoCAD Electrical
-            for control engineers, panel builders, and electricians.
+            Open-source, browser-based CAD for electrical cable containment design:
+            2D and 3D routing of trays, ladders, baskets, trunking and conduit, with
+            fill, derating, voltage drop and segregation checks. Calculations are design
+            assistance and must be verified against the licensed standard.
           </p>
           {/* The full shortcut table lives in ShortcutsModal, generated from
               the command registry so it can never drift from the bindings. */}

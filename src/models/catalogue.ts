@@ -1,5 +1,6 @@
-// Manufacturer catalogue — real product data referenced by containment
-// entities, fittings, supports and BOMs.
+// Parametric product catalogue — generated sizes and finishes referenced by
+// containment entities, fittings, supports and BOMs. Manufacturer names are
+// illustrative tags, not verified manufacturer data.
 
 export type CatalogueCategory =
   | 'cable-tray'

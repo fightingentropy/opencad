@@ -2,7 +2,7 @@
 
 Web-native CAD for electrical containment design, with engineering calculations baked in.
 
-OpenCAD Electrical is a browser-first design tool for cable containment systems — trays, ladders, baskets, trunking and conduit — with traceable engineering seed calculations and a manufacturer product catalogue. It treats fill, derating, voltage drop and segregation as first-class model data. The calculator is design assistance, not certification software; a competent designer must verify outputs against the licensed standard, local amendments, installation method and manufacturer data.
+OpenCAD Electrical is a browser-first design tool for cable containment systems — trays, ladders, baskets, trunking and conduit — with traceable engineering seed calculations and a parametric product catalogue. It treats fill, derating, voltage drop and segregation as first-class model data. The calculator is design assistance, not certification software; a competent designer must verify outputs against the licensed standard, local amendments, installation method and manufacturer data.
 
 ![2D plan view](docs/screenshot-2d.png)
 
@@ -10,10 +10,10 @@ OpenCAD Electrical is a browser-first design tool for cable containment systems 
 
 - **2D + 3D containment routing** with auto-fittings, support placement and slab/wall penetration detection
 - **Versioned engineering calculation datasets** — fill, grouping derating, voltage drop, ampacity, segregation and basic overload coordination, with profile hashes in calculation results and exports
-- **366-product manufacturer catalogue** covering Cablofil, Hilti, Schneider, Marshall-Tufflex, Univolt, Unistrut and Promat parts
+- **Parametric product catalogue** of 350-plus items: generated sizes and finishes for tray, ladder, basket, trunking, conduit, fittings, supports and fire stops. Brand names are illustrative tags, not manufacturer data
 - **Cable schedule** with auto-routing through the containment graph and per-cable pull cards
 - **BS EN ISO 19650 drawing numbering** and ISO 7200 title blocks
-- **IFC import/export**, DXF underlay import, and COBie, Excel-compatible CSV, PDF, PNG and SVG exports
+- **Basic IFC import and DXF underlay import**, with IFC, COBie, Excel-compatible CSV, PDF, PNG and SVG export
 - **Compliance dashboard** running project-wide checks against the active standards profile
 - **Multi-floor 3D building scene** with floor isolation, system filters and live cross-sections
 - **Installation workspace** with searchable components, progress colours, specifications, connected cables, site comments and a dated project timeline
@@ -89,14 +89,14 @@ npm run preview
 
 ```
 src/
-├── calc/           BS 7671 / NEC calculation engine (fill, derating, vdrop, segregation, supports)
+├── calc/           Calculation engine: BS 7671 reference tables, partial IEC 60364 / NEC limits (fill, derating, vdrop, segregation, supports)
 ├── lib/            Geometry, snapping, autoroute, cable routing, fitting placement
 ├── three/          Three.js building scene, render kits and 3D viewer components
 ├── views/          Plan, section and elevation view generation
 ├── drawing/        Sheet templates, ISO 7200 title blocks, ISO 19650 numbering, revisions
 ├── io/             IFC / DXF / COBie / PDF / PNG / CSV I/O, BOM and schedules
 ├── models/         Domain types — site, cable, catalogue, fire, revision, standards
-├── data/catalogues  Manufacturer product data (trays, ladders, baskets, trunking, conduit, supports, fittings, fire stops)
+├── data/catalogues  Parametric product catalogue (trays, ladders, baskets, trunking, conduit, supports, fittings, fire stops)
 └── ui/             React panels, modals and ribbon — calculations, BOM, compliance, cable schedule
 ```
 

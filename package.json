@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "OpenCAD Electrical - Open source AutoCAD Electrical competitor",
+  "description": "OpenCAD Electrical - Browser-based CAD for electrical cable containment design",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
