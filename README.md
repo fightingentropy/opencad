@@ -131,7 +131,7 @@ Every profile carries jurisdiction, document identifier, edition/amendments, eff
 
 The source standards are licensed publications and are not distributed by this repository. Lookup data and golden fixtures require independent review before a profile version/hash is changed.
 
-![Bill of materials](docs/screenshot-bom.png)
+![Containment schedule in the Schedules & BOM dialog](docs/screenshot-bom.png)
 
 ## Deployment
 
