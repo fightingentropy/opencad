@@ -6,18 +6,14 @@
 
 import type { Project, Entity, Sheet, ContainmentEntity } from '../types';
 import type { Cable } from '../models/cable';
-import {
-  AMPACITY_REF_B_PVC_COPPER,
-  AMPACITY_REF_B_XLPE_COPPER,
-  DEFAULT_STANDARDS,
-} from '../models/standards';
+import { DEFAULT_STANDARDS } from '../models/standards';
 import type { StandardsCode, StandardsProfile } from '../models/standards';
 import {
   computeContainmentFill,
   computeVoltageDrop,
-  computeDeratingFactors,
+  estimateCableAmpacity,
+  loadCategoryForCable,
   polylineLength,
-  type InstallationMethod,
 } from '../calc';
 
 export const fmtPct = (v: number): string => `${(v * 100).toFixed(1)}%`;
@@ -48,12 +44,6 @@ export const computeFill = (
   };
 };
 
-const installationMethodFor = (cable: Cable): InstallationMethod => {
-  // Approximate installation method from the cable's first containment.
-  // The UI doesn't have a richer hint; fall back to a tray/clipped default.
-  return 'tray';
-};
-
 // Voltage-drop estimate. Adapts `computeVoltageDrop` to the legacy
 // {vdropV, vdropPct (fraction), ok, limit (fraction)} shape.
 export const estimateVdrop = (
@@ -63,9 +53,7 @@ export const estimateVdrop = (
 ): { vdropV: number; vdropPct: number; ok: boolean; limit: number } => {
   const ib = cable.designCurrent ?? 0;
   const standardsCode = project ? projectStandardsCode(project) : 'BS7671';
-  const loadCategory = cable.circuitType === 'fire-alarm' || cable.circuitType === 'emergency'
-    ? 'other'
-    : 'other';
+  const loadCategory = loadCategoryForCable(cable, project?.systems);
   const r = computeVoltageDrop({
     construction: cable.construction,
     csa: cable.csa,
@@ -92,29 +80,8 @@ export const estimateAmpacity = (
   project?: Project,
 ): { iz: number; ib: number; ok: boolean } => {
   const ib = cable.designCurrent ?? 0;
-  const isXlpe = cable.construction.startsWith('XLPE');
-  const baseTable = isXlpe ? AMPACITY_REF_B_XLPE_COPPER : AMPACITY_REF_B_PVC_COPPER;
-  const baseIz = baseTable[cable.csa] ?? 0;
-  // Estimate group size: the largest count of cables sharing any containment
-  // segment on this cable's route. Falls back to 1 when no project provided.
-  let numCircuits = 1;
-  if (project && cable.route.length > 0) {
-    const cables = project.cableSchedule?.cables ?? {};
-    const cableList = Object.values(cables);
-    let maxShared = 1;
-    for (const cid of cable.route) {
-      const shared = cableList.filter((c) => c.route.includes(cid)).length;
-      if (shared > maxShared) maxShared = shared;
-    }
-    numCircuits = maxShared;
-  }
-  const factors = computeDeratingFactors({
-    numCircuits,
-    ambientC: 30,
-    installationMethod: installationMethodFor(cable),
-    insulation: isXlpe ? 'XLPE' : 'PVC',
-  });
-  const iz = baseIz * factors.totalFactor;
+  const scheduled = project ? Object.values(project.cableSchedule?.cables ?? {}) : [];
+  const iz = estimateCableAmpacity(cable, scheduled.length > 0 ? scheduled : [cable]);
   return { iz, ib, ok: iz >= ib };
 };
 

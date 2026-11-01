@@ -8,7 +8,8 @@ import { DEFAULT_STANDARDS, createStandardsTrace } from '../models/standards';
 import { computeContainmentFill } from './fill';
 import { checkSegregation } from './segregation';
 import { polylineLength, computeSupportSpacing } from './supports';
-import { computeVoltageDrop } from './voltage-drop';
+import { computeVoltageDrop, loadCategoryForCable } from './voltage-drop';
+import { estimateCableAmpacity } from './cable-sizing';
 import { checkProtectiveDeviceCoordination } from './protective-device';
 import { analyzeSceneClearance } from '../lib/scene-clearance';
 
@@ -233,7 +234,7 @@ export const runComplianceChecks = (project: Project): ComplianceReport => {
         designCurrentA: cable.designCurrent,
         systemVoltageV: cable.voltage,
         phasing: cable.cores >= 3 ? 'three' : 'single',
-        loadCategory: cable.circuitType === 'data' || cable.circuitType === 'comms' ? 'other' : 'other',
+        loadCategory: loadCategoryForCable(cable, project.systems),
         standardsCode: standards.code,
       });
       if (!r.withinLimits) {
@@ -252,12 +253,15 @@ export const runComplianceChecks = (project: Project): ComplianceReport => {
     // This implementation is intentionally limited to the BS relation. The
     // other selectable profiles remain marked partial and must not silently
     // reuse a UK overload-protection rule.
-    const cableAmpacity = cable.calculated?.ampacity ?? cable.calculated?.baseAmpacity;
+    // Without a stored calculation, Iz falls back to the same conservative
+    // estimate the cable schedule shows, and a failure is only a warning.
+    const storedAmpacity = cable.calculated?.ampacity ?? cable.calculated?.baseAmpacity;
+    const cableAmpacity = storedAmpacity ?? estimateCableAmpacity(cable, cables);
     if (
       standards.code === 'BS7671' &&
       cable.designCurrent !== undefined &&
       cable.protectiveDeviceRating !== undefined &&
-      cableAmpacity !== undefined
+      cableAmpacity > 0
     ) {
       const coordination = checkProtectiveDeviceCoordination({
         designCurrentA: cable.designCurrent,
@@ -269,8 +273,8 @@ export const runComplianceChecks = (project: Project): ComplianceReport => {
         issues.push({
           entityId: cable.id,
           kind: 'protective-device',
-          severity: 'error',
-          message: `Cable ${cable.reference} overload coordination fails Ib <= In <= Iz (${cable.designCurrent} A <= ${cable.protectiveDeviceRating} A <= ${cableAmpacity.toFixed(1)} A)`,
+          severity: storedAmpacity === undefined ? 'warning' : 'error',
+          message: `Cable ${cable.reference} overload coordination fails Ib <= In <= Iz (${cable.designCurrent} A <= ${cable.protectiveDeviceRating} A <= ${cableAmpacity.toFixed(1)} A${storedAmpacity === undefined ? ' estimated' : ''})`,
           measured: cable.protectiveDeviceRating,
           limit: cableAmpacity,
           unit: 'A',

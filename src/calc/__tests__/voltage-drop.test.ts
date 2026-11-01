@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { computeVoltageDrop } from '../voltage-drop';
+import { computeVoltageDrop, loadCategoryForCable } from '../voltage-drop';
+import type { Cable } from '../../models/cable';
 
 describe('computeVoltageDrop', () => {
   it('single-phase PVC 2.5mm² 16A 30m 230V matches the BS 7671 Table 4D2B value', () => {
@@ -111,5 +112,40 @@ describe('computeVoltageDrop', () => {
       phasing: 'three',
     });
     expect(r.mvAm).toBe(2.4);
+  });
+
+  it('converts the three-phase XLPE table for single-phase circuits', () => {
+    // 16mm² XLPE 3P = 2.4 mV/A/m; single phase is 2.4 × 2/√3 ≈ 2.771.
+    const r = computeVoltageDrop({
+      construction: 'XLPE/SWA/PVC',
+      csa: 16,
+      lengthM: 50,
+      designCurrentA: 80,
+      systemVoltageV: 230,
+      phasing: 'single',
+    });
+    expect(r.mvAm).toBeCloseTo(2.771, 3);
+    expect(r.vdropV).toBeCloseTo(11.085, 3);
+  });
+});
+
+describe('loadCategoryForCable', () => {
+  const cable = (systemId?: string) => ({ systemId } as Cable);
+  const systems = {
+    l: { id: 'l', name: 'Lighting', kind: 'lighting', color: '#fc0' },
+    e: { id: 'e', name: 'Emergency lighting', kind: 'emergency-lighting', color: '#0c0' },
+    p: { id: 'p', name: 'Small power', kind: 'small-power', color: '#c00' },
+  } as const;
+
+  it('treats normal and emergency lighting systems as lighting', () => {
+    expect(loadCategoryForCable(cable('l'), systems)).toBe('lighting');
+    expect(loadCategoryForCable(cable('e'), systems)).toBe('lighting');
+  });
+
+  it('treats other, unknown or unassigned systems as other', () => {
+    expect(loadCategoryForCable(cable('p'), systems)).toBe('other');
+    expect(loadCategoryForCable(cable('missing'), systems)).toBe('other');
+    expect(loadCategoryForCable(cable(), systems)).toBe('other');
+    expect(loadCategoryForCable(cable('l'))).toBe('other');
   });
 });

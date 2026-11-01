@@ -8,7 +8,7 @@ import {
   type StandardsCode,
   type StandardsTrace,
 } from '../models/standards';
-import { STANDARD_CSA, type CableConstruction } from '../models/cable';
+import { STANDARD_CSA, type Cable, type CableConstruction } from '../models/cable';
 import { computeDeratingFactors, type InstallationMethod } from './derating';
 
 export interface CableSizingOptions {
@@ -78,4 +78,23 @@ export const suggestCableSize = (opts: CableSizingOptions): CableSizingResult =>
     reason: 'No standard size meets design current after derating — review installation conditions or split circuit.',
     standards,
   };
+};
+
+// Iz for a scheduled cable that has no stored calculation: the conservative
+// Reference Method B seed table, derated for the most crowded containment on
+// the cable's route at 30 °C on tray. Returns 0 when the size isn't tabulated.
+export const estimateCableAmpacity = (cable: Cable, scheduled: readonly Cable[]): number => {
+  const base = ampacityFor(cable.csa, cable.construction);
+  let numCircuits = 1;
+  for (const containmentId of cable.route) {
+    const shared = scheduled.filter((c) => c.route.includes(containmentId)).length;
+    if (shared > numCircuits) numCircuits = shared;
+  }
+  const factors = computeDeratingFactors({
+    numCircuits,
+    ambientC: 30,
+    installationMethod: 'tray',
+    insulation: isXlpe(cable.construction) ? 'XLPE' : 'PVC',
+  });
+  return base * factors.totalFactor;
 };

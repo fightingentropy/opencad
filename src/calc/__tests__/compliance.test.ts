@@ -101,6 +101,35 @@ describe('runComplianceChecks', () => {
     });
   });
 
+  it('estimates Iz for overload coordination when no calculation is stored', () => {
+    // 2.5mm² PVC, Reference Method B 24 A, one circuit at 30 °C: Iz = 24 A < In 32 A.
+    const cable = makeCable({ reference: 'P-2', designCurrent: 26, estimatedLength: 10 });
+    cable.protectiveDeviceRating = 32;
+    const project = makeProject({ cables: [cable] });
+
+    const issues = runComplianceChecks(project).issues.filter((issue) => issue.kind === 'protective-device');
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ severity: 'warning', measured: 32, limit: 24 });
+    expect(issues[0].message).toContain('estimated');
+
+    cable.protectiveDeviceRating = 20;
+    cable.designCurrent = 16;
+    expect(runComplianceChecks(project).issues.some((issue) => issue.kind === 'protective-device')).toBe(false);
+  });
+
+  it('holds cables on a lighting system to the 3% voltage-drop limit', () => {
+    // 1.5mm² PVC SP, 6A, 53m, 230V => 29*6*53/1000 = 9.22V => 4.01%
+    const cable = makeCable({ csa: 1.5, designCurrent: 6, estimatedLength: 53 });
+    const project = makeProject({ cables: [cable] });
+    const voltageDrop = () => runComplianceChecks(project).issues.filter((issue) => issue.kind === 'voltage-drop');
+    expect(voltageDrop()).toHaveLength(0);
+
+    project.systems = { 'sys-l': { id: 'sys-l', name: 'Lighting', kind: 'lighting', color: '#ffcc00' } };
+    cable.systemId = 'sys-l';
+    expect(voltageDrop()).toHaveLength(1);
+    expect(voltageDrop()[0].limit).toBeCloseTo(3, 2);
+  });
+
   it('reports a segregation error when power and data share an unpartitioned tray', () => {
     const c = makeContainment({ containmentType: 'tray', width: 300 });
     const power = makeCable({ circuitType: 'power', route: [c.id], reference: 'PW-1' });

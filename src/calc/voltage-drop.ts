@@ -9,7 +9,8 @@ import {
   type StandardsCode,
   type StandardsTrace,
 } from '../models/standards';
-import type { CableConstruction } from '../models/cable';
+import type { Cable, CableConstruction } from '../models/cable';
+import type { ElectricalSystem, SystemId } from '../models/site';
 
 export type Phasing = 'single' | 'three';
 export type LoadCategory = 'lighting' | 'other';
@@ -52,11 +53,31 @@ const lookupVdropTable = (csa: number, table: Record<number, number>): number =>
   return table[keys[keys.length - 1]];
 };
 
+// Per metre, a single-phase loop drops 2·I·Z and a three-phase line √3·I·Z,
+// so a three-phase mV/A/m figure scales to single phase by 2/√3.
+const THREE_TO_SINGLE_PHASE = 2 / Math.sqrt(3);
+
 const mvAmFor = (construction: CableConstruction, csa: number, phasing: Phasing): number => {
-  if (isXlpe(construction) || phasing === 'three') {
-    return lookupVdropTable(csa, VDROP_MV_A_M_XLPE_3P);
+  if (isXlpe(construction)) {
+    // Only a three-phase XLPE table is held, so convert it for single-phase
+    // circuits instead of understating their drop.
+    const threePhase = lookupVdropTable(csa, VDROP_MV_A_M_XLPE_3P);
+    return phasing === 'three' ? threePhase : threePhase * THREE_TO_SINGLE_PHASE;
   }
+  // Three-phase PVC uses the XLPE table, whose 90 °C conductor values sit
+  // above PVC's 70 °C ones, so the result errs high until a PVC table is held.
+  if (phasing === 'three') return lookupVdropTable(csa, VDROP_MV_A_M_XLPE_3P);
   return lookupVdropTable(csa, VDROP_MV_A_M_PVC_SP);
+};
+
+// Lighting circuits take the tighter limit. A cable records no load type of
+// its own, so it comes from the kind of system the cable is assigned to.
+export const loadCategoryForCable = (
+  cable: Cable,
+  systems?: Record<SystemId, ElectricalSystem>,
+): LoadCategory => {
+  const kind = cable.systemId ? systems?.[cable.systemId]?.kind : undefined;
+  return kind === 'lighting' || kind === 'emergency-lighting' ? 'lighting' : 'other';
 };
 
 export const computeVoltageDrop = (opts: VoltageDropOptions): VoltageDropResult => {
