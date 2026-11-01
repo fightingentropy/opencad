@@ -24,6 +24,8 @@ export default [
       'coverage/**',
       '.wrangler/**',
       '.cloudflare/**',
+      'site/dist/**',
+      'site/.cloudflare/**',
       'worker/worker-configuration.d.ts',
     ],
   },
