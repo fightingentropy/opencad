@@ -13,7 +13,7 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm run collab:types:check && npm run collab:typecheck && npm run lint && npm test && npm run collab:test && npm run build && npm run collab:dry-run",
     "visual:smoke": "node scripts/visual-smoke.mjs",
-    "deploy": "wrangler pages deploy dist --project-name=opencad",
+    "deploy": "npm run site:deploy",
     "collab:dev": "wrangler dev --experimental-new-config --local",
     "collab:types": "wrangler types worker/worker-configuration.d.ts --config wrangler.collab.jsonc --include-runtime=false",
     "collab:types:check": "wrangler types worker/worker-configuration.d.ts --config wrangler.collab.jsonc --include-runtime=false --check",
@@ -23,7 +23,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "collab:build": "wrangler build --experimental-new-config --experimental-cf-build-output",
-    "collab:deploy": "npm run collab:build && cf deploy --prebuilt"
+    "collab:deploy": "npm run collab:build && cf deploy --prebuilt",
+    "site:build": "npm run build && rm -rf site/dist && cp -R dist site/dist && rm -f site/dist/_redirects site/dist/_routes.json && cd site && wrangler build --experimental-new-config --experimental-cf-build-output",
+    "site:deploy": "npm run site:build && cd site && cf deploy --prebuilt"
   },
   "dependencies": {
     "jose": "^6.2.7",

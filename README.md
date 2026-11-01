@@ -35,7 +35,7 @@ The Corporate HQ demonstration model (**OpenCAD → Open demonstration site…**
 
 ## Try it locally
 
-There is no hosted demo at the moment. To try OpenCAD, [run it locally](#run-locally) (Node 22.18 or newer): `npm install`, `npm run dev`, then open `http://localhost:5173`. First launch opens a simple 3D containment layout: open-top tray (300 × 50 mm), trunking (150 × 150 mm) and wire basket (300 × 54 mm), each with a 3 m run and 1.5 m return. Use Iso, Top and Fit to inspect the geometry. This is a generic section study, not a fabrication drawing. Saved projects reopen as before; OpenCAD → New containment layout creates the new study after a replacement prompt, with an option to save the current project first.
+Try it at **[opencad.erlin.org](https://opencad.erlin.org)**. The hosted build runs entirely in your browser and keeps projects in local storage; collaboration is off there. To run it yourself, see [Run locally](#run-locally) (Node 22.18 or newer): `npm install`, `npm run dev`, then open `http://localhost:5173`. First launch opens a simple 3D containment layout: open-top tray (300 × 50 mm), trunking (150 × 150 mm) and wire basket (300 × 54 mm), each with a 3 m run and 1.5 m return. Use Iso, Top and Fit to inspect the geometry. This is a generic section study, not a fabrication drawing. Saved projects reopen as before; OpenCAD → New containment layout creates the new study after a replacement prompt, with an option to save the current project first.
 
 For a larger example, choose **OpenCAD → Open demonstration site…**. It replaces the current project after a confirmation prompt (use **Save a copy…** first to keep it) and loads the Corporate HQ demonstration model from `src/sample-whole-site.ts`: a five-level office with containment, boards, risers and roof plant. The screenshots in this README were captured from that model, not from the first-launch layout.
 
@@ -135,14 +135,13 @@ The source standards are licensed publications and are not distributed by this r
 
 ## Deployment
 
-The `dist/` output is a static SPA and can be hosted on any static host. The repository ships with a Cloudflare Pages configuration:
+The `dist/` output is a static SPA and can be hosted on any static host. The public build at [opencad.erlin.org](https://opencad.erlin.org) is a static-assets Worker named `opencad`, configured in `site/` (`site/cloudflare.config.ts` sets the SPA fallback and the custom domain):
 
 ```bash
-npm run build
 npm run deploy
 ```
 
-`npm run deploy` calls `wrangler pages deploy dist --project-name=opencad`. Use the pinned project Wrangler and run `npx --no-install wrangler login` before the first Pages deploy.
+`npm run deploy` runs `site:deploy`: it builds the app, copies `dist/` to `site/dist/` without the Pages-only `_redirects` and `_routes.json` (Workers rejects the `/* /index.html 200` rule as a loop; the Worker's SPA fallback covers it), writes the build output with Wrangler and uploads it with `cf deploy --prebuilt`. It needs `cf auth login`, not a Wrangler login. The hosted build sets no `VITE_COLLAB_BACKEND_URL`, so collaboration stays off there.
 
 ### Authenticated collaboration service
 
@@ -175,7 +174,7 @@ MIT — see `LICENSE`.
 
 ## Cloudflare CLI
 
-The collaboration Worker uses `npm run collab:build`, `npm run collab:dry-run`, and `npm run collab:deploy`. Its `CollaborationRoom` export keeps SQLite storage. The separate static site remains on legacy Pages: `npm run deploy` uses the pinned Wrangler.
+The collaboration Worker uses `npm run collab:build`, `npm run collab:dry-run`, and `npm run collab:deploy`. Its `CollaborationRoom` export keeps SQLite storage. The static site is a separate Worker configured in `site/`; `npm run deploy` builds and uploads it the same way.
 
 Pinned CLI: `cf@1.0.0-beta.17` on Node 22.18 or newer. `cf auth login` is separate from Wrangler login. Verify the selected account before remote operations. Deployment settings live in `cloudflare.config.ts`; keep the original Wrangler configuration for local data and any remaining Wrangler commands.
 
