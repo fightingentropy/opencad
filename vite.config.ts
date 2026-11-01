@@ -20,16 +20,22 @@ export default defineConfig({
         manualChunks: (id) => {
           // Vendor: split heavy third-party libs into their own chunks so
           // they cache independently of app code and lazy-load with the
-          // features that need them.
+          // features that need them. jspdf is left out on purpose: every
+          // use is a dynamic import, so it splits off by itself. As a manual
+          // chunk it would also absorb the preload helper (jspdf lazy-loads
+          // its own plugins) and drag itself into the first page load.
           if (id.includes('node_modules/three')) return 'three';
-          if (id.includes('node_modules/jspdf')) return 'jspdf';
           if (id.includes('node_modules/react') || id.includes('node_modules/scheduler')) return 'react';
           if (id.includes('node_modules/zustand')) return 'zustand';
           if (id.includes('node_modules/nanoid')) return 'vendor-misc';
           // Collaboration: Yjs + y-webrtc + y-indexeddb + y-protocols
           // ride together in a deferred chunk that's only fetched when
           // the user opens the Collaboration modal. Single-player never
-          // pays the bundle cost.
+          // pays the bundle cost. The src/collab implementation is only
+          // reached through runtime.ts's dynamic import, so it splits off
+          // on its own; naming it here would also pull in the modules it
+          // shares with the store (collaboration-guard, room-code) and make
+          // the main bundle load this chunk.
           if (
             id.includes('node_modules/yjs') ||
             id.includes('node_modules/y-webrtc') ||
@@ -38,13 +44,6 @@ export default defineConfig({
             id.includes('node_modules/lib0') ||
             id.includes('node_modules/simple-peer')
           ) return 'collab';
-          if (id.includes('/src/collab/yjs-doc') ||
-              id.includes('/src/collab/durable-provider') ||
-              id.includes('/src/collab/protocol') ||
-              id.includes('/src/collab/sync') ||
-              id.includes('/src/collab/presence') ||
-              id.includes('/src/collab/session') ||
-              id.includes('/src/collab/index')) return 'collab';
           // App: pull the static-data heavyweights out of the main chunk.
           if (id.includes('/src/symbols/library')) return 'symbols-library';
           if (id.includes('/src/data/catalogues')) return 'catalogues';

@@ -4,7 +4,6 @@
 
 import type { Project, ContainmentEntity } from '../types';
 import type { Cable } from '../models/cable';
-import jsPDF from 'jspdf';
 import {
   buildExportMetadata,
   exportMetadataSummary,
@@ -156,6 +155,7 @@ export const cableScheduleToPDF = async (
   rows: CableScheduleRow[],
   project: Project,
 ): Promise<Blob> => {
+  const { default: jsPDF } = await import('jspdf');
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
   const metadata = buildExportMetadata(project, 'cable-schedule-pdf');
   const pageWidth = doc.internal.pageSize.getWidth();

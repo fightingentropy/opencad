@@ -7,7 +7,6 @@
 
 import type { Project, ContainmentEntity, WallEntity } from '../types';
 import type { PenetrationSeal, FireRating } from '../models/fire';
-import jsPDF from 'jspdf';
 import {
   buildExportMetadata,
   exportMetadataSummary,
@@ -152,6 +151,7 @@ export const fireStopScheduleToPDF = async (
   rows: FireStopRow[],
   project: Project,
 ): Promise<Blob> => {
+  const { default: jsPDF } = await import('jspdf');
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
   const metadata = buildExportMetadata(project, 'fire-stop-schedule-pdf');
   const pageWidth = doc.internal.pageSize.getWidth();

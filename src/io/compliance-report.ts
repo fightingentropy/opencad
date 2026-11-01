@@ -23,7 +23,6 @@ import {
   createStandardsTrace,
   type StandardsTrace,
 } from '../models/standards';
-import jsPDF from 'jspdf';
 import { buildExportMetadata, exportMetadataSummary, type ExportMetadata } from './export-metadata';
 
 export interface ComplianceLine {
@@ -435,6 +434,7 @@ ${failingLines}
 export const complianceReportToPDF = async (
   data: ComplianceReportData,
 ): Promise<Blob> => {
+  const { default: jsPDF } = await import('jspdf');
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();

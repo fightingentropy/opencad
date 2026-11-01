@@ -1,5 +1,4 @@
 import type { Project } from '../types';
-import jsPDF from 'jspdf';
 import { exportSheetSVG } from './svg';
 import { buildExportMetadata, exportMetadataSummary } from './export-metadata';
 
@@ -51,6 +50,8 @@ const svgToDataURL = (
 export const exportSheetPDF = async (project: Project): Promise<void> => {
   const sheet = project.sheets[project.activeSheetId];
   const orientation = sheet.width > sheet.height ? 'landscape' : 'portrait';
+
+  const { default: jsPDF } = await import('jspdf');
 
   const doc = new jsPDF({
     orientation,
