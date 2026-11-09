@@ -52,7 +52,7 @@ function NumberField({
 export function ViewGeneratorModal({ kind, onClose }: ViewGeneratorModalProps) {
   const buildingsMap = useBuildings();
   const addSheet = useStore((s) => s.addSheet);
-  const addEntities = useStore((s) => s.addEntities);
+  const addEntitiesByLayerName = useStore((s) => s.addEntitiesByLayerName);
   const setStatus = useStore((s) => s.setStatus);
 
   // Common inputs across multiple generators
@@ -150,7 +150,8 @@ export function ViewGeneratorModal({ kind, onClose }: ViewGeneratorModalProps) {
     if (entities.length === 0) {
       setStatus(`${name}: no entities generated (check inputs)`);
     } else {
-      addEntities(entities);
+      // Generated entities name their layer; the store maps the names to layer ids.
+      addEntitiesByLayerName(entities);
       setStatus(`Generated ${entities.length} entities on ${name}`);
     }
     onClose();

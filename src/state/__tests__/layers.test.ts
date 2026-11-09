@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createEmptyProject, useStore } from '../store';
+import { generateCrossSection } from '../../views';
+import type { Entity } from '../../types';
 
 // The store is a module-level singleton, so every test starts from a fresh
 // empty project with cleared undo/redo stacks.
@@ -116,5 +118,80 @@ describe('undo participation', () => {
     expect(useStore.getState().past).toHaveLength(1);
     useStore.getState().undo();
     expect(useStore.getState().project.layers[id].name).not.toBe('Renamed');
+  });
+});
+
+describe('addEntitiesByLayerName', () => {
+  const layerNamed = (name: string) => {
+    const { layers, layerOrder } = useStore.getState().project;
+    return layerOrder.map((id) => layers[id]).find((l) => l.name === name);
+  };
+  const sheetEntities = (): Entity[] => {
+    const { sheets, activeSheetId } = useStore.getState().project;
+    return Object.values(sheets[activeSheetId].entities);
+  };
+  const crossSection = (): Entity[] => {
+    const { project } = useStore.getState();
+    return generateCrossSection({
+      project,
+      sheetId: project.activeSheetId,
+      cutA: { x: 0, y: 0 },
+      cutB: { x: 1000, y: 0 },
+      viewName: 'A-A',
+    });
+  };
+
+  it('puts generated view entities on the real layers with those names', () => {
+    const generated = crossSection();
+    const layerCount = useStore.getState().project.layerOrder.length;
+    // The generators name layers; no layer is keyed by its name.
+    expect(generated.map((e) => e.layerId)).toContain('Annotation');
+    expect(generated.map((e) => e.layerId)).toContain('Dimensions');
+
+    useStore.getState().addEntitiesByLayerName(generated);
+
+    const { layers, layerOrder } = useStore.getState().project;
+    const added = sheetEntities();
+    expect(added).toHaveLength(generated.length);
+    for (const e of added) expect(layers[e.layerId]).toBeDefined();
+    const title = added.find((e) => e.kind === 'text' && e.text === 'SECTION A-A');
+    expect(title?.layerId).toBe(layerNamed('Annotation')?.id);
+    expect(added.find((e) => e.kind === 'dimension')?.layerId).toBe(layerNamed('Dimensions')?.id);
+    expect(layerOrder).toHaveLength(layerCount);
+  });
+
+  it('recreates a missing layer and undoes it together with the entities', () => {
+    const dimensions = layerNamed('Dimensions')!;
+    useStore.getState().removeLayer(dimensions.id);
+    const before = useStore.getState().project;
+
+    useStore.getState().addEntitiesByLayerName(crossSection());
+
+    const recreated = layerNamed('Dimensions');
+    expect(recreated).toMatchObject({ color: dimensions.color, lineWidth: dimensions.lineWidth, visible: true });
+    expect(recreated?.id).not.toBe(dimensions.id);
+    expect(sheetEntities().find((e) => e.kind === 'dimension')?.layerId).toBe(recreated?.id);
+
+    useStore.getState().undo();
+    expect(useStore.getState().project).toBe(before);
+  });
+
+  it('matches names case-insensitively and creates layers for unknown names once', () => {
+    const line = (id: string, layerId: string): Entity => ({
+      id, kind: 'line', layerId, visible: true, locked: false, a: { x: 0, y: 0 }, b: { x: 1, y: 1 },
+    });
+    const realId = firstLayerId();
+    useStore.getState().addEntitiesByLayerName([
+      line('a', 'annotation'),
+      line('b', 'Site Survey'),
+      line('c', 'site survey'),
+      line('d', realId),
+    ]);
+
+    const { entities } = useStore.getState().project.sheets[useStore.getState().project.activeSheetId];
+    expect(entities.a.layerId).toBe(layerNamed('Annotation')?.id);
+    expect(entities.b.layerId).toBe(layerNamed('Site Survey')?.id);
+    expect(entities.c.layerId).toBe(entities.b.layerId);
+    expect(entities.d.layerId).toBe(realId);
   });
 });

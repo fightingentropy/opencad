@@ -309,34 +309,41 @@ const reflectEntity = (e: Entity, axis: 'horizontal' | 'vertical', center: numbe
   return cp;
 };
 
+// The layers every new project starts with, in display order. View generators also ask for
+// layers by these names (see addEntitiesByLayerName), so a missing one is recreated to match.
+const STANDARD_LAYERS: Omit<Layer, 'id'>[] = [
+  { name: 'Wires', color: '#ff3a3a', visible: true, locked: false, lineWidth: 0.6 },
+  { name: 'Symbols', color: '#e6e6e6', visible: true, locked: false, lineWidth: 0.5 },
+  { name: 'Wire Labels', color: '#ffd84d', visible: true, locked: false, lineWidth: 0.4 },
+  { name: 'Dimensions', color: '#5cdcff', visible: true, locked: false, lineWidth: 0.3 },
+  { name: 'Annotation', color: '#9ad65a', visible: true, locked: false, lineWidth: 0.4 },
+  { name: 'Panel Layout', color: '#bb8cff', visible: true, locked: false, lineWidth: 0.5 },
+  { name: 'Containment', color: '#5cdcff', visible: true, locked: false, lineWidth: 0.6 },
+  { name: 'Walls', color: '#a8aab0', visible: true, locked: false, lineWidth: 0.8 },
+  { name: 'Rooms', color: '#7a8593', visible: true, locked: false, lineWidth: 0.3 },
+  { name: 'Construction', color: '#5d6473', visible: true, locked: false, lineWidth: 0.3, lineDash: [4, 4] },
+];
+
+const layerNameKey = (name: string): string => name.trim().toLowerCase();
+
+// Each layer gets its own lineDash array: committed projects are frozen in dev builds.
+const standardLayer = (id: LayerId, spec: Omit<Layer, 'id'>): Layer => ({
+  id,
+  ...spec,
+  ...(spec.lineDash ? { lineDash: [...spec.lineDash] } : {}),
+});
+
 const defaultLayers = (): { layers: Record<LayerId, Layer>; layerOrder: LayerId[]; defaultId: LayerId } => {
-  const wireId = newId();
-  const symId = newId();
-  const wireLabelId = newId();
-  const dimId = newId();
-  const textId = newId();
-  const panelId = newId();
-  const containmentId = newId();
-  const wallId = newId();
-  const roomId = newId();
-  const sketchId = newId();
-  const layers: Record<LayerId, Layer> = {
-    [wireId]: { id: wireId, name: 'Wires', color: '#ff3a3a', visible: true, locked: false, lineWidth: 0.6 },
-    [symId]: { id: symId, name: 'Symbols', color: '#e6e6e6', visible: true, locked: false, lineWidth: 0.5 },
-    [wireLabelId]: { id: wireLabelId, name: 'Wire Labels', color: '#ffd84d', visible: true, locked: false, lineWidth: 0.4 },
-    [dimId]: { id: dimId, name: 'Dimensions', color: '#5cdcff', visible: true, locked: false, lineWidth: 0.3 },
-    [textId]: { id: textId, name: 'Annotation', color: '#9ad65a', visible: true, locked: false, lineWidth: 0.4 },
-    [panelId]: { id: panelId, name: 'Panel Layout', color: '#bb8cff', visible: true, locked: false, lineWidth: 0.5 },
-    [containmentId]: { id: containmentId, name: 'Containment', color: '#5cdcff', visible: true, locked: false, lineWidth: 0.6 },
-    [wallId]: { id: wallId, name: 'Walls', color: '#a8aab0', visible: true, locked: false, lineWidth: 0.8 },
-    [roomId]: { id: roomId, name: 'Rooms', color: '#7a8593', visible: true, locked: false, lineWidth: 0.3 },
-    [sketchId]: { id: sketchId, name: 'Construction', color: '#5d6473', visible: true, locked: false, lineWidth: 0.3, lineDash: [4, 4] },
-  };
-  return {
-    layers,
-    layerOrder: [wireId, symId, wireLabelId, dimId, textId, panelId, containmentId, wallId, roomId, sketchId],
-    defaultId: symId,
-  };
+  const layers: Record<LayerId, Layer> = {};
+  const layerOrder: LayerId[] = [];
+  for (const spec of STANDARD_LAYERS) {
+    const id = newId();
+    layers[id] = standardLayer(id, spec);
+    layerOrder.push(id);
+  }
+  // New entities go on Symbols until the user picks another layer.
+  const defaultId = layerOrder[STANDARD_LAYERS.findIndex((l) => l.name === 'Symbols')];
+  return { layers, layerOrder, defaultId };
 };
 
 const defaultSheets = (): { sheets: Record<SheetId, Sheet>; sheetOrder: SheetId[]; activeSheetId: SheetId } => {
@@ -502,6 +509,9 @@ interface Store {
   // Entity
   addEntity: (e: Entity) => void;
   addEntities: (es: Entity[]) => void;
+  // For entities whose layerId holds a layer name rather than an id, as
+  // produced by the view generators.
+  addEntitiesByLayerName: (es: Entity[]) => void;
   updateEntity: (id: EntityId, patch: Partial<Entity>) => void;
   removeEntity: (id: EntityId) => void;
   removeEntities: (ids: EntityId[]) => void;
@@ -853,6 +863,56 @@ export const useStore = create<Store>((rawSet, get) => {
       future: [],
       project: {
         ...project,
+        sheets: { ...project.sheets, [sheet.id]: updatedSheet },
+        modified: Date.now(),
+      },
+    });
+  },
+
+  // Generators run without knowing the project's layer ids, so they put a
+  // layer name ('Annotation', 'Walls') in layerId. Layers are keyed by id and
+  // an entity on an unknown layer is never drawn, so map each name to the
+  // layer that has it, creating missing layers, in the same undo step.
+  addEntitiesByLayerName: (es) => {
+    if (es.length === 0) return;
+    const { project, past } = get();
+    const sheet = project.sheets[project.activeSheetId];
+    if (!sheet) return;
+    const layers = { ...project.layers };
+    const layerOrder = [...project.layerOrder];
+    const idByName = new Map<string, LayerId>();
+    for (const id of layerOrder) {
+      const layer = layers[id];
+      if (layer && !idByName.has(layerNameKey(layer.name))) idByName.set(layerNameKey(layer.name), id);
+    }
+    const resolveLayer = (ref: string): LayerId => {
+      if (Object.hasOwn(layers, ref)) return ref;
+      const key = layerNameKey(ref);
+      const existing = idByName.get(key);
+      if (existing) return existing;
+      const id = newId();
+      const standard = STANDARD_LAYERS.find((l) => layerNameKey(l.name) === key);
+      layers[id] = standard
+        ? standardLayer(id, standard)
+        : { id, name: ref, color: '#cccccc', visible: true, locked: false, lineWidth: 0.5 };
+      layerOrder.push(id);
+      idByName.set(key, id);
+      return id;
+    };
+    const entities = { ...sheet.entities };
+    const order = [...sheet.entityOrder];
+    for (const e of es) {
+      entities[e.id] = { ...e, layerId: resolveLayer(e.layerId) };
+      order.push(e.id);
+    }
+    const updatedSheet: Sheet = { ...sheet, entities, entityOrder: order };
+    set({
+      past: pushPast(past, project),
+      future: [],
+      project: {
+        ...project,
+        layers,
+        layerOrder,
         sheets: { ...project.sheets, [sheet.id]: updatedSheet },
         modified: Date.now(),
       },

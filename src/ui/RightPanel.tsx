@@ -198,11 +198,11 @@ function SinglePropertiesEditor({ entity, onUpdate }: { entity: Entity; onUpdate
           </select>
         </Row>
         <Row label="Color">
-          <input type="color" value={entity.color ?? layersMap[entity.layerId].color}
+          <input type="color" value={entity.color ?? layersMap[entity.layerId]?.color ?? '#cccccc'}
             onChange={(e) => onUpdate({ color: e.target.value } as any)} />
         </Row>
         <Row label="Line Width">
-          <input type="number" step="0.1" min="0.1" max="5" value={entity.lineWidth ?? layersMap[entity.layerId].lineWidth}
+          <input type="number" step="0.1" min="0.1" max="5" value={entity.lineWidth ?? layersMap[entity.layerId]?.lineWidth ?? 0.5}
             onChange={(e) => onUpdate({ lineWidth: parseFloat(e.target.value) } as any)} />
         </Row>
         <Row label="Locked">
