@@ -22,6 +22,7 @@ import { assembleDrawingNumber, nextSequenceNumber } from '../drawing/numbering'
 import { shouldRejectLocalProjectMutation } from './collaboration-guard';
 import { keepRouteConnections } from '../lib/route-connections';
 import { projectWithAutoFeatures } from '../lib/auto-feature-actions';
+import { createLayerNameResolver, layerFromSpec, STANDARD_LAYERS } from '../lib/layer-names';
 import { notify } from './notifications';
 
 const newId = () => nanoid(10);
@@ -309,42 +310,12 @@ const reflectEntity = (e: Entity, axis: 'horizontal' | 'vertical', center: numbe
   return cp;
 };
 
-// The layers every new project starts with, in display order. View generators also ask for
-// layers by these names (see addEntitiesByLayerName), so a missing one is recreated to match.
-const STANDARD_LAYERS: Omit<Layer, 'id'>[] = [
-  { name: 'Wires', color: '#ff3a3a', visible: true, locked: false, lineWidth: 0.6 },
-  { name: 'Symbols', color: '#e6e6e6', visible: true, locked: false, lineWidth: 0.5 },
-  { name: 'Wire Labels', color: '#ffd84d', visible: true, locked: false, lineWidth: 0.4 },
-  { name: 'Dimensions', color: '#5cdcff', visible: true, locked: false, lineWidth: 0.3 },
-  { name: 'Annotation', color: '#9ad65a', visible: true, locked: false, lineWidth: 0.4 },
-  { name: 'Panel Layout', color: '#bb8cff', visible: true, locked: false, lineWidth: 0.5 },
-  { name: 'Containment', color: '#5cdcff', visible: true, locked: false, lineWidth: 0.6 },
-  { name: 'Walls', color: '#a8aab0', visible: true, locked: false, lineWidth: 0.8 },
-  { name: 'Rooms', color: '#7a8593', visible: true, locked: false, lineWidth: 0.3 },
-  { name: 'Construction', color: '#5d6473', visible: true, locked: false, lineWidth: 0.3, lineDash: [4, 4] },
-];
-
-// Layers that are only created when something asks for them by name: DXF and IFC imports go
-// on 'Underlay'.
-const ON_DEMAND_LAYERS: Omit<Layer, 'id'>[] = [
-  { name: 'Underlay', color: '#7a8593', visible: true, locked: false, lineWidth: 0.3 },
-];
-
-const layerNameKey = (name: string): string => name.trim().toLowerCase();
-
-// Each layer gets its own lineDash array: committed projects are frozen in dev builds.
-const standardLayer = (id: LayerId, spec: Omit<Layer, 'id'>): Layer => ({
-  id,
-  ...spec,
-  ...(spec.lineDash ? { lineDash: [...spec.lineDash] } : {}),
-});
-
 const defaultLayers = (): { layers: Record<LayerId, Layer>; layerOrder: LayerId[]; defaultId: LayerId } => {
   const layers: Record<LayerId, Layer> = {};
   const layerOrder: LayerId[] = [];
   for (const spec of STANDARD_LAYERS) {
     const id = newId();
-    layers[id] = standardLayer(id, spec);
+    layers[id] = layerFromSpec(id, spec);
     layerOrder.push(id);
   }
   // New entities go on Symbols until the user picks another layer.
@@ -875,41 +846,19 @@ export const useStore = create<Store>((rawSet, get) => {
     });
   },
 
-  // Generators and importers run without knowing the project's layer ids, so
-  // they put a layer name ('Annotation', 'Underlay') in layerId. Layers are
-  // keyed by id and an entity on an unknown layer is never drawn, so map each
-  // name to the layer that has it, creating missing layers, in the same undo
-  // step.
+  // Generators and importers put a layer name ('Annotation', 'Underlay') in
+  // layerId. Map each name to the layer that has it, creating missing layers,
+  // and add the entities in the same undo step.
   addEntitiesByLayerName: (es) => {
     if (es.length === 0) return;
     const { project, past } = get();
     const sheet = project.sheets[project.activeSheetId];
     if (!sheet) return;
-    const layers = { ...project.layers };
-    const layerOrder = [...project.layerOrder];
-    const idByName = new Map<string, LayerId>();
-    for (const id of layerOrder) {
-      const layer = layers[id];
-      if (layer && !idByName.has(layerNameKey(layer.name))) idByName.set(layerNameKey(layer.name), id);
-    }
-    const resolveLayer = (ref: string): LayerId => {
-      if (Object.hasOwn(layers, ref)) return ref;
-      const key = layerNameKey(ref);
-      const existing = idByName.get(key);
-      if (existing) return existing;
-      const id = newId();
-      const standard = [...STANDARD_LAYERS, ...ON_DEMAND_LAYERS].find((l) => layerNameKey(l.name) === key);
-      layers[id] = standard
-        ? standardLayer(id, standard)
-        : { id, name: ref, color: '#cccccc', visible: true, locked: false, lineWidth: 0.5 };
-      layerOrder.push(id);
-      idByName.set(key, id);
-      return id;
-    };
+    const resolver = createLayerNameResolver(project);
     const entities = { ...sheet.entities };
     const order = [...sheet.entityOrder];
     for (const e of es) {
-      entities[e.id] = { ...e, layerId: resolveLayer(e.layerId) };
+      entities[e.id] = { ...e, layerId: resolver.resolve(e.layerId) };
       order.push(e.id);
     }
     const updatedSheet: Sheet = { ...sheet, entities, entityOrder: order };
@@ -918,8 +867,8 @@ export const useStore = create<Store>((rawSet, get) => {
       future: [],
       project: {
         ...project,
-        layers,
-        layerOrder,
+        layers: resolver.layers,
+        layerOrder: resolver.layerOrder,
         sheets: { ...project.sheets, [sheet.id]: updatedSheet },
         modified: Date.now(),
       },
