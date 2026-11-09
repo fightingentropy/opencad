@@ -36,17 +36,22 @@ export const exportSheetSVG = (project: Project): string => {
 };
 
 const entitySVG = (e: Entity, layer: Layer, project: Project): string => {
-  const stroke = e.color ?? layer.color;
+  const stroke = escapeXml(e.color ?? layer.color);
   const lw = e.lineWidth ?? layer.lineWidth;
   const dash = e.lineDash ?? layer.lineDash;
-  const dashAttr = dash ? `stroke-dasharray="${dash.join(' ')}"` : '';
-  const lineAttrs = `stroke="${stroke}" stroke-width="${lw}" fill="none" stroke-linecap="round" stroke-linejoin="round" ${dashAttr}`;
+  const dashAttr = dash ? ` stroke-dasharray="${dash.join(' ')}"` : '';
+  // The fill is added once per shape. An element that repeats an attribute is
+  // not well-formed XML, and then the whole SVG fails to load.
+  const strokeAttrs = `stroke="${stroke}" stroke-width="${lw}" stroke-linecap="round" stroke-linejoin="round"${dashAttr}`;
+  const lineAttrs = `${strokeAttrs} fill="none"`;
+  const filledAttrs = (fill?: string) => `${strokeAttrs} fill="${fill ? escapeXml(fill) : 'none'}"`;
 
   switch (e.kind) {
     case 'line':
       return `<line x1="${e.a.x}" y1="${e.a.y}" x2="${e.b.x}" y2="${e.b.y}" ${lineAttrs} />`;
     case 'polyline':
-      return `<polyline points="${e.points.map(p => `${p.x},${p.y}`).join(' ')}" ${lineAttrs} ${e.closed ? 'fill="none"' : ''} />`;
+      // A polygon draws the closing segment; a polyline would leave the shape open.
+      return `<${e.closed ? 'polygon' : 'polyline'} points="${e.points.map(p => `${p.x},${p.y}`).join(' ')}" ${lineAttrs} />`;
     case 'wire':
       return `<polyline points="${e.points.map(p => `${p.x},${p.y}`).join(' ')}" stroke="${stroke || '#ff3a3a'}" stroke-width="${lw}" fill="none" stroke-linecap="round" stroke-linejoin="round" />`;
     case 'bus':
@@ -56,10 +61,10 @@ const entitySVG = (e: Entity, layer: Layer, project: Project): string => {
       const y = Math.min(e.a.y, e.b.y);
       const w = Math.abs(e.b.x - e.a.x);
       const h = Math.abs(e.b.y - e.a.y);
-      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" ${lineAttrs} ${(e as any).fill ? `fill="${(e as any).fill}"` : ''} />`;
+      return `<rect x="${x}" y="${y}" width="${w}" height="${h}" ${filledAttrs(e.fill)} />`;
     }
     case 'circle':
-      return `<circle cx="${e.center.x}" cy="${e.center.y}" r="${e.radius}" ${lineAttrs} ${(e as any).fill ? `fill="${(e as any).fill}"` : ''} />`;
+      return `<circle cx="${e.center.x}" cy="${e.center.y}" r="${e.radius}" ${filledAttrs(e.fill)} />`;
     case 'arc': {
       const sx = e.center.x + e.radius * Math.cos(e.startAngle);
       const sy = e.center.y + e.radius * Math.sin(e.startAngle);
@@ -103,7 +108,7 @@ const entitySVG = (e: Entity, layer: Layer, project: Project): string => {
 const renderSymbolPreviewSVG = (sym: SymbolEntity, layer: Layer): string => {
   const def = getSymbol(sym.symbolId);
   if (!def) return '';
-  const stroke = sym.color ?? layer.color;
+  const stroke = escapeXml(sym.color ?? layer.color);
   const lw = sym.lineWidth ?? layer.lineWidth;
   const parts: string[] = [];
   for (const p of def.primitives) {
