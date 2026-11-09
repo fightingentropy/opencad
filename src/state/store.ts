@@ -324,6 +324,12 @@ const STANDARD_LAYERS: Omit<Layer, 'id'>[] = [
   { name: 'Construction', color: '#5d6473', visible: true, locked: false, lineWidth: 0.3, lineDash: [4, 4] },
 ];
 
+// Layers that are only created when something asks for them by name: DXF and IFC imports go
+// on 'Underlay'.
+const ON_DEMAND_LAYERS: Omit<Layer, 'id'>[] = [
+  { name: 'Underlay', color: '#7a8593', visible: true, locked: false, lineWidth: 0.3 },
+];
+
 const layerNameKey = (name: string): string => name.trim().toLowerCase();
 
 // Each layer gets its own lineDash array: committed projects are frozen in dev builds.
@@ -510,7 +516,7 @@ interface Store {
   addEntity: (e: Entity) => void;
   addEntities: (es: Entity[]) => void;
   // For entities whose layerId holds a layer name rather than an id, as
-  // produced by the view generators.
+  // produced by the view generators and the DXF/IFC importers.
   addEntitiesByLayerName: (es: Entity[]) => void;
   updateEntity: (id: EntityId, patch: Partial<Entity>) => void;
   removeEntity: (id: EntityId) => void;
@@ -869,10 +875,11 @@ export const useStore = create<Store>((rawSet, get) => {
     });
   },
 
-  // Generators run without knowing the project's layer ids, so they put a
-  // layer name ('Annotation', 'Walls') in layerId. Layers are keyed by id and
-  // an entity on an unknown layer is never drawn, so map each name to the
-  // layer that has it, creating missing layers, in the same undo step.
+  // Generators and importers run without knowing the project's layer ids, so
+  // they put a layer name ('Annotation', 'Underlay') in layerId. Layers are
+  // keyed by id and an entity on an unknown layer is never drawn, so map each
+  // name to the layer that has it, creating missing layers, in the same undo
+  // step.
   addEntitiesByLayerName: (es) => {
     if (es.length === 0) return;
     const { project, past } = get();
@@ -891,7 +898,7 @@ export const useStore = create<Store>((rawSet, get) => {
       const existing = idByName.get(key);
       if (existing) return existing;
       const id = newId();
-      const standard = STANDARD_LAYERS.find((l) => layerNameKey(l.name) === key);
+      const standard = [...STANDARD_LAYERS, ...ON_DEMAND_LAYERS].find((l) => layerNameKey(l.name) === key);
       layers[id] = standard
         ? standardLayer(id, standard)
         : { id, name: ref, color: '#cccccc', visible: true, locked: false, lineWidth: 0.5 };

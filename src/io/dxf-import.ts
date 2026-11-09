@@ -359,7 +359,8 @@ export const parseDXF = (text: string): UnderlayEntity => {
   const underlay: UnderlayEntity = {
     id: nanoid(),
     kind: 'underlay',
-    layerId: 'underlay',
+    // A layer name, not an id: add the result with addEntitiesByLayerName.
+    layerId: 'Underlay',
     visible: true,
     locked: true,
     underlayLocked: true,

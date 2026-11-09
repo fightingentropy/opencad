@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { render2d } from '../render2d';
 import { createContainmentSampleProject } from '../../sample-containment';
-import { useStore } from '../../state/store';
+import { createEmptyProject, useStore } from '../../state/store';
+import { parseDXF } from '../../io/dxf-import';
+import { importIFC } from '../../io/ifc-import';
 import { getSymbol, SYMBOL_LIST } from '../../symbols';
 import type { Cable } from '../../models/cable';
 import type { ContainmentEntity, EditorState, Entity, Project } from '../../types';
@@ -91,5 +93,81 @@ describe('2D cable overlays', () => {
     const { project, containment } = fixture();
     project.layers[containment.layerId].visible = false;
     expect(draw(project, 'fill').texts).not.toContain('20%');
+  });
+});
+
+describe('imported underlays', () => {
+  // One line from (1000, 2000) to (1500, 2600), in millimetres.
+  const dxf = [
+    '0', 'SECTION', '2', 'HEADER', '9', '$INSUNITS', '70', '4', '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'LINE', '8', '0', '10', '1000', '20', '2000', '11', '1500', '21', '2600',
+    '0', 'ENDSEC', '0', 'EOF',
+  ].join('\n');
+
+  const drawActiveSheet = () => {
+    const translates: Array<[number, number]> = [];
+    const segments: number[][] = [];
+    const strokes: string[] = [];
+    const values: Record<string, unknown> = {
+      globalAlpha: 1, font: '10px sans-serif', strokeStyle: '',
+      measureText: (text: string) => ({ width: text.length * 6 }),
+      translate: (x: number, y: number) => translates.push([x, y]),
+      moveTo: (x: number, y: number) => segments.push([x, y]),
+      lineTo: (x: number, y: number) => segments[segments.length - 1]?.push(x, y),
+      stroke: () => strokes.push(String(values.strokeStyle)),
+    };
+    const ctx = new Proxy(values, {
+      get: (target, property: string) => target[property] ?? (() => undefined),
+      set: (target, property: string, value: unknown) => { target[property] = value; return true; },
+    }) as unknown as CanvasRenderingContext2D;
+    render2d(ctx, useStore.getState().project, editor('off'), {
+      width: 900, height: 700, dpr: 1, symbolLookup: getSymbol,
+    });
+    return { translates, segments, strokes };
+  };
+
+  it('draws a DXF underlay on a real layer, at its origin', () => {
+    useStore.setState({ project: createEmptyProject(), past: [], future: [] });
+    const underlay = parseDXF(dxf);
+    expect(underlay.origin).toEqual({ x: 1000, y: 2000 });
+    expect(underlay.vectors).toEqual([{ a: { x: 0, y: 0 }, b: { x: 500, y: 600 }, color: undefined }]);
+
+    useStore.getState().addEntitiesByLayerName([underlay]);
+
+    const { project } = useStore.getState();
+    const stored = project.sheets[project.activeSheetId].entities[underlay.id];
+    expect(project.layers[stored.layerId]).toMatchObject({ name: 'Underlay', visible: true });
+
+    const drawn = drawActiveSheet();
+    // The vectors are origin-local, so the origin has to be applied before they are stroked.
+    expect(drawn.translates).toContainEqual([1000, 2000]);
+    expect(drawn.segments).toContainEqual([0, 0, 500, 600]);
+    expect(drawn.strokes).toContain('#7a8593');
+  });
+
+  it('puts IFC walls and slabs on the same real layer', () => {
+    useStore.setState({ project: createEmptyProject(), past: [], future: [] });
+    const result = importIFC([
+      'ISO-10303-21;', "FILE_SCHEMA(('IFC4'));", 'DATA;',
+      '#1=IFCCARTESIANPOINT((0.,0.));',
+      '#2=IFCCARTESIANPOINT((4000.,0.));',
+      '#3=IFCPOLYLINE((#1,#2));',
+      '#4=IFCSHAPEREPRESENTATION($,$,$,(#3));',
+      '#5=IFCPRODUCTDEFINITIONSHAPE($,$,(#4));',
+      '#6=IFCLOCALPLACEMENT($,$);',
+      "#7=IFCWALL('w',$,'Wall',$,$,#6,#5,$,$);",
+      "#8=IFCSLAB('s',$,'Slab',$,$,#6,#5,$,$);",
+      'ENDSEC;', 'END-ISO-10303-21;',
+    ].join('\n'));
+    expect(result.entities.map((e) => e.kind).sort()).toEqual(['underlay', 'wall']);
+
+    useStore.getState().addEntitiesByLayerName(result.entities);
+
+    const { project } = useStore.getState();
+    const added = Object.values(project.sheets[project.activeSheetId].entities);
+    expect(added.length).toBe(result.entities.length);
+    for (const e of added) expect(project.layers[e.layerId]?.name).toBe('Underlay');
+    expect(project.layerOrder.filter((id) => project.layers[id].name === 'Underlay')).toHaveLength(1);
   });
 });

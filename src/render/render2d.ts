@@ -1612,6 +1612,7 @@ type AnyEntity = {
   // revision-cloud
   revisionTag?: string;
   // underlay
+  origin?: Vec2;
   imageDataUrl?: string;
   vectors?: { a: Vec2; b: Vec2 }[];
   opacity?: number;
@@ -2365,19 +2366,22 @@ const getUnderlayImage = (dataUrl: string): HTMLImageElement | null => {
 
 const drawUnderlay = (ctx: CanvasRenderingContext2D, e: AnyEntity) => {
   const opacity = e.opacity ?? 0.5;
+  // The image and the vectors are stored relative to the underlay's origin,
+  // the same corner its bounds, culling and hit-testing are measured from.
+  const origin = e.origin ?? e.position ?? { x: 0, y: 0 };
   ctx.save();
   ctx.globalAlpha = opacity;
+  ctx.translate(origin.x, origin.y);
 
   if (e.imageDataUrl) {
     const img = getUnderlayImage(e.imageDataUrl);
     if (img) {
       const w = e.width ?? img.naturalWidth;
       const h = e.height ?? img.naturalHeight;
-      const pos = e.position ?? { x: 0, y: 0 };
       // y is flipped — drawImage expects screen-orientation coords. Mirror Y so
       // the image reads upright in the world view.
       ctx.save();
-      ctx.translate(pos.x, pos.y + h);
+      ctx.translate(0, h);
       ctx.scale(1, -1);
       try {
         ctx.drawImage(img, 0, 0, w, h);

@@ -73,8 +73,7 @@ export function MenuBar({
   const viewMode = useStore((s) => s.editor.viewMode);
   const setViewMode = useStore((s) => s.setViewMode);
   const setStatus = useStore((s) => s.setStatus);
-  const addEntity = useStore((s) => s.addEntity);
-  const addEntities = useStore((s) => s.addEntities);
+  const addEntitiesByLayerName = useStore((s) => s.addEntitiesByLayerName);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Hidden import inputs — one per importer so we can configure `accept`
@@ -406,7 +405,7 @@ export function MenuBar({
       notify('info', 'Importing DXF…', { id: 'import-dxf', timeoutMs: null });
       const text = await file.text();
       const underlay = parseDXF(text);
-      addEntity(underlay);
+      addEntitiesByLayerName([underlay]);
       setStatus(`Imported DXF underlay (${file.name})`);
       notify('success', `Imported DXF underlay (${file.name})`, { id: 'import-dxf' });
     } catch (err) {
@@ -428,7 +427,7 @@ export function MenuBar({
       const text = await file.text();
       const result = importIFC(text);
       if (result.entities.length > 0) {
-        addEntities(result.entities);
+        addEntitiesByLayerName(result.entities);
       }
       const warned = result.warnings.length;
       setStatus(

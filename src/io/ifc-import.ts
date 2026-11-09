@@ -325,7 +325,8 @@ export const importIFC = (text: string): ImportResult => {
     result.warnings.push('IFC: no entity records detected.');
     return result;
   }
-  const layerId = 'underlay';
+  // A layer name, not an id: add the result with addEntitiesByLayerName.
+  const layerId = 'Underlay';
   for (const r of records.values()) {
     try {
       if (r.type === 'IFCWALL' || r.type === 'IFCWALLSTANDARDCASE') {
