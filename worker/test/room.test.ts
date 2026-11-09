@@ -2,7 +2,7 @@ import { env, exports } from 'cloudflare:workers';
 import { evictDurableObject, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
-import { bytesToBase64 } from '../../src/collab/protocol';
+import { base64ToBytes, bytesToBase64, COLLAB_LIMITS } from '../../src/collab/protocol';
 import { type AuthenticatedPrincipal } from '../src/auth';
 import { encodeInternalPrincipal, INTERNAL_PRINCIPAL_HEADER } from '../src/internal-principal';
 import { CollaborationRoom } from '../src/room';
@@ -65,6 +65,43 @@ const largeYUpdate = (index: number): string => {
   const doc = new Y.Doc();
   doc.getMap('large-fixture').set(`chunk-${index}`, `${index}:${'x'.repeat(1_050_000)}`);
   return bytesToBase64(Y.encodeStateAsUpdate(doc));
+};
+
+const namedYUpdate = (key: string, value: string): Uint8Array => {
+  const doc = new Y.Doc();
+  doc.getMap('fixture').set(key, value);
+  return Y.encodeStateAsUpdate(doc);
+};
+
+// Valid base64 that the protocol parser accepts, but not something Yjs can decode.
+const undecodableBytes = new TextEncoder().encode('valid base64, but not a Yjs update');
+
+const insertStoredUpdate = (state: DurableObjectState, idempotencyKey: string, update: Uint8Array): void => {
+  const blob = new ArrayBuffer(update.byteLength);
+  new Uint8Array(blob).set(update);
+  state.storage.sql.exec(
+    `INSERT INTO room_updates (idempotency_key, actor_id, update_blob, byte_length, created_at)
+     VALUES (?, 'editor-subject', ?, ?, ?)`,
+    idempotencyKey,
+    blob,
+    update.byteLength,
+    Date.now(),
+  );
+};
+
+const storedUpdateKeys = (stub: DurableObjectStub<CollaborationRoom>): Promise<string[]> =>
+  runInDurableObject(stub, async (_instance: CollaborationRoom, state) =>
+    state.storage.sql
+      .exec<{ idempotency_key: string }>('SELECT idempotency_key FROM room_updates ORDER BY sequence')
+      .toArray()
+      .map((row) => row.idempotency_key));
+
+const welcomeFixture = async (webSocket: WebSocket): Promise<Record<string, unknown>> => {
+  const welcome = await nextMessage(webSocket) as { type: string; update: string };
+  expect(welcome.type).toBe('welcome');
+  const doc = new Y.Doc();
+  Y.applyUpdate(doc, base64ToBytes(welcome.update, COLLAB_LIMITS.roomSnapshotBytes));
+  return doc.getMap('fixture').toJSON();
 };
 
 describe('collaboration Worker boundary', () => {
@@ -155,6 +192,111 @@ describe('collaboration Worker boundary', () => {
     expect(storage.chunks).toBeGreaterThan(1);
     expect(storage.pending).toBe(0);
     expect(storage.largest).toBeLessThanOrEqual(1024 * 1024);
+    webSocket.close(1000, 'done');
+  });
+
+  it('rejects an update Yjs cannot decode, so it cannot lock the room', async () => {
+    const { stub, webSocket } = await openRoom('editor', 'undecodable');
+    expect(await nextMessage(webSocket)).toMatchObject({ type: 'welcome' });
+    const peer = await openRoom('viewer', 'undecodable');
+    expect(await nextMessage(peer.webSocket)).toMatchObject({ type: 'welcome' });
+
+    const rejected = nextMessage(webSocket);
+    webSocket.send(JSON.stringify({
+      type: 'update',
+      idempotencyKey: 'undecodable-0001',
+      update: bytesToBase64(undecodableBytes),
+    }));
+    expect(await rejected).toMatchObject({ type: 'error', code: 'bad-message' });
+
+    // The room keeps working, and the peer is only ever sent the valid updates.
+    const updates = [namedYUpdate('first', 'a'), namedYUpdate('second', 'b')].map(bytesToBase64);
+    for (const [index, update] of updates.entries()) {
+      const ack = nextMessage(webSocket);
+      const relayed = nextMessage(peer.webSocket);
+      webSocket.send(JSON.stringify({ type: 'update', idempotencyKey: `decodable-000${index + 1}`, update }));
+      expect(await ack).toMatchObject({ type: 'ack', duplicate: false, sequence: index + 1 });
+      expect(await relayed).toMatchObject({ type: 'update', sequence: index + 1, update });
+    }
+    expect(await storedUpdateKeys(stub)).toEqual(['decodable-0001', 'decodable-0002']);
+
+    // A join merges every stored update. With the undecodable one among them the merge threw, and
+    // the room refused every join from then on.
+    const late = await openRoom('viewer', 'undecodable');
+    expect(await welcomeFixture(late.webSocket)).toEqual({ first: 'a', second: 'b' });
+    for (const socket of [webSocket, peer.webSocket, late.webSocket]) socket.close(1000, 'done');
+  });
+
+  it('recovers a room that stored undecodable updates before they were validated', async () => {
+    const { stub, webSocket } = await openRoom('editor', 'poisoned');
+    expect(await nextMessage(webSocket)).toMatchObject({ type: 'welcome' });
+    const ack = nextMessage(webSocket);
+    webSocket.send(JSON.stringify({
+      type: 'update',
+      idempotencyKey: 'before-poison-0001',
+      update: bytesToBase64(namedYUpdate('before', 'kept')),
+    }));
+    expect(await ack).toMatchObject({ type: 'ack', sequence: 1 });
+
+    // The state an editor could leave behind before updates were validated: an undecodable row,
+    // then valid rows from sessions that were still connected.
+    await runInDurableObject(stub, async (_instance: CollaborationRoom, state) => {
+      insertStoredUpdate(state, 'poison-0001', undecodableBytes);
+      insertStoredUpdate(state, 'after-poison-0001', namedYUpdate('after', 'kept too'));
+      insertStoredUpdate(state, 'poison-0002', new Uint8Array(0));
+      state.storage.sql.exec('DROP TABLE room_updates_rejected');
+      state.storage.sql.exec('DELETE FROM _sql_schema_migrations WHERE id >= 2');
+    });
+    await evictDurableObject(stub); // the next request starts the object again, as a deploy does
+
+    const late = await openRoom('viewer', 'poisoned');
+    expect(await welcomeFixture(late.webSocket)).toEqual({ before: 'kept', after: 'kept too' });
+    expect(await storedUpdateKeys(stub)).toEqual(['before-poison-0001', 'after-poison-0001']);
+    // The undecodable rows are kept out of the room, with who sent them.
+    const rejected = await runInDurableObject(stub, async (_instance: CollaborationRoom, state) =>
+      state.storage.sql
+        .exec<{ idempotency_key: string; actor_id: string; byte_length: number }>(
+          'SELECT idempotency_key, actor_id, byte_length FROM room_updates_rejected ORDER BY sequence',
+        )
+        .toArray());
+    expect(rejected).toEqual([
+      { idempotency_key: 'poison-0001', actor_id: 'editor-subject', byte_length: undecodableBytes.byteLength },
+      { idempotency_key: 'poison-0002', actor_id: 'editor-subject', byte_length: 0 },
+    ]);
+    for (const socket of [webSocket, late.webSocket]) socket.close(1000, 'done');
+  });
+
+  it('does not keep an update when its compaction fails', async () => {
+    const { stub, webSocket } = await openRoom('owner', 'failed-compaction');
+    expect(await nextMessage(webSocket)).toMatchObject({ type: 'welcome' });
+    for (let index = 0; index < 3; index += 1) {
+      const ack = nextMessage(webSocket);
+      webSocket.send(JSON.stringify({
+        type: 'update',
+        idempotencyKey: `large-update-${String(index).padStart(4, '0')}`,
+        update: largeYUpdate(index),
+      }));
+      expect(await ack).toMatchObject({ type: 'ack', duplicate: false });
+    }
+    // Make the next compaction fail: this row cannot be merged.
+    await runInDurableObject(stub, async (_instance: CollaborationRoom, state) =>
+      insertStoredUpdate(state, 'unmergeable-0001', undecodableBytes));
+    const before = await storedUpdateKeys(stub);
+
+    // The fourth large update crosses the pending-bytes limit and starts a compaction. A client
+    // that is told the update failed must be able to retry it: it must not be stored already,
+    // or the retry is acknowledged as a duplicate that no peer was ever sent.
+    const update = {
+      type: 'update',
+      idempotencyKey: 'large-update-0003',
+      update: largeYUpdate(3),
+    };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const failed = nextMessage(webSocket);
+      webSocket.send(JSON.stringify(update));
+      expect(await failed).toMatchObject({ type: 'error', code: 'server-error' });
+      expect(await storedUpdateKeys(stub)).toEqual(before);
+    }
     webSocket.close(1000, 'done');
   });
 });

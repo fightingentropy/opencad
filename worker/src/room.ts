@@ -59,6 +59,18 @@ const copiedArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
   return buffer;
 };
 
+// Every join and every compaction merges all stored updates with Y.mergeUpdates, which throws on
+// bytes it cannot decode. One such row would make the room refuse every join, so an update must
+// decode before it is stored. Y.decodeUpdate reads an update with the same reader the merge uses.
+const isDecodableUpdate = (update: Uint8Array): boolean => {
+  try {
+    Y.decodeUpdate(update);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export class CollaborationRoom extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -110,6 +122,51 @@ export class CollaborationRoom extends DurableObject<Env> {
         CREATE INDEX room_updates_sequence_idx ON room_updates(sequence);
         INSERT INTO _sql_schema_migrations (id, applied_at) VALUES (1, unixepoch() * 1000);
       `);
+    }
+    if (version < 2) {
+      // Updates were stored without being decoded until this version, and a single row Yjs cannot
+      // decode made every join fail. Such rows hold no document state, so they are moved out of
+      // the room once, here, and kept in room_updates_rejected to show who sent them and when.
+      // The snapshot needs no check: it is only ever written from a merge that succeeded.
+      this.ctx.storage.sql.exec(`
+        CREATE TABLE room_updates_rejected (
+          sequence INTEGER PRIMARY KEY,
+          idempotency_key TEXT NOT NULL,
+          actor_id TEXT NOT NULL,
+          update_blob BLOB NOT NULL,
+          byte_length INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          rejected_at INTEGER NOT NULL
+        );
+      `);
+      const rejected: number[] = [];
+      const rows = this.ctx.storage.sql.exec<{ sequence: number; update_blob: ArrayBuffer }>(
+        'SELECT sequence, update_blob FROM room_updates ORDER BY sequence',
+      );
+      for (const row of rows) {
+        if (!isDecodableUpdate(new Uint8Array(row.update_blob))) rejected.push(row.sequence);
+      }
+      for (const sequence of rejected) {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO room_updates_rejected
+             (sequence, idempotency_key, actor_id, update_blob, byte_length, created_at, rejected_at)
+           SELECT sequence, idempotency_key, actor_id, update_blob, byte_length, created_at, ?
+           FROM room_updates WHERE sequence = ?`,
+          Date.now(),
+          sequence,
+        );
+        this.ctx.storage.sql.exec('DELETE FROM room_updates WHERE sequence = ?', sequence);
+      }
+      this.ctx.storage.sql.exec(
+        'INSERT INTO _sql_schema_migrations (id, applied_at) VALUES (2, unixepoch() * 1000)',
+      );
+      if (rejected.length > 0) {
+        console.warn(JSON.stringify({
+          message: 'moved stored collaboration updates that Yjs cannot decode to room_updates_rejected',
+          count: rejected.length,
+          sequences: rejected.slice(0, 20),
+        }));
+      }
     }
   }
 
@@ -341,6 +398,9 @@ export class CollaborationRoom extends DurableObject<Env> {
     if (duplicate) return { sequence: duplicate.sequence, duplicate: true };
 
     const updateBytes = base64ToBytes(updateBase64);
+    if (!isDecodableUpdate(updateBytes)) {
+      throw new CollaborationProtocolError('Update is not a valid Yjs update');
+    }
     const snapshotBytes = this.ctx.storage.sql
       .exec<{ bytes: number }>('SELECT COALESCE(byte_length, 0) AS bytes FROM room_snapshot_meta WHERE singleton = 1')
       .toArray()[0]?.bytes ?? 0;
@@ -349,27 +409,32 @@ export class CollaborationRoom extends DurableObject<Env> {
       throw new CollaborationProtocolError('Room has reached its collaboration storage limit', 'too-large');
     }
 
-    const inserted = this.ctx.storage.sql.exec<{ sequence: number }>(
-      `INSERT INTO room_updates (idempotency_key, actor_id, update_blob, byte_length, created_at)
-       VALUES (?, ?, ?, ?, ?) RETURNING sequence`,
-      idempotencyKey,
-      actorId,
-      copiedArrayBuffer(updateBytes),
-      updateBytes.byteLength,
-      Date.now(),
-    ).one();
-    this.ctx.storage.sql.exec(
-      'INSERT INTO processed_updates (idempotency_key, sequence, created_at) VALUES (?, ?, ?)',
-      idempotencyKey,
-      inserted.sequence,
-      Date.now(),
-    );
-    const afterInsert = { count: pending.count + 1, bytes: pending.bytes + updateBytes.byteLength };
-    if (
-      afterInsert.count >= COLLAB_LIMITS.roomUpdatesBeforeCompaction
-      || afterInsert.bytes >= COLLAB_LIMITS.roomPendingBytesBeforeCompaction
-    ) this.compact(inserted.sequence);
-    return { sequence: inserted.sequence, duplicate: false };
+    // One transaction, so a failed compaction leaves neither half a snapshot nor the update. The
+    // sender is told it failed and no peer is sent it, so it must not be stored either: a retry
+    // would be acknowledged as a duplicate of an update the peers never received.
+    return this.ctx.storage.transactionSync(() => {
+      const inserted = this.ctx.storage.sql.exec<{ sequence: number }>(
+        `INSERT INTO room_updates (idempotency_key, actor_id, update_blob, byte_length, created_at)
+         VALUES (?, ?, ?, ?, ?) RETURNING sequence`,
+        idempotencyKey,
+        actorId,
+        copiedArrayBuffer(updateBytes),
+        updateBytes.byteLength,
+        Date.now(),
+      ).one();
+      this.ctx.storage.sql.exec(
+        'INSERT INTO processed_updates (idempotency_key, sequence, created_at) VALUES (?, ?, ?)',
+        idempotencyKey,
+        inserted.sequence,
+        Date.now(),
+      );
+      const afterInsert = { count: pending.count + 1, bytes: pending.bytes + updateBytes.byteLength };
+      if (
+        afterInsert.count >= COLLAB_LIMITS.roomUpdatesBeforeCompaction
+        || afterInsert.bytes >= COLLAB_LIMITS.roomPendingBytesBeforeCompaction
+      ) this.compact(inserted.sequence);
+      return { sequence: inserted.sequence, duplicate: false };
+    });
   }
 
   private pendingUpdateStats(): UpdateCountRow {
