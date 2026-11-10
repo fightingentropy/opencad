@@ -252,7 +252,7 @@ function ContainmentTable({
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colSpan={13} style={{ textAlign: 'center', padding: 20, color: 'var(--text-mute)' }}>
+              <td colSpan={14} style={{ textAlign: 'center', padding: 20, color: 'var(--text-mute)' }}>
                 No containment runs yet.
               </td>
             </tr>
@@ -361,6 +361,7 @@ function ContainmentScheduleTable({
             <th>Elevation (mm)</th>
             <th>System</th>
             <th>Fill (%)</th>
+            <th>Fill status</th>
             <th>Cables</th>
             <th>Mfr</th>
             <th>Part No</th>
@@ -370,7 +371,7 @@ function ContainmentScheduleTable({
         <tbody>
           {rows.length === 0 && (
             <tr>
-              <td colSpan={13} style={{ textAlign: 'center', padding: 20, color: 'var(--text-mute)' }}>
+              <td colSpan={14} style={{ textAlign: 'center', padding: 20, color: 'var(--text-mute)' }}>
                 No containment runs to schedule.
               </td>
             </tr>
@@ -386,6 +387,7 @@ function ContainmentScheduleTable({
               <td style={{ textAlign: 'right' }}>{r.elevation}</td>
               <td>{r.system}</td>
               <td style={{ textAlign: 'right' }}>{r.fillPct.toFixed(1)}</td>
+              <td>{r.fillStatus}</td>
               <td style={{ textAlign: 'right' }}>{r.cableCount}</td>
               <td>{r.manufacturer}</td>
               <td style={{ fontFamily: 'var(--font-mono)' }}>{r.partNumber}</td>

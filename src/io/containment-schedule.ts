@@ -6,7 +6,8 @@
 import type { Project, ContainmentEntity } from '../types';
 import type { Cable } from '../models/cable';
 import { routeLength } from '../lib/route-path';
-import { FILL_LIMITS } from '../models/standards';
+import { DEFAULT_STANDARDS } from '../models/standards';
+import { computeContainmentFill, type FillStatus } from '../calc/fill';
 import { prependCSVExportMetadata } from './export-metadata';
 
 export interface ContainmentScheduleRow {
@@ -19,6 +20,7 @@ export interface ContainmentScheduleRow {
   elevation: number; // mm
   system: string;
   fillPct: number;
+  fillStatus: FillStatus;
   cableCount: number;
   manufacturer: string;
   partNumber: string;
@@ -40,18 +42,6 @@ const sizeLabel = (c: ContainmentEntity): string => {
   return '';
 };
 
-const innerCsa = (c: ContainmentEntity): number => {
-  if (c.innerCsaMm2 && c.innerCsaMm2 > 0) return c.innerCsaMm2;
-  if (c.containmentType === 'conduit' && c.width) {
-    // Round conduit area, take 80% to allow for wall thickness if not given
-    return Math.PI * (c.width / 2) ** 2 * 0.8;
-  }
-  if (c.width && c.height) {
-    return c.width * c.height * 0.85;
-  }
-  return 0;
-};
-
 const cablesInContainment = (
   project: Project,
   containmentId: string,
@@ -66,25 +56,6 @@ const cablesInContainment = (
   return out;
 };
 
-const fillLimitFor = (project: Project, c: ContainmentEntity): number => {
-  const code = project.standardsProfile?.code ?? 'BS7671';
-  const limits = FILL_LIMITS[code];
-  switch (c.containmentType) {
-    case 'trunking':
-      return limits.trunking;
-    case 'conduit':
-      return limits.conduit;
-    case 'tray':
-      return limits.cableTray;
-    case 'ladder':
-      return limits.cableLadder;
-    case 'basket':
-      return limits.cableBasket;
-    default:
-      return 1.0;
-  }
-};
-
 const systemName = (project: Project, systemId?: string): string => {
   if (!systemId) return '';
   return project.systems?.[systemId]?.name ?? systemId;
@@ -94,6 +65,7 @@ export const exportContainmentSchedule = (
   project: Project,
 ): ContainmentScheduleRow[] => {
   const rows: ContainmentScheduleRow[] = [];
+  const standards = project.standardsProfile ?? DEFAULT_STANDARDS.BS7671;
   let auto = 1;
   for (const sheetId of project.sheetOrder) {
     const sheet = project.sheets[sheetId];
@@ -103,14 +75,9 @@ export const exportContainmentSchedule = (
       if (!e || e.kind !== 'containment') continue;
       const c = e as ContainmentEntity;
       const cables = cablesInContainment(project, c.id);
-      const occupied = cables.reduce(
-        (sum, cab) => sum + Math.PI * (cab.outerDiameter / 2) ** 2,
-        0,
-      );
-      const csa = innerCsa(c);
-      const fillRaw = csa > 0 ? occupied / csa : 0;
-      const limit = fillLimitFor(project, c);
-      const fillPct = +(fillRaw * 100).toFixed(1);
+      // Same model as the dashboard and 3D overlay, so the figures agree.
+      const fill = computeContainmentFill(c, cables, standards);
+      const fillPct = +fill.fillPct.toFixed(1);
       rows.push({
         ref: c.label ?? `CT-${String(auto++).padStart(3, '0')}`,
         type: c.containmentType,
@@ -121,15 +88,12 @@ export const exportContainmentSchedule = (
         elevation: c.elevation ?? 0,
         system: systemName(project, c.systemId),
         fillPct,
+        fillStatus: fill.fillStatus,
         cableCount: cables.length,
         manufacturer: c.manufacturer ?? '',
         partNumber: c.catalogPartNumber ?? '',
         sheet: sheet.number,
       });
-      // Note: fill limit only used to derive a status flag for reports
-      // that consume this schedule; we keep the raw fillPct here so
-      // downstream code can compare against any standard.
-      void limit;
     }
   }
   return rows.sort((a, b) => a.ref.localeCompare(b.ref));
@@ -149,6 +113,7 @@ export const containmentScheduleToCSV = (
     'Elevation (mm)',
     'System',
     'Fill (%)',
+    'Fill status',
     'Cables',
     'Manufacturer',
     'PartNumber',
@@ -165,6 +130,7 @@ export const containmentScheduleToCSV = (
       r.elevation,
       r.system,
       r.fillPct.toFixed(1),
+      r.fillStatus,
       r.cableCount,
       r.manufacturer,
       r.partNumber,
