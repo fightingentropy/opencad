@@ -1583,7 +1583,7 @@ type AnyEntity = {
   // equipment
   equipmentKind?: string;
   tag?: string;
-  connections?: Vec2[];
+  connections?: { name: string; position: Vec2 }[];
   // riser
   fromElevation?: number;
   toElevation?: number;
@@ -1598,7 +1598,7 @@ type AnyEntity = {
   text?: string;
   arrowStyle?: string;
   // section-marker
-  viewDirection?: number;
+  viewDirection?: 'left' | 'right' | number;
   label?: string;
   // level-marker
   elevation?: number;
@@ -1609,6 +1609,10 @@ type AnyEntity = {
   segments?: number;
   scale?: number | string;
   // grid-line
+  orientation?: 'horizontal' | 'vertical';
+  offset?: number;
+  start?: number;
+  end?: number;
   // revision-cloud
   revisionTag?: string;
   // underlay
@@ -1631,6 +1635,7 @@ const newKindBounds = (e: AnyEntity): { minX: number; minY: number; maxX: number
   if (e.a) expand(b, e.a);
   if (e.b) expand(b, e.b);
   if (e.points) for (const p of e.points) expand(b, p);
+  if (e.kind === 'grid-line') for (const p of gridLineEnds(e) ?? []) expand(b, p);
   if (!isFinite(b.minX)) return null;
   // Pad single-point entities so the selection box reads
   if (e.size || e.width || e.height) {
@@ -1901,7 +1906,7 @@ const drawEquipment = (
   // Connection dots in world space
   if (e.connections && e.connections.length > 0) {
     ctx.fillStyle = PIN_COLOR;
-    for (const p of e.connections) {
+    for (const { position: p } of e.connections) {
       ctx.beginPath();
       ctx.arc(p.x, p.y, Math.max(0.6, lineWidth * 1.2), 0, Math.PI * 2);
       ctx.fill();
@@ -2086,7 +2091,9 @@ const drawSectionMarker = (
   ctx.stroke();
 
   // Arrows at each end pointing in viewDirection
-  const dir = e.viewDirection ?? Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
+  const cutAngle = Math.atan2(b.y - a.y, b.x - a.x);
+  const dir = typeof e.viewDirection === 'number' ? e.viewDirection
+    : cutAngle + (e.viewDirection === 'right' ? -Math.PI / 2 : Math.PI / 2);
   const arrLen = 4;
   for (const p of [a, b]) {
     const tipX = p.x + Math.cos(dir) * arrLen;
@@ -2247,6 +2254,18 @@ const drawScaleBar = (
 
 // ----- grid-line -------------------------------------------------------
 
+/** End points of a grid line: vertical lines sit at x = offset, horizontal ones at y = offset. */
+const gridLineEnds = (e: AnyEntity): [Vec2, Vec2] | null => {
+  const { offset, start, end } = e;
+  if (typeof offset === 'number' && typeof start === 'number' && typeof end === 'number') {
+    return e.orientation === 'horizontal'
+      ? [{ x: start, y: offset }, { x: end, y: offset }]
+      : [{ x: offset, y: start }, { x: offset, y: end }];
+  }
+  const a = e.a ?? e.position;
+  return a && e.b ? [a, e.b] : null;
+};
+
 const drawGridLine = (
   ctx: CanvasRenderingContext2D,
   e: AnyEntity,
@@ -2254,9 +2273,9 @@ const drawGridLine = (
   lineWidth: number,
   state: DrawState
 ) => {
-  const a = e.a ?? e.position;
-  const b = e.b;
-  if (!a || !b) return;
+  const ends = gridLineEnds(e);
+  if (!ends) return;
+  const [a, b] = ends;
   const stroke = strokeColorFor(state, color || '#5d6473');
 
   ctx.save();

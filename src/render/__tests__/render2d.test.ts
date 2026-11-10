@@ -171,3 +171,56 @@ describe('imported underlays', () => {
     expect(project.layerOrder.filter((id) => project.layers[id].name === 'Underlay')).toHaveLength(1);
   });
 });
+
+describe('new-kind drawers use the real entity fields', () => {
+  const calls = () => {
+    const log: { op: string; args: number[] }[] = [];
+    const rec = (op: string) => (...args: number[]) => { log.push({ op, args }); };
+    const values: Record<string, unknown> = {
+      globalAlpha: 1, font: '10px sans-serif', strokeStyle: '',
+      measureText: (text: string) => ({ width: text.length * 6 }),
+      moveTo: rec('moveTo'), lineTo: rec('lineTo'), arc: rec('arc'),
+    };
+    const ctx = new Proxy(values, {
+      get: (target, property: string) => target[property] ?? (() => undefined),
+      set: (target, property: string, value: unknown) => { target[property] = value; return true; },
+    }) as unknown as CanvasRenderingContext2D;
+    return { ctx, log };
+  };
+  const drawOne = (entity: object) => {
+    const project = createEmptyProject();
+    const sheet = project.sheets[project.activeSheetId];
+    const layerId = project.activeLayerId;
+    const e = { id: 'x', layerId, visible: true, locked: false, ...entity } as unknown as Entity;
+    sheet.entities = { x: e }; sheet.entityOrder = ['x'];
+    const rec = calls();
+    render2d(rec.ctx, project, editor('off'), { width: 900, height: 700, dpr: 1, symbolLookup: getSymbol });
+    return rec.log;
+  };
+  const finite = (log: { args: number[] }[]) => log.every(c => c.args.every(Number.isFinite));
+
+  it('draws a vertical grid line at its offset between start and end', () => {
+    const log = drawOne({ kind: 'grid-line', orientation: 'vertical', offset: 1000, start: -500, end: 4000, label: 'A' });
+    expect(log).toContainEqual({ op: 'moveTo', args: [1000, -500] });
+    expect(log).toContainEqual({ op: 'lineTo', args: [1000, 4000] });
+  });
+  it('draws a horizontal grid line along y = offset', () => {
+    const log = drawOne({ kind: 'grid-line', orientation: 'horizontal', offset: 2000, start: 0, end: 6000, label: '1' });
+    expect(log).toContainEqual({ op: 'moveTo', args: [0, 2000] });
+    expect(log).toContainEqual({ op: 'lineTo', args: [6000, 2000] });
+  });
+  it('draws equipment connection dots at their positions', () => {
+    const log = drawOne({ kind: 'equipment', equipmentKind: 'distribution-board', tag: 'DB', a: { x: 0, y: 0 }, b: { x: 600, y: 400 },
+      connections: [{ name: 'In', position: { x: 123, y: 456 } }] });
+    expect(log).toContainEqual(expect.objectContaining({ op: 'arc', args: expect.arrayContaining([123, 456]) }));
+    expect(finite(log)).toBe(true);
+  });
+  it('draws section marker arrows for a left or right view direction', () => {
+    for (const viewDirection of ['left', 'right']) {
+      const log = drawOne({ kind: 'section-marker', a: { x: 0, y: 0 }, b: { x: 100, y: 0 }, label: 'A-A', viewDirection });
+      expect(finite(log)).toBe(true);
+      const tip = log.filter(c => c.op === 'lineTo').map(c => c.args[1]);
+      expect(tip).toContain(viewDirection === 'left' ? 4 : -4);
+    }
+  });
+});
