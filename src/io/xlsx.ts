@@ -53,28 +53,53 @@ export const cablesToCSV = (cables: Cable[], project: Project): string => {
   );
 };
 
-const parseCSVLine = (line: string): string[] => {
-  const out: string[] = [];
+// Quote-aware CSV tokenizer: scans the whole text so quoted cells may
+// contain newlines. A row whose first character is '#' (outside quotes)
+// is an export-metadata comment and is skipped; blank rows are skipped.
+const parseCSV = (text: string): string[][] => {
+  const rows: string[][] = [];
+  let row: string[] = [];
   let cur = '';
   let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
+  let rowStart = true;
+  const endRow = () => {
+    row.push(cur);
+    cur = '';
+    if (row.length > 1 || row[0].trim().length > 0) rows.push(row);
+    row = [];
+    rowStart = true;
+  };
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
     if (inQuotes) {
-      if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+      if (ch === '"' && text[i + 1] === '"') { cur += '"'; i++; }
       else if (ch === '"') inQuotes = false;
       else cur += ch;
-    } else {
-      if (ch === '"') inQuotes = true;
-      else if (ch === ',') {
-        out.push(cur);
-        if (out.length > 128) throw new ImportLimitError('Cable CSV', 'more than 128 columns');
-        cur = '';
-      }
-      else cur += ch;
+      continue;
     }
+    if (rowStart && ch === '#') {
+      while (i < text.length && text[i] !== '\n') i++;
+      continue;
+    }
+    if (ch === '\r' && text[i + 1] === '\n') continue;
+    if (ch === '\n' || ch === '\r') { endRow(); continue; }
+    if (rowStart && (ch === ' ' || ch === '\t')) {
+      // Leading whitespace before a possible '#' comment marker.
+      let j = i;
+      while (text[j] === ' ' || text[j] === '\t') j++;
+      if (text[j] === '#') { i = j - 1; continue; }
+    }
+    rowStart = false;
+    if (ch === '"') inQuotes = true;
+    else if (ch === ',') {
+      row.push(cur);
+      if (row.length > 128) throw new ImportLimitError('Cable CSV', 'more than 128 columns');
+      cur = '';
+    }
+    else cur += ch;
   }
-  out.push(cur);
-  return out;
+  if (cur.length > 0 || row.length > 0) endRow();
+  return rows;
 };
 
 export interface CableImportResult {
@@ -86,17 +111,22 @@ const newId = (): CableId => `c-${Math.random().toString(36).slice(2, 10)}`;
 
 export const cablesFromCSV = (text: string): CableImportResult => {
   assertImportTextLimits(text, 'Cable CSV', IMPORT_LIMITS.cableCsv);
-  const lines = text
-    .split(/\r?\n/)
-    .filter((line) => line.trim().length > 0 && !line.trimStart().startsWith('#'));
-  if (lines.length === 0) return { cables: [], errors: [] };
-  const header = parseCSVLine(lines[0]).map((h) => h.trim());
+  const rows = parseCSV(text);
+  if (rows.length === 0) return { cables: [], errors: [] };
+  const header = rows[0].map((h) => h.trim());
   const idx = (name: string) => header.indexOf(name);
   const errors: string[] = [];
   const cables: Cable[] = [];
-  for (let li = 1; li < lines.length; li++) {
-    const cells = parseCSVLine(lines[li]);
+  for (let li = 1; li < rows.length; li++) {
+    const cells = rows[li];
     try {
+      const num = (name: string, fallback?: number): number | undefined => {
+        const raw = (cells[idx(name)] ?? '').trim();
+        if (raw === '') return fallback;
+        const n = Number(raw);
+        if (!Number.isFinite(n)) throw new Error(`${name} "${raw}" is not a number`);
+        return n;
+      };
       const c: Cable = {
         id: newId(),
         reference: cells[idx('reference')] ?? `C-${li}`,
@@ -106,28 +136,28 @@ export const cablesFromCSV = (text: string): CableImportResult => {
         systemId: cells[idx('systemId')] || undefined,
         circuitType: (cells[idx('circuitType')] || 'power') as Cable['circuitType'],
         construction: (cells[idx('construction')] || 'XLPE/SWA/LSOH') as Cable['construction'],
-        cores: Number(cells[idx('cores')] || 3),
-        csa: Number(cells[idx('csa')] || 2.5),
+        cores: num('cores', 3) as number,
+        csa: num('csa', 2.5) as number,
         hasEarth: (cells[idx('hasEarth')] || 'Y').toUpperCase() === 'Y',
-        earthCsa: cells[idx('earthCsa')] ? Number(cells[idx('earthCsa')]) : undefined,
-        outerDiameter: Number(cells[idx('outerDiameter')] || 10),
-        massPerMetre: cells[idx('massPerMetre')] ? Number(cells[idx('massPerMetre')]) : undefined,
-        voltage: Number(cells[idx('voltage')] || 230),
+        earthCsa: num('earthCsa'),
+        outerDiameter: num('outerDiameter', 10) as number,
+        massPerMetre: num('massPerMetre'),
+        voltage: num('voltage', 230) as number,
         manufacturer: cells[idx('manufacturer')] || undefined,
         partNumber: cells[idx('partNumber')] || undefined,
         route: [],
-        estimatedLength: cells[idx('estimatedLength')] ? Number(cells[idx('estimatedLength')]) : undefined,
-        actualLength: cells[idx('actualLength')] ? Number(cells[idx('actualLength')]) : undefined,
-        lengthAllowance: cells[idx('lengthAllowance')] ? Number(cells[idx('lengthAllowance')]) : undefined,
-        designCurrent: cells[idx('designCurrent')] ? Number(cells[idx('designCurrent')]) : undefined,
+        estimatedLength: num('estimatedLength'),
+        actualLength: num('actualLength'),
+        lengthAllowance: num('lengthAllowance'),
+        designCurrent: num('designCurrent'),
         protectiveDevice: cells[idx('protectiveDevice')] || undefined,
-        protectiveDeviceRating: cells[idx('protectiveDeviceRating')] ? Number(cells[idx('protectiveDeviceRating')]) : undefined,
+        protectiveDeviceRating: num('protectiveDeviceRating'),
         status: (cells[idx('status')] as Cable['status']) || undefined,
         notes: cells[idx('notes')] || undefined,
       };
       cables.push(c);
     } catch (err) {
-      errors.push(`Line ${li + 1}: ${(err as Error).message}`);
+      errors.push(`Row ${li + 1}: ${(err as Error).message}`);
     }
   }
   return { cables, errors };
