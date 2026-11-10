@@ -47,6 +47,7 @@ import { SceneSelectionOverlay } from './SceneSelectionOverlay';
 import { SceneClearanceOverlay } from './SceneClearanceOverlay';
 import { PlacementControls } from '../ui/PlacementControls';
 import { RunDrawingDialog } from '../ui/RunDrawingDialog';
+import { trailingDebounce } from './trailing-debounce';
 import './site-workspace.css';
 
 interface Props {
@@ -421,6 +422,8 @@ const disposeSelectionHelper = (helper: THREE.BoxHelper): void => {
   }
 };
 
+const SCENE_REBUILD_DEBOUNCE_MS = 150;
+
 export function SiteSceneViewer({ project, width, height, containmentOnly = false }: Props) {
   const selection = useStore((s) => s.editor.selection);
   const placement = useComponentPlacement((state) => state.pending);
@@ -504,18 +507,35 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
 
   // Signature triggering a scene rebuild. We don't deep-compare the whole
   // project; instead we hash the parts that actually drive geometry.
+  // The project changes on every pointer move while an entity is dragged in 2D.
+  // Serialising it and rebuilding the whole scene each time is far too heavy, so
+  // the signature follows a copy that settles once edits pause. Other changes
+  // (toolbar state, reset, containment mode) still rebuild immediately.
+  const [settledProject, setSettledProject] = useState(project);
+  useEffect(() => {
+    if (settledProject === project) return undefined;
+    if (settledProject.id !== project.id) {
+      // A different project is a load, not an edit: show it straight away.
+      setSettledProject(project);
+      return undefined;
+    }
+    const pending = trailingDebounce<Project>(setSettledProject, SCENE_REBUILD_DEBOUNCE_MS);
+    pending.schedule(project);
+    return () => pending.cancel();
+  }, [project, settledProject]);
+
   const projectSig = useMemo(() => JSON.stringify({
-    id: project.id, sites: project.sites, buildings: project.buildings,
-    floors: project.floors, systems: project.systems, cableSchedule: project.cableSchedule, penetrationSeals: project.penetrationSeals,
-    sheets: project.sheetOrder.map((id) => {
-      const sheet = project.sheets[id];
+    id: settledProject.id, sites: settledProject.sites, buildings: settledProject.buildings,
+    floors: settledProject.floors, systems: settledProject.systems, cableSchedule: settledProject.cableSchedule, penetrationSeals: settledProject.penetrationSeals,
+    sheets: settledProject.sheetOrder.map((id) => {
+      const sheet = settledProject.sheets[id];
       if (!sheet) return null;
       return { ...sheet, entities: Object.fromEntries(Object.entries(sheet.entities).map(([id, entity]) => {
         const { installation: _installation, ...geometry } = entity;
         return [id, geometry];
       })) };
     }),
-  }), [project]);
+  }), [settledProject]);
 
   useEffect(() => {
     cancelHoverRef.current?.();

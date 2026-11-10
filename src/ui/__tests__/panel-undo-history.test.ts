@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { useStore } from '../../state/store';
 
@@ -15,6 +14,8 @@ const PANELS = [
   'RevisionHistoryPanel',
 ];
 
+const sources = import.meta.glob('../*.tsx', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+
 describe('panel edits keep undo history', () => {
   it('setProjectPatch keeps and extends history while setProject clears it', () => {
     const s = useStore.getState();
@@ -27,7 +28,8 @@ describe('panel edits keep undo history', () => {
   });
 
   it.each(PANELS)('%s does not use setProject', (name) => {
-    const src = readFileSync(new URL(`../${name}.tsx`, import.meta.url), 'utf8');
+    const src = sources[`../${name}.tsx`];
+    expect(src).toBeTypeOf('string');
     expect(src).not.toMatch(/\bsetProject\b/);
   });
 });
