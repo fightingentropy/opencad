@@ -31,6 +31,7 @@
 import type * as Y from 'yjs';
 import type { StoreApi } from 'zustand';
 import type { Entity, EntityId, Project, Sheet, SheetId } from '../types';
+import { repairLayerNames } from '../lib/layer-names';
 import { applyAuthenticatedCollaborationUpdate } from '../state/collaboration-guard';
 
 // ---- v2 doc schema ----
@@ -300,8 +301,17 @@ export function bindStoreToYjs(
   };
 
   const applyRemote = (): void => {
-    const next = buildProjectFromMaps();
-    if (!next) return;
+    const built = buildProjectFromMaps();
+    if (!built) return;
+    // A room can hold entities saved with a layer name as their layerId, which
+    // are never drawn (see repairLayerNames). Files and autosaves are repaired
+    // when they load; a room is repaired here, each time it is read, and only
+    // in this peer's copy. Nothing is written back for it: a viewer could not,
+    // and peers that all wrote on joining would be editing the room just by
+    // opening it. The repair gives every peer the same result, including the
+    // id of a layer it has to create, so when an edit does carry a repaired
+    // entity or a created layer into the room, the peers agree on it.
+    const next = repairLayerNames(built);
     // Refresh the mirrors first so the next local diff compares against
     // what the doc now holds, not what we last wrote.
     refreshMirrors();
