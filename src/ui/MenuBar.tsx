@@ -14,7 +14,7 @@ import { layoutContainmentsSideBySide } from '../lib/containment-layout';
 import { exportIFC } from '../io/ifc-export';
 import { importIFC } from '../io/ifc-import';
 import { exportCOBie, cobieToCSVZip } from '../io/cobie';
-import { parseDXF } from '../io/dxf-import';
+import { parseDXFWithWarnings } from '../io/dxf-import';
 import {
   exportCableSchedule,
   cableScheduleToPDF,
@@ -404,10 +404,18 @@ export function MenuBar({
     try {
       notify('info', 'Importing DXF…', { id: 'import-dxf', timeoutMs: null });
       const text = await file.text();
-      const underlay = parseDXF(text);
+      const { underlay, warnings } = parseDXFWithWarnings(text);
       addEntitiesByLayerName([underlay]);
       setStatus(`Imported DXF underlay (${file.name})`);
-      notify('success', `Imported DXF underlay (${file.name})`, { id: 'import-dxf' });
+      if (warnings.length > 0) {
+        notify('warning', `Imported DXF underlay (${file.name}) with ${warnings.length} warning${warnings.length === 1 ? '' : 's'}`, {
+          detail: warnings.join('\n'),
+          id: 'import-dxf',
+          timeoutMs: null,
+        });
+      } else {
+        notify('success', `Imported DXF underlay (${file.name})`, { id: 'import-dxf' });
+      }
     } catch (err) {
       notify('error', 'DXF import failed', {
         detail: (err as Error).message,
