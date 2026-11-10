@@ -141,21 +141,30 @@ function portJoint(route: ContainmentEntity, segment: number, equipment: Equipme
     distance3(port.position, path[i]) < 1 && distance3(at, port.position) <= Math.max(route.width ?? 100, route.height ?? 50)));
 }
 
-export function analyzeSceneClearance(project: Project, source: Entity): ClearanceIssue[] {
+/** Boxes already built for one sheet, keyed by entity id, so a batch of analyses does not rebuild them per source. */
+export type ClearanceBoxCache = Map<string, ClearanceBox[]>;
+
+export function analyzeSceneClearance(project: Project, source: Entity, cache: ClearanceBoxCache = new Map()): ClearanceIssue[] {
+  const boxesOf = (entity: Entity) => {
+    let boxes = cache.get(entity.id);
+    if (!boxes) cache.set(entity.id, boxes = entityClearanceBoxes(entity, project));
+    return boxes;
+  };
   const sheet = project.sheets[project.activeSheetId];
   if (!sheet) return [];
   const limit = project.coordination?.clearanceMm ?? DEFAULT_CLEARANCE_MM;
-  const sourceBoxes = entityClearanceBoxes(source, project);
+  const sourceBoxes = boxesOf(source);
   const issues = new Map<string, ClearanceIssue>();
   for (const target of [...Object.values(sheet.entities).filter(e => e.id !== source.id), source]) {
     if (target.visible === false || project.layers[target.layerId]?.visible === false) continue;
-    const targetBoxes = entityClearanceBoxes(target, project);
+    const targetBoxes = boxesOf(target);
     for (const a of sourceBoxes) for (const b of targetBoxes) {
       if (a.access && b.access || source.id === target.id && (source.kind !== 'containment' || b.segment <= a.segment + 1)) continue;
-      if (joinedLegs(source, a.segment, target, b.segment, project)) continue;
       const access = a.access || b.access;
       const hit = boxSeparation(a, b, access ? 0 : limit);
       if (!hit || access && hit.gap >= -0.01 || !access && hit.gap >= limit) continue;
+      // Joined-leg detection rebuilds route paths, so it only runs for pairs that are already close.
+      if (joinedLegs(source, a.segment, target, b.segment, project)) continue;
       if (!access && source.kind === 'containment' && target.kind === 'equipment' && portJoint(source, a.segment, target, hit.from, project)) continue;
       if (!access && source.kind === 'equipment' && target.kind === 'containment' && portJoint(target, b.segment, source, hit.to, project)) continue;
       const kind = access ? 'access' : hit.gap < -0.01 ? 'overlap' : 'clearance';

@@ -11,7 +11,7 @@ import { polylineLength, computeSupportSpacing } from './supports';
 import { computeVoltageDrop, loadCategoryForCable } from './voltage-drop';
 import { estimateCableAmpacity } from './cable-sizing';
 import { checkProtectiveDeviceCoordination } from './protective-device';
-import { analyzeSceneClearance } from '../lib/scene-clearance';
+import { analyzeSceneClearance, type ClearanceBoxCache } from '../lib/scene-clearance';
 
 export type IssueSeverity = 'info' | 'warning' | 'error';
 export type IssueKind =
@@ -117,8 +117,10 @@ const supportsByContainment = (project: Project): Map<EntityId, SupportEntity[]>
 
 const checkContainmentClearance = (project: Project, issues: ComplianceIssue[]): void => {
   const seen = new Set<string>();
+  const caches = new Map<string, ClearanceBoxCache>();
   for (const { containment, sheetId } of containmentsBySheet(project)) {
-    for (const issue of analyzeSceneClearance({ ...project, activeSheetId: sheetId }, containment)) {
+    if (!caches.has(sheetId)) caches.set(sheetId, new Map());
+    for (const issue of analyzeSceneClearance({ ...project, activeSheetId: sheetId }, containment, caches.get(sheetId))) {
       const key = [issue.sourceId, issue.targetId].sort().join(':') + ':' + issue.kind;
       if (seen.has(key)) continue;
       seen.add(key);
