@@ -115,6 +115,19 @@ const projectMetaUnchanged = (a: Project, b: Project): boolean => {
   return true;
 };
 
+// True when the two projects differ in the meta payload only by `modified`,
+// which every store edit bumps. Compared by value: a patched project's meta is
+// parsed from the wire, so its fields are never identical to the old ones.
+const projectMetaOnlyModifiedDiffers = (a: Project, b: Project): boolean => {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    if (key === 'sheets' || key === 'catalogues' || key === 'modified') continue;
+    if (JSON.stringify((a as unknown as Record<string, unknown>)[key]) !==
+      JSON.stringify((b as unknown as Record<string, unknown>)[key])) return false;
+  }
+  return true;
+};
+
 // Carry the records a remote transaction touched into an undo/redo snapshot, so
 // that undo reverts local edits without restoring stale copies of what a peer
 // changed or deleted. Sheets the snapshot does not have are left alone.
@@ -512,7 +525,10 @@ export function bindStoreToYjs(
       // remote state. Anything wider (settings changed, a sheet added or
       // removed, or a full rebuild) clears it.
       const state = store.getState();
-      const keepHistory = patched && changed !== undefined && !changed.meta;
+      // A change to `modified` alone (every peer edit makes one) does not count
+      // as a settings change.
+      const keepHistory = patched && changed !== undefined && lastSynced !== null &&
+        (!changed.meta || projectMetaOnlyModifiedDiffers(lastSynced, next));
       applyAuthenticatedCollaborationUpdate(() => {
         if (state.applyRemoteProject) {
           state.applyRemoteProject(next, keepHistory

@@ -36,7 +36,15 @@ const setup = () => {
     storeB.getState().setProject({ ...p, sheets: { ...p.sheets, [sheet.id]: { ...sheet,
       entities: { ...sheet.entities, [id]: line(p, id, 77) }, entityOrder: [...sheet.entityOrder, id] } } });
   };
-  return { sync, peerAdds };
+  const peerAddsViaStore = (id: string) => {
+    // Like a real peer: the store action also bumps project.modified.
+    const p = storeB.getState().project;
+    storeB.getState().setProject({ ...p, modified: p.modified + 1000 });
+    peerAdds(id);
+    const q = storeB.getState().project;
+    storeB.getState().setProject({ ...q, modified: q.modified + 1000 });
+  };
+  return { sync, peerAdds, peerAddsViaStore };
 };
 
 describe('local undo while collaborating', () => {
@@ -65,5 +73,16 @@ describe('local undo while collaborating', () => {
     const after = entities(useStore.getState().project);
     expect(after.mine).toBeDefined();
     expect(after.theirs).toBeDefined();
+  });
+
+  it('keeps the undo stack when the peer edit also bumps project.modified', () => {
+    const { sync, peerAddsViaStore } = setup();
+    useStore.getState().addEntity(line(useStore.getState().project, 'mine', 5));
+    peerAddsViaStore('theirs');
+    sync();
+    expect(entities(useStore.getState().project).theirs).toBeDefined();
+    expect(useStore.getState().past.length).toBe(1);
+    useStore.getState().undo();
+    expect(entities(useStore.getState().project).theirs).toBeDefined();
   });
 });
