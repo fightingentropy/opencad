@@ -167,7 +167,11 @@ function CrossSectionContent({
           <div className="cross-section-stats">
             <div>
               <span className="cs-label">Fill:</span>
-              <span className={`cs-value ${fill.ok ? 'ok' : 'fail'}`}>{fmtPct(fill.fill)}</span>
+              {fill.unknown ? (
+                <span className="cs-value" title="Containment size or a cable diameter is missing">? (cannot be checked)</span>
+              ) : (
+                <span className={`cs-value ${fill.ok ? 'ok' : 'fail'}`}>{fmtPct(fill.fill)}</span>
+              )}
               <span className="cs-limit">limit {fmtPct(fill.limit)}</span>
             </div>
           </div>

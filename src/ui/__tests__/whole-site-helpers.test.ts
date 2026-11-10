@@ -41,3 +41,15 @@ describe('cableVoltageDrop', () => {
     expect(r.limit * 100).toBeCloseTo(cableVoltageDrop(cable, 50, 'BS7671', systems as never).limitPct, 9);
   });
 });
+
+describe('computeFill unknown status', () => {
+  it('flags an unchecked fill as unknown instead of a failing 0%', async () => {
+    const { computeFill } = await import('../whole-site-helpers');
+    const cont = { id: 'k1', kind: 'containment', containmentType: 'tray', width: 0, points: [] } as never;
+    const r = computeFill(cont, [cable]);
+    expect(r.unknown).toBe(true);
+    expect(r.ok).toBe(false);
+    const ok = computeFill({ ...(cont as object), width: 200, height: 50 } as never, [cable]);
+    expect(ok.unknown).toBe(false);
+  });
+});

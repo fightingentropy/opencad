@@ -34,13 +34,14 @@ export const computeFill = (
   cont: ContainmentEntity,
   cables: Cable[],
   project?: Project,
-): { fill: number; limit: number; ok: boolean } => {
+): { fill: number; limit: number; ok: boolean; unknown: boolean } => {
   const standards = project ? projectStandardsProfile(project) : DEFAULT_STANDARDS.BS7671;
   const r = computeContainmentFill(cont, cables, standards);
   return {
     fill: r.fillPct / 100,
     limit: r.limit,
     ok: r.fillStatus !== 'over' && r.fillStatus !== 'unknown',
+    unknown: r.fillStatus === 'unknown',
   };
 };
 
