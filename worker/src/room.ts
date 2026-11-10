@@ -77,7 +77,14 @@ export class CollaborationRoom extends DurableObject<Env> {
     ctx.blockConcurrencyWhile(async () => this.migrate());
   }
 
+  // Runs when the object starts. A start that fails part-way must not leave the room unable to
+  // start again, so the migrations are one transaction, and each statement can also run a second
+  // time over what an earlier run left behind.
   private migrate(): void {
+    this.ctx.storage.transactionSync(() => this.applyMigrations());
+  }
+
+  private applyMigrations(): void {
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS _sql_schema_migrations (
         id INTEGER PRIMARY KEY,
@@ -89,23 +96,23 @@ export class CollaborationRoom extends DurableObject<Env> {
       .one().version;
     if (version < 1) {
       this.ctx.storage.sql.exec(`
-        CREATE TABLE room_identity (
+        CREATE TABLE IF NOT EXISTS room_identity (
           singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
           room_id TEXT NOT NULL UNIQUE,
           created_at INTEGER NOT NULL
         );
-        CREATE TABLE room_snapshot_meta (
+        CREATE TABLE IF NOT EXISTS room_snapshot_meta (
           singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
           sequence INTEGER NOT NULL,
           byte_length INTEGER NOT NULL,
           chunk_count INTEGER NOT NULL,
           updated_at INTEGER NOT NULL
         );
-        CREATE TABLE room_snapshot_chunks (
+        CREATE TABLE IF NOT EXISTS room_snapshot_chunks (
           chunk_index INTEGER PRIMARY KEY,
           update_blob BLOB NOT NULL
         );
-        CREATE TABLE room_updates (
+        CREATE TABLE IF NOT EXISTS room_updates (
           sequence INTEGER PRIMARY KEY AUTOINCREMENT,
           idempotency_key TEXT NOT NULL UNIQUE,
           actor_id TEXT NOT NULL,
@@ -113,13 +120,13 @@ export class CollaborationRoom extends DurableObject<Env> {
           byte_length INTEGER NOT NULL,
           created_at INTEGER NOT NULL
         );
-        CREATE TABLE processed_updates (
+        CREATE TABLE IF NOT EXISTS processed_updates (
           idempotency_key TEXT PRIMARY KEY,
           sequence INTEGER NOT NULL,
           created_at INTEGER NOT NULL
         );
-        CREATE INDEX processed_updates_sequence_idx ON processed_updates(sequence);
-        CREATE INDEX room_updates_sequence_idx ON room_updates(sequence);
+        CREATE INDEX IF NOT EXISTS processed_updates_sequence_idx ON processed_updates(sequence);
+        CREATE INDEX IF NOT EXISTS room_updates_sequence_idx ON room_updates(sequence);
         INSERT INTO _sql_schema_migrations (id, applied_at) VALUES (1, unixepoch() * 1000);
       `);
     }
@@ -129,7 +136,7 @@ export class CollaborationRoom extends DurableObject<Env> {
       // the room once, here, and kept in room_updates_rejected to show who sent them and when.
       // The snapshot needs no check: it is only ever written from a merge that succeeded.
       this.ctx.storage.sql.exec(`
-        CREATE TABLE room_updates_rejected (
+        CREATE TABLE IF NOT EXISTS room_updates_rejected (
           sequence INTEGER PRIMARY KEY,
           idempotency_key TEXT NOT NULL,
           actor_id TEXT NOT NULL,
@@ -148,7 +155,7 @@ export class CollaborationRoom extends DurableObject<Env> {
       }
       for (const sequence of rejected) {
         this.ctx.storage.sql.exec(
-          `INSERT INTO room_updates_rejected
+          `INSERT OR REPLACE INTO room_updates_rejected
              (sequence, idempotency_key, actor_id, update_blob, byte_length, created_at, rejected_at)
            SELECT sequence, idempotency_key, actor_id, update_blob, byte_length, created_at, ?
            FROM room_updates WHERE sequence = ?`,

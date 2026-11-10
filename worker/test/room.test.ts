@@ -266,6 +266,50 @@ describe('collaboration Worker boundary', () => {
     for (const socket of [webSocket, late.webSocket]) socket.close(1000, 'done');
   });
 
+  it('starts again after its storage migrations were cut short', async () => {
+    const { stub, webSocket } = await openRoom('editor', 'interrupted-migration');
+    expect(await nextMessage(webSocket)).toMatchObject({ type: 'welcome' });
+    const ack = nextMessage(webSocket);
+    webSocket.send(JSON.stringify({
+      type: 'update',
+      idempotencyKey: 'kept-0001',
+      update: bytesToBase64(namedYUpdate('kept', 'yes')),
+    }));
+    expect(await ack).toMatchObject({ type: 'ack', sequence: 1 });
+
+    // What a start that stopped part-way would leave: every table exists, one undecodable row is
+    // already copied to room_updates_rejected but still in room_updates, and no migration is
+    // recorded as applied. The next start runs both migrations again over that.
+    await runInDurableObject(stub, async (_instance: CollaborationRoom, state) => {
+      insertStoredUpdate(state, 'poison-0001', undecodableBytes);
+      insertStoredUpdate(state, 'poison-0002', undecodableBytes);
+      state.storage.sql.exec(
+        `INSERT INTO room_updates_rejected
+           (sequence, idempotency_key, actor_id, update_blob, byte_length, created_at, rejected_at)
+         SELECT sequence, idempotency_key, actor_id, update_blob, byte_length, created_at, 0
+         FROM room_updates WHERE idempotency_key = 'poison-0001'`,
+      );
+      state.storage.sql.exec('DELETE FROM _sql_schema_migrations');
+    });
+    await evictDurableObject(stub);
+
+    const late = await openRoom('viewer', 'interrupted-migration');
+    expect(await welcomeFixture(late.webSocket)).toEqual({ kept: 'yes' });
+    expect(await storedUpdateKeys(stub)).toEqual(['kept-0001']);
+    const after = await runInDurableObject(stub, async (_instance: CollaborationRoom, state) => ({
+      rejected: state.storage.sql
+        .exec<{ idempotency_key: string }>('SELECT idempotency_key FROM room_updates_rejected ORDER BY sequence')
+        .toArray()
+        .map((row) => row.idempotency_key),
+      migrations: state.storage.sql
+        .exec<{ id: number }>('SELECT id FROM _sql_schema_migrations ORDER BY id')
+        .toArray()
+        .map((row) => row.id),
+    }));
+    expect(after).toEqual({ rejected: ['poison-0001', 'poison-0002'], migrations: [1, 2] });
+    for (const socket of [webSocket, late.webSocket]) socket.close(1000, 'done');
+  });
+
   it('does not keep an update when its compaction fails', async () => {
     const { stub, webSocket } = await openRoom('owner', 'failed-compaction');
     expect(await nextMessage(webSocket)).toMatchObject({ type: 'welcome' });
