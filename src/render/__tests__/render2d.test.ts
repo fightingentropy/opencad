@@ -89,6 +89,15 @@ describe('2D cable overlays', () => {
     expect(draw(project, 'segregation').strokes).not.toContain('#ff5d5d');
   });
 
+  it('labels an unchecked fill as unknown instead of 0%', () => {
+    const { project, cable } = fixture();
+    cable.outerDiameter = 0;
+    const { texts, strokes } = draw(project, 'fill');
+    expect(strokes).toContain('#9aa0a6');
+    expect(texts).toContain('?');
+    expect(texts).not.toContain('0%');
+  });
+
   it('does not redraw hidden containment through its fill overlay', () => {
     const { project, containment } = fixture();
     project.layers[containment.layerId].visible = false;

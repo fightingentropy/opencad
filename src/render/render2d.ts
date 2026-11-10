@@ -2481,7 +2481,7 @@ const drawComplianceOverlay = (
       // Percentage label near the start
       drawWorldText(
         ctx,
-        `${Math.round(fill.fillPct)}%`,
+        fill.fillStatus === 'unknown' ? '?' : `${Math.round(fill.fillPct)}%`,
         pts[0].x,
         pts[0].y + w * 0.6,
         3,
