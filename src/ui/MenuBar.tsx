@@ -65,6 +65,7 @@ export function MenuBar({
   const projectStandard = useStore((s) => s.project.standard);
   const sheetCount = useStore((s) => s.project.sheetOrder.length);
   const setProject = useStore((s) => s.setProject);
+  const setProjectPatch = useStore((s) => s.setProjectPatch);
   const resetProject = useStore((s) => s.resetProject);
   const undo = useStore((s) => s.undo);
   const redo = useStore((s) => s.redo);
@@ -498,11 +499,7 @@ export function MenuBar({
           added++;
         }
       }
-      setProject({
-        ...project,
-        cableSchedule: { cables, cableOrder: order },
-        modified: Date.now(),
-      });
+      setProjectPatch({ cableSchedule: { cables, cableOrder: order } });
       setStatus(`Imported ${added} new + ${merged} merged cables`);
       notify('success', `Imported ${added} new + ${merged} merged cables`, {
         id: 'import-cables',

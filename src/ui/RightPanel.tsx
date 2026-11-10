@@ -450,11 +450,8 @@ function SinglePropertiesEditor({ entity, onUpdate }: { entity: Entity; onUpdate
 
 function ProjectInfo() {
   const meta = useProjectMeta();
-  const setProject = useStore((s) => s.setProject);
-  // Spread the live project from getState() so this section only subscribes
-  // to the header fields it renders.
-  const upd = (patch: Partial<Project>) =>
-    setProject({ ...useStore.getState().project, ...patch, modified: Date.now() });
+  const setProjectPatch = useStore((s) => s.setProjectPatch);
+  const upd = (patch: Partial<Project>) => setProjectPatch(patch);
 
   return (
     <div className="panel-section">

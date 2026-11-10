@@ -7,7 +7,7 @@ import type { MarkupItem } from '../models/revision';
 type FilterStatus = 'all' | 'open' | 'resolved';
 
 export function MarkupPanel() {
-  const setProject = useStore((s) => s.setProject);
+  const setProjectPatch = useStore((s) => s.setProjectPatch);
   const setViewport = useStore((s) => s.setViewport);
 
   const [filter, setFilter] = useState<FilterStatus>('open');
@@ -33,11 +33,7 @@ export function MarkupPanel() {
   // subscribes to the markups slice it renders.
   const upsert = (m: MarkupItem) => {
     const project = useStore.getState().project;
-    setProject({
-      ...project,
-      markups: { ...(project.markups ?? {}), [m.id]: m },
-      modified: Date.now(),
-    });
+    setProjectPatch({ markups: { ...(project.markups ?? {}), [m.id]: m } });
   };
 
   const onAdd = () => {

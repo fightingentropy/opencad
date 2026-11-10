@@ -16,7 +16,7 @@ import type { Building, Floor, Site, Zone, BuildingId, FloorId, ZoneId } from '.
 // SiteNavigator replaces SheetTabs when project hierarchy exists. Otherwise
 // falls back to plain SheetTabs.
 export function SiteNavigator() {
-  const setProject = useStore((s) => s.setProject);
+  const setProjectPatch = useStore((s) => s.setProjectPatch);
 
   const sites = useSites() ?? {};
   const buildings = useBuildings() ?? {};
@@ -40,11 +40,11 @@ export function SiteNavigator() {
   // Patch builders read the live project via getState() so this component
   // never has to subscribe to the whole project just to spread it.
   const updateProject = (patch: Partial<Project>) => {
-    setProject({ ...useStore.getState().project, ...patch, modified: Date.now() });
+    setProjectPatch(patch);
   };
 
   const navigateToFloor = (f: Floor) => {
-    setProject(setActiveFloor(useStore.getState().project, f.id));
+    setProjectPatch(setActiveFloor(useStore.getState().project, f.id));
   };
 
   const addBuilding = (siteId: string) => {

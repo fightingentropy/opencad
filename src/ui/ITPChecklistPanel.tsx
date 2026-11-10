@@ -7,7 +7,7 @@ import type { ITPItem } from '../models/fire';
 const STATUSES: ITPItem['status'][] = ['pending', 'in-progress', 'inspected-pass', 'inspected-fail', 'cleared'];
 
 export function ITPChecklistPanel() {
-  const setProject = useStore((s) => s.setProject);
+  const setProjectPatch = useStore((s) => s.setProjectPatch);
 
   const [filter, setFilter] = useState<'all' | ITPItem['status']>('all');
 
@@ -20,11 +20,7 @@ export function ITPChecklistPanel() {
   // the ITP slice it renders.
   const upsert = (it: ITPItem) => {
     const project = useStore.getState().project;
-    setProject({
-      ...project,
-      itpItems: { ...(project.itpItems ?? {}), [it.id]: it },
-      modified: Date.now(),
-    });
+    setProjectPatch({ itpItems: { ...(project.itpItems ?? {}), [it.id]: it } });
   };
 
   const setStatus = (it: ITPItem, st: ITPItem['status']) => {

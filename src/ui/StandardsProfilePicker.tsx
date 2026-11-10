@@ -12,12 +12,12 @@ const CODES: { id: StandardsCode; label: string }[] = [
 ];
 
 export function StandardsProfilePicker({ compact }: { compact?: boolean } = {}) {
-  const setProject = useStore((s) => s.setProject);
+  const setProjectPatch = useStore((s) => s.setProjectPatch);
   const profile = useStandardsProfile() ?? DEFAULT_STANDARDS.BS7671;
 
   const onChange = (code: StandardsCode) => {
     const next: StandardsProfile = DEFAULT_STANDARDS[code];
-    setProject({ ...useStore.getState().project, standardsProfile: next, modified: Date.now() });
+    setProjectPatch({ standardsProfile: next });
   };
 
   if (compact) {

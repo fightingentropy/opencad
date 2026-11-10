@@ -28,7 +28,7 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
   const systemsMap = useSystems();
   const standardsProfile = useStandardsProfile();
   const projectName = useProjectName();
-  const setProject = useStore((s) => s.setProject);
+  const setProjectPatch = useStore((s) => s.setProjectPatch);
 
   // Untracked handle for the row helpers (estimateCableLength reads
   // sheets/sheetOrder, estimateAmpacity reads cableSchedule) — all of which
@@ -66,9 +66,8 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
   }, [schedule, filterSystem, filterCircuit, sortKey, sortDir]);
 
   const updateSchedule = (next: CableSchedule) => {
-    // Spread the live project — the render-scope handle above may be stale
-    // for fields this modal doesn't subscribe to.
-    setProject({ ...useStore.getState().project, cableSchedule: next, modified: Date.now() });
+    // A patch keeps the undo history; loading a whole project would wipe it.
+    setProjectPatch({ cableSchedule: next });
   };
 
   const upsertCable = (c: Cable) => {

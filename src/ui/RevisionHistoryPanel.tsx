@@ -6,7 +6,7 @@ import type { DrawingRevision, RevisionStatus, SheetMeta } from '../models/revis
 import { REVISION_STATUSES } from '../models/revision';
 
 export function RevisionHistoryPanel() {
-  const setProject = useStore((s) => s.setProject);
+  const setProjectPatch = useStore((s) => s.setProjectPatch);
   const sheet = useActiveSheet();
 
   if (!sheet) return null;
@@ -19,11 +19,7 @@ export function RevisionHistoryPanel() {
   // the active sheet it renders.
   const setMeta = (next: SheetMeta) => {
     const project = useStore.getState().project;
-    setProject({
-      ...project,
-      sheets: { ...project.sheets, [sheet.id]: { ...sheet, meta: next } },
-      modified: Date.now(),
-    });
+    setProjectPatch({ sheets: { ...project.sheets, [sheet.id]: { ...sheet, meta: next } } });
   };
 
   const onAdd = () => {
