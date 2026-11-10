@@ -537,6 +537,15 @@ interface Store {
   setAutoRoute: (on: boolean) => void;
 }
 
+// True when a patch carries a NaN or infinite number anywhere inside it, such
+// as a cleared numeric field parsed with parseFloat. Such a value would be
+// saved as null and break the entity on the next load.
+const hasNonFinite = (value: unknown): boolean =>
+  typeof value === 'number' ? !Number.isFinite(value)
+    : Array.isArray(value) ? value.some(hasNonFinite)
+      : value !== null && typeof value === 'object' ? Object.values(value).some(hasNonFinite)
+        : false;
+
 /**
  * True, with a message, when the active sheet is locked by its issue status
  * (S3, S4, S6, S7). Entity edits on the sheet are refused; revision, issue
@@ -931,6 +940,7 @@ export const useStore = create<Store>((rawSet, get) => {
   },
 
   updateEntity: (id, patch) => {
+    if (hasNonFinite(patch)) return;
     if (activeSheetEditBlocked()) return;
     const { project, past } = get();
     const sheet = project.sheets[project.activeSheetId];
