@@ -93,12 +93,10 @@ export const measureTextCached = (
   return w;
 };
 
-// Per-render entity-bounds cache. The map is rebuilt at the start of each
-// render; entity references are stable until edited (immutable updates),
-// so reference equality is safe as a cache key. We use Entity directly as
-// the key (a Map keyed by Entity) so different sheets and store updates
-// don't pollute each other.
-let boundsCache: Map<Entity, Bounds> = new Map();
+// Entity-bounds cache shared across renders. Entities are immutable (edits
+// produce new objects), so reference equality is a safe key, and a WeakMap
+// lets replaced entities be collected. Bounds depend on the entity alone.
+const boundsCache = new WeakMap<Entity, Bounds>();
 const getEntityBoundsCached = (e: Entity): Bounds => {
   const hit = boundsCache.get(e);
   if (hit !== undefined) return hit;
@@ -115,9 +113,6 @@ export const render2d = (
 ): void => {
   const perf = isPerfEnabled();
   const tStart = perf ? performance.now() : 0;
-  // Reset the per-render bounds cache so we never serve stale entries
-  // from a previous edit.
-  boundsCache = new Map();
   const { width, height, dpr } = opts;
   ctx.save();
   // Clear
