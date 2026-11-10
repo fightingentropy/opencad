@@ -20,6 +20,7 @@ import { emptyCableSchedule } from '../models/cable';
 import type { SheetMeta } from '../models/revision';
 import { assembleDrawingNumber, nextSequenceNumber } from '../drawing/numbering';
 import { shouldRejectLocalProjectMutation } from './collaboration-guard';
+import { nextEquipmentTag } from '../lib/component-library';
 import { keepRouteConnections } from '../lib/route-connections';
 import { projectWithAutoFeatures } from '../lib/auto-feature-actions';
 import { createLayerNameResolver, layerFromSpec, STANDARD_LAYERS, withLayerRemoved } from '../lib/layer-names';
@@ -1066,9 +1067,30 @@ export const useStore = create<Store>((rawSet, get) => {
       if (count > 0) { cx /= count; cy /= count; dx = anchor.x - cx; dy = anchor.y - cy; }
     }
 
+    // Copies are new objects: they must not share the originals' cables,
+    // joints or tags, and references between pasted items follow the new ids.
+    const idMap = new Map<string, string>();
+    for (const e of clipboard) idMap.set(e.id, newId());
+    const remap = (ids: string[]) => ids.flatMap((id) => { const n = idMap.get(id); return n ? [n] : []; });
+    const usedTags: string[] = [];
     const newEntities: Entity[] = clipboard.map((e) => {
-      const moved = moveEntityDeep(e, dx, dy);
-      return { ...(moved as any), id: newId() } as Entity;
+      const moved: any = moveEntityDeep(e, dx, dy);
+      moved.id = idMap.get(e.id);
+      switch (moved.kind) {
+        case 'containment':
+          delete moved.assignedCableIds;
+          delete moved.connections;
+          if ('connectionsLocked' in moved) moved.connectionsLocked = false;
+          break;
+        case 'riser': delete moved.assignedCableIds; break;
+        case 'group': moved.childIds = remap(moved.childIds ?? []); break;
+        case 'support': moved.supportingContainmentIds = remap(moved.supportingContainmentIds ?? []); break;
+        case 'equipment':
+          moved.tag = nextEquipmentTag(project, moved.equipmentKind, usedTags);
+          usedTags.push(moved.tag);
+          break;
+      }
+      return moved as Entity;
     });
 
     const entities = { ...sheet.entities };

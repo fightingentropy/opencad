@@ -229,9 +229,14 @@ function insertionLayer(project: Project, kind: InsertableComponent['kind']): st
   return layer.id;
 }
 
-function nextTag(project: Project, prefix: string): string {
-  const tags = new Set(Object.values(project.sheets).flatMap((sheet) => Object.values(sheet.entities)
-    .flatMap((entity) => (entity.kind === 'equipment' || entity.kind === 'symbol') && entity.tag ? [entity.tag] : [])));
+/** A project-unique tag for a copy of equipment; `taken` holds tags already given out in the same batch. */
+export function nextEquipmentTag(project: Project, kind: EquipmentKind, taken: Iterable<string> = []): string {
+  return nextTag(project, EQUIPMENT[kind][1], taken);
+}
+
+function nextTag(project: Project, prefix: string, taken: Iterable<string> = []): string {
+  const tags = new Set([...taken, ...Object.values(project.sheets).flatMap((sheet) => Object.values(sheet.entities)
+    .flatMap((entity) => (entity.kind === 'equipment' || entity.kind === 'symbol') && entity.tag ? [entity.tag] : []))]);
   let number = 1;
   while (tags.has(`${prefix}-${String(number).padStart(2, '0')}`)) number++;
   return `${prefix}-${String(number).padStart(2, '0')}`;
