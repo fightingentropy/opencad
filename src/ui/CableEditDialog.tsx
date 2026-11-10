@@ -3,8 +3,8 @@ import { useStandardsProfile, useSystems } from '../state/selectors';
 import { notify } from '../state/notifications';
 import type { Cable, CableConstruction, CableCircuitType } from '../models/cable';
 import { STANDARD_CSA } from '../models/cable';
-import { computeVoltageDrop, suggestCableSize } from '../calc';
-import { fmtNum } from './whole-site-helpers';
+import { suggestCableSize } from '../calc';
+import { cableVoltageDrop, fmtNum } from './whole-site-helpers';
 
 const CONSTRUCTIONS: CableConstruction[] = [
   'XLPE/SWA/LSOH',
@@ -74,16 +74,10 @@ export function CableEditDialog({
 
   const standardsCode = standardsProfile?.code ?? 'BS7671';
 
-  const vdrop = useMemo(() => computeVoltageDrop({
-    construction: draft.construction,
-    csa: draft.csa,
-    lengthM: PREVIEW_LENGTH_M,
-    designCurrentA: draft.designCurrent ?? 0,
-    systemVoltageV: draft.voltage || 230,
-    phasing: draft.cores >= 3 ? 'three' : 'single',
-    loadCategory: 'other',
-    standardsCode,
-  }), [draft.construction, draft.csa, draft.designCurrent, draft.voltage, draft.cores, standardsCode]);
+  const vdrop = useMemo(
+    () => cableVoltageDrop(draft as Cable, PREVIEW_LENGTH_M, standardsCode, systemsMap),
+    [draft, standardsCode, systemsMap],
+  );
 
   const suggestion = useMemo(() => {
     if (!draft.designCurrent || draft.designCurrent <= 0) return null;

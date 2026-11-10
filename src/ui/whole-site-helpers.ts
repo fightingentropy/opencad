@@ -44,6 +44,26 @@ export const computeFill = (
   };
 };
 
+// Full voltage-drop result for one cable, with the load category taken from the
+// cable's system exactly as the compliance engine does, so every view applies
+// the same limit (lighting circuits get the tighter one).
+export const cableVoltageDrop = (
+  cable: Cable,
+  lengthM: number,
+  standardsCode: StandardsCode,
+  systems?: Project['systems'],
+) =>
+  computeVoltageDrop({
+    construction: cable.construction,
+    csa: cable.csa,
+    lengthM,
+    designCurrentA: cable.designCurrent ?? 0,
+    systemVoltageV: cable.voltage || 230,
+    phasing: cable.cores >= 3 ? 'three' : 'single',
+    loadCategory: loadCategoryForCable(cable, systems),
+    standardsCode,
+  });
+
 // Voltage-drop estimate. Adapts `computeVoltageDrop` to the legacy
 // {vdropV, vdropPct (fraction), ok, limit (fraction)} shape.
 export const estimateVdrop = (
@@ -51,19 +71,7 @@ export const estimateVdrop = (
   lengthM: number,
   project?: Project,
 ): { vdropV: number; vdropPct: number; ok: boolean; limit: number } => {
-  const ib = cable.designCurrent ?? 0;
-  const standardsCode = project ? projectStandardsCode(project) : 'BS7671';
-  const loadCategory = loadCategoryForCable(cable, project?.systems);
-  const r = computeVoltageDrop({
-    construction: cable.construction,
-    csa: cable.csa,
-    lengthM,
-    designCurrentA: ib,
-    systemVoltageV: cable.voltage || 230,
-    phasing: cable.cores >= 3 ? 'three' : 'single',
-    loadCategory,
-    standardsCode,
-  });
+  const r = cableVoltageDrop(cable, lengthM, project ? projectStandardsCode(project) : 'BS7671', project?.systems);
   return {
     vdropV: r.vdropV,
     vdropPct: r.vdropPct / 100,

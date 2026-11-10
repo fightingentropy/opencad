@@ -13,8 +13,7 @@ import { nanoid } from 'nanoid';
 import type { Cable, CableCircuitType, CableSchedule } from '../models/cable';
 import type { ContainmentEntity, EquipmentEntity, Vec2 } from '../types';
 import { CableEditDialog } from './CableEditDialog';
-import { estimateAmpacity, estimateCableLength, estimateVdrop, fmtNum } from './whole-site-helpers';
-import { computeVoltageDrop } from '../calc';
+import { cableVoltageDrop, estimateAmpacity, estimateCableLength, estimateVdrop, fmtNum } from './whole-site-helpers';
 import { buildContainmentGraph } from '../lib/containment-graph';
 import { routeCableThroughGraph } from '../lib/cable-router';
 
@@ -320,16 +319,7 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
               {visible.map((c) => {
                 const len = c.estimatedLength ?? estimateCableLength(c, project);
                 const amp = estimateAmpacity(c, project);
-                const vd = computeVoltageDrop({
-                  construction: c.construction,
-                  csa: c.csa,
-                  lengthM: len,
-                  designCurrentA: c.designCurrent ?? 0,
-                  systemVoltageV: c.voltage || 230,
-                  phasing: c.cores >= 3 ? 'three' : 'single',
-                  loadCategory: 'other',
-                  standardsCode: standardsProfile?.code ?? 'BS7671',
-                });
+                const vd = cableVoltageDrop(c, len, standardsProfile?.code ?? 'BS7671', systemsMap);
                 const failures: string[] = [];
                 if (!amp.ok && amp.ib > 0) failures.push('ampacity');
                 if (!vd.withinLimits) failures.push('vdrop');

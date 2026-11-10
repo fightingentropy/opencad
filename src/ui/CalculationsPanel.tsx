@@ -6,13 +6,13 @@ import {
   useSelectedEntity,
   useSheets,
   useStandardsProfile,
+  useSystems,
 } from '../state/selectors';
 import type { ContainmentEntity, Entity } from '../types';
 import type { Cable } from '../models/cable';
 import {
   computeContainmentFill,
   computeDeratingFactors,
-  computeVoltageDrop,
   polylineLength,
   type InstallationMethod,
 } from '../calc';
@@ -22,6 +22,7 @@ import {
   DEFAULT_STANDARDS,
 } from '../models/standards';
 import {
+  cableVoltageDrop,
   cablesOnContainment,
   estimateCableLength,
   fmtNum,
@@ -130,6 +131,7 @@ function LinkedWireCalcs({ cable }: { cable: Cable }) {
   const cableSchedule = useCableSchedule();
   const sheets = useSheets();
   const standardsProfile = useStandardsProfile();
+  const systems = useSystems();
 
   // estimateCableLength walks every sheet's entities, so the sheets map is
   // the exact recompute trigger; the full project is read untracked.
@@ -166,16 +168,10 @@ function LinkedWireCalcs({ cable }: { cable: Cable }) {
   const ib = cable.designCurrent ?? 0;
   const ampacityOk = deratedAmp >= ib;
 
-  const vdrop = useMemo(() => computeVoltageDrop({
-    construction: cable.construction,
-    csa: cable.csa,
-    lengthM: len,
-    designCurrentA: ib,
-    systemVoltageV: cable.voltage || 230,
-    phasing: cable.cores >= 3 ? 'three' : 'single',
-    loadCategory: 'other',
-    standardsCode,
-  }), [cable, len, ib, standardsCode]);
+  const vdrop = useMemo(
+    () => cableVoltageDrop(cable, len, standardsCode, systems),
+    [cable, len, standardsCode, systems],
+  );
 
   return (
     <div className="calc-section">
