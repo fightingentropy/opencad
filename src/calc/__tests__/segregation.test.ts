@@ -3,6 +3,7 @@ import {
   checkSegregation,
   checkContainmentPairSeparation,
 } from '../segregation';
+import { SEGREGATION_CATEGORIES } from '../../models/standards';
 import { resetIds, makeContainment, makeCable } from './helpers';
 
 describe('checkSegregation', () => {
@@ -109,5 +110,33 @@ describe('checkContainmentPairSeparation', () => {
     const r = checkContainmentPairSeparation(a, b, 0);
     expect(r.required).toBe(0);
     expect(r.ok).toBe(true);
+  });
+
+  it('defines a minimum for every pair of declarable categories, symmetrically', () => {
+    for (const x of SEGREGATION_CATEGORIES) {
+      for (const y of SEGREGATION_CATEGORIES) {
+        if (x === y) continue;
+        const a = makeContainment({ cableCategory: x, containmentType: 'tray' });
+        const b = makeContainment({ cableCategory: y, containmentType: 'tray' });
+        const fwd = checkContainmentPairSeparation(a, b, 0);
+        const rev = checkContainmentPairSeparation(b, a, 0);
+        expect(fwd.known, `${x}/${y}`).toBe(true);
+        expect(fwd.required, `${x}/${y}`).toBe(rev.required);
+      }
+    }
+  });
+
+  it('does not pass fire-alarm beside power at zero distance', () => {
+    const a = makeContainment({ cableCategory: 'fire-alarm', containmentType: 'tray' });
+    const b = makeContainment({ cableCategory: 'power', containmentType: 'tray' });
+    expect(checkContainmentPairSeparation(a, b, 0).ok).toBe(false);
+  });
+
+  it('reports a mixed run beside a categorised one as unknown, not ok', () => {
+    const a = makeContainment({ cableCategory: 'mixed', containmentType: 'tray' });
+    const b = makeContainment({ cableCategory: 'power', containmentType: 'tray' });
+    const r = checkContainmentPairSeparation(a, b, 1000);
+    expect(r.known).toBe(false);
+    expect(r.ok).toBe(false);
   });
 });

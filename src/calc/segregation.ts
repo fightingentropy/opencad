@@ -140,7 +140,11 @@ const categoryMatch = (
 // different categories, check that the centerlines (or band edges) are
 // at least the minimum required distance apart.
 export interface PairSeparationResult {
+  // True only when the pair is tabulated and the distance meets the minimum.
   ok: boolean;
+  // False when no minimum is defined for this pair of categories, so the
+  // check cannot pass (for example a 'mixed' run beside a categorised one).
+  known: boolean;
   distance: number;
   required: number;
   category1: string;
@@ -155,10 +159,13 @@ export const checkContainmentPairSeparation = (
 ): PairSeparationResult => {
   const cat1 = c1.cableCategory ?? 'mixed';
   const cat2 = c2.cableCategory ?? 'mixed';
-  const required =
-    SEGREGATION_MIN_MM[cat1]?.[cat2] ?? SEGREGATION_MIN_MM[cat2]?.[cat1] ?? 0;
+  const tabulated =
+    cat1 === cat2 ? 0 : SEGREGATION_MIN_MM[cat1]?.[cat2] ?? SEGREGATION_MIN_MM[cat2]?.[cat1];
+  const known = tabulated !== undefined;
+  const required = tabulated ?? 0;
   return {
-    ok: measuredDistanceMm >= required,
+    ok: known && measuredDistanceMm >= required,
+    known,
     distance: measuredDistanceMm,
     required,
     category1: cat1,

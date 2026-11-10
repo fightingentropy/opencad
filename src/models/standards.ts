@@ -88,8 +88,8 @@ export const DEFAULT_STANDARDS: Record<StandardsCode, StandardsProfile> = {
     effectiveDate: '2022-09-28',
     sourceUrl: 'https://electrical.theiet.org/guidance-and-codes-of-practice/publications-by-category/bs-7671-and-guidance/',
     unitSystem: 'SI',
-    profileVersion: 'bs7671-a2.2',
-    datasetHash: 'sha256:a620d8397d00d1718e200e3d9a0ac993c9445f8006dd5ea540fdeaf24c2b3d0e',
+    profileVersion: 'bs7671-a2.3',
+    datasetHash: 'sha256:a9d21693b24d246ee3f5693a37828d540a0b95d420067fca010323a63389021f',
     implementationStatus: 'reference-snapshot',
     region: 'UK',
   },
@@ -420,10 +420,26 @@ export const SUPPORT_SPANS_HORIZONTAL_MM = {
 
 // Segregation distances (mm) between cable categories.
 // Power vs data is the canonical example — BS 7671 528.1 / IET GN1.
+// The matrix is complete and symmetric for every category a containment can
+// declare (except 'mixed', which has no defined separation). Fire alarm and
+// emergency circuits are kept apart from every other category, matching
+// checkSegregation, which reports them sharing containment as a violation.
+export const SEGREGATION_CATEGORIES = [
+  'power',
+  'data',
+  'comms',
+  'fire-alarm',
+  'emergency',
+  'instrumentation',
+] as const;
+
 export const SEGREGATION_MIN_MM: Record<string, Record<string, number>> = {
-  power: { data: 50, comms: 50, 'fire-alarm': 0, emergency: 0, instrumentation: 50 },
+  power: { data: 50, comms: 50, 'fire-alarm': 50, emergency: 50, instrumentation: 50 },
   data: { power: 50, comms: 0, 'fire-alarm': 25, emergency: 25, instrumentation: 25 },
-  'fire-alarm': { power: 0, data: 25, emergency: 0, comms: 25, instrumentation: 25 },
+  comms: { power: 50, data: 0, 'fire-alarm': 25, emergency: 25, instrumentation: 25 },
+  'fire-alarm': { power: 50, data: 25, comms: 25, emergency: 25, instrumentation: 25 },
+  emergency: { power: 50, data: 25, comms: 25, 'fire-alarm': 25, instrumentation: 25 },
+  instrumentation: { power: 50, data: 25, comms: 25, 'fire-alarm': 25, emergency: 25 },
 };
 
 interface TableReference {
