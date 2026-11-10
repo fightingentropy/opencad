@@ -214,3 +214,36 @@ describe('entity-level collab merging', () => {
     expect(sheetOf(a)).toEqual(sheetOf(b));
   });
 });
+
+describe('remote updates patch only what changed', () => {
+  it('keeps the identity of entities and sheets a remote edit did not touch', () => {
+    const { a, b } = makePeers(makeProject([line('e1', 0), line('e2', 10), line('e3', 20)]));
+    const before = b.store.getState().project;
+    a.store.getState().setProject(withEntity(a.store.getState().project, SHEET_ID, line('e1', 5, '#ff0000')));
+    exchange(a, b);
+    const after = b.store.getState().project;
+    expect((sheetOf(b).entities.e1 as LineEntity).color).toBe('#ff0000');
+    expect(after.sheets[SHEET_ID].entities.e2).toBe(before.sheets[SHEET_ID].entities.e2);
+    expect(after.sheets[SHEET_ID].entities.e3).toBe(before.sheets[SHEET_ID].entities.e3);
+    expect(after.sheets[SHEET_ID].entityOrder).toBe(before.sheets[SHEET_ID].entityOrder);
+  });
+
+  it('applies remote adds and deletes with the same order on both peers', () => {
+    const { a, b } = makePeers(makeProject([line('e1', 0), line('e2', 10)]));
+    let pa = withEntity(a.store.getState().project, SHEET_ID, line('e9', 90));
+    pa = withEntity(pa, SHEET_ID, line('e4', 40));
+    pa = withoutEntity(pa, SHEET_ID, 'e1');
+    a.store.getState().setProject(pa);
+    exchange(a, b);
+    expect(Object.keys(sheetOf(b).entities).sort()).toEqual(['e2', 'e4', 'e9']);
+    expect(sheetOf(b).entityOrder).toEqual(sheetOf(a).entityOrder);
+  });
+
+  it('still applies a project-level change from a peer', () => {
+    const { a, b } = makePeers(makeProject([line('e1', 0)]));
+    a.store.getState().setProject({ ...a.store.getState().project, name: 'Renamed' });
+    exchange(a, b);
+    expect(b.store.getState().project.name).toBe('Renamed');
+    expect(sheetOf(b).entities.e1).toBeDefined();
+  });
+});

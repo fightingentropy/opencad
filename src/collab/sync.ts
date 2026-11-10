@@ -14,8 +14,9 @@
 // Local store changes are diffed per entity — the store is immutable,
 // so object identity tells us which sheets/entities a given update
 // actually touched — and written as individual map entries. Remote
-// transactions rebuild the project from the maps and replace the store
-// project. Concurrent edits to different entities therefore merge
+// transactions patch only the records they touched (see
+// patchProjectFromMaps), falling back to a rebuild from the maps for
+// sheet-list changes. Concurrent edits to different entities therefore merge
 // cleanly; last-writer-wins now only applies when two peers edit the
 // *same* entity (or the same sheet/project metadata) simultaneously.
 //
@@ -89,6 +90,31 @@ const serializeSheetShell = (s: Sheet): string => {
   return JSON.stringify(rest);
 };
 
+// A sheet's entityOrder reconciled against the records that exist: ids whose
+// record is gone are dropped and records missing from the order are appended
+// in sorted order, so every peer ends up with the identical list.
+const reconcileEntityOrder = (sheet: Sheet): EntityId[] => {
+  const order = (sheet.entityOrder ?? []).filter((id) => sheet.entities[id] !== undefined);
+  const present = new Set(order);
+  const missing = Object.keys(sheet.entities)
+    .filter((id) => !present.has(id))
+    .sort();
+  return [...order, ...missing];
+};
+
+// True when every project field that travels in the meta payload is the very
+// same value as before (the store is immutable, so identity proves it).
+const projectMetaUnchanged = (a: Project, b: Project): boolean => {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    if (key === 'sheets' || key === 'catalogues') continue;
+    if ((a as unknown as Record<string, unknown>)[key] !== (b as unknown as Record<string, unknown>)[key]) {
+      return false;
+    }
+  }
+  return true;
+};
+
 interface BindHandle {
   /** Tear down both directions. */
   dispose: () => void;
@@ -159,7 +185,12 @@ export function bindStoreToYjs(
     for (const sheetId of sentSheets.keys()) {
       if (!project.sheets[sheetId]) removedSheets.push(sheetId);
     }
-    const metaSer = serializeProjectMeta(project);
+    // Project-level fields keep their object identity across store updates
+    // that only touch sheets, so skip re-serialising them when none changed.
+    const metaSer =
+      prev && sentMeta !== null && projectMetaUnchanged(prev, project)
+        ? sentMeta
+        : serializeProjectMeta(project);
     if (metaSer === sentMeta && changedSheets.length === 0 && removedSheets.length === 0) {
       lastSynced = project;
       return; // nothing changed payload-wise
@@ -262,14 +293,14 @@ export function bindStoreToYjs(
     // record was deleted elsewhere and append missing records (sorted,
     // so every peer reconciles to the identical list).
     for (const sheet of Object.values(sheets)) {
-      const order = (sheet.entityOrder ?? []).filter((id) => sheet.entities[id] !== undefined);
-      const present = new Set(order);
-      const missing = Object.keys(sheet.entities)
-        .filter((id) => !present.has(id))
-        .sort();
-      sheet.entityOrder = [...order, ...missing];
+      sheet.entityOrder = reconcileEntityOrder(sheet);
     }
-    // Same reconciliation for the sheet list itself.
+    return assembleProject(meta, sheets);
+  };
+
+  // Combine parsed project meta with reconciled sheets into a project.
+  const assembleProject = (meta: ProjectWireMeta, sheets: Record<SheetId, Sheet>): Project => {
+    // Reconcile the sheet list itself the same way.
     const order = (meta.sheetOrder ?? []).filter((id) => sheets[id] !== undefined);
     const present = new Set(order);
     const missingSheets = Object.keys(sheets)
@@ -300,9 +331,125 @@ export function bindStoreToYjs(
     };
   };
 
-  const applyRemote = (): void => {
-    const built = buildProjectFromMaps();
-    if (!built) return;
+  // Patch the last synced project with only the records a remote
+  // transaction touched. Entities and sheets that were not touched keep their
+  // object identity, so identity-keyed caches (spatial index, 3D diff) stay
+  // valid and nothing else is re-parsed. Returns null when a sheet was added or
+  // removed or a record could not be read, and the
+  // caller rebuilds the whole project instead.
+  const patchProjectFromMaps = (
+    base: Project,
+    metaChanged: boolean,
+    changedSheetKeys: ReadonlySet<string>,
+    changedEntityKeys: ReadonlySet<string>,
+  ): Project | null => {
+    for (const sheetId of changedSheetKeys) {
+      if ((maps.sheets.get(sheetId) !== undefined) !== (base.sheets[sheetId] !== undefined)) return null;
+    }
+    const entityIdsBySheet = new Map<SheetId, Set<EntityId>>();
+    for (const key of changedEntityKeys) {
+      const parts = splitEntityKey(key);
+      if (!parts) continue;
+      const [sheetId, entityId] = parts;
+      if (maps.sheets.get(sheetId) === undefined) continue; // record for a sheet that no longer exists
+      if (!base.sheets[sheetId]) return null;
+      let ids = entityIdsBySheet.get(sheetId);
+      if (!ids) entityIdsBySheet.set(sheetId, (ids = new Set()));
+      ids.add(entityId);
+    }
+    const touched = new Set<SheetId>([...changedSheetKeys, ...entityIdsBySheet.keys()]);
+    const sheets: Record<SheetId, Sheet> = { ...base.sheets };
+    for (const sheetId of touched) {
+      const baseSheet = base.sheets[sheetId];
+      const entities: Record<EntityId, Entity> = { ...baseSheet.entities };
+      let structural = false;
+      for (const entityId of entityIdsBySheet.get(sheetId) ?? []) {
+        const raw = maps.entities.get(entityKey(sheetId, entityId));
+        let parsed: Entity | undefined;
+        if (typeof raw === 'string') {
+          try {
+            parsed = JSON.parse(raw) as Entity;
+          } catch (err) {
+            console.warn('[opencad collab] failed to parse remote entity', err);
+          }
+        }
+        if (parsed === undefined) {
+          if (entityId in entities) {
+            delete entities[entityId];
+            structural = true;
+          }
+        } else {
+          if (!(entityId in entities)) structural = true;
+          entities[entityId] = parsed;
+        }
+      }
+      if (!changedSheetKeys.has(sheetId) && !structural) {
+        // Only existing entities changed: the order is still the reconciled one.
+        sheets[sheetId] = { ...baseSheet, entities };
+        continue;
+      }
+      const shellRaw = maps.sheets.get(sheetId);
+      if (typeof shellRaw !== 'string') return null;
+      let shell: SheetShell;
+      try {
+        shell = JSON.parse(shellRaw) as SheetShell;
+      } catch (err) {
+        console.warn('[opencad collab] failed to parse remote sheet', err);
+        return null;
+      }
+      const sheet: Sheet = { ...shell, entities };
+      sheet.entityOrder = reconcileEntityOrder(sheet);
+      sheets[sheetId] = sheet;
+    }
+    if (!metaChanged) return { ...base, sheets };
+    const metaRaw = maps.meta.get(PROJECT_META_KEY);
+    if (typeof metaRaw !== 'string' || metaRaw.length === 0) return null;
+    try {
+      return assembleProject(JSON.parse(metaRaw) as ProjectWireMeta, sheets);
+    } catch (err) {
+      console.warn('[opencad collab] failed to parse remote project meta', err);
+      return null;
+    }
+  };
+
+  // Keys that differ between the mirror and the doc after a patch.
+  const refreshMirrorKeys = (
+    sheetKeys: ReadonlySet<string>,
+    entityKeys: ReadonlySet<string>,
+  ): void => {
+    for (const sheetId of sheetKeys) {
+      const raw = maps.sheets.get(sheetId);
+      if (typeof raw === 'string') sentSheets.set(sheetId, raw);
+      else sentSheets.delete(sheetId);
+    }
+    for (const key of entityKeys) {
+      const raw = maps.entities.get(key);
+      if (typeof raw === 'string') sentEntities.set(key, raw);
+      else sentEntities.delete(key);
+    }
+  };
+
+  // Set when a remote update could not be applied, so the next one cannot
+  // trust the last synced project as a base and rebuilds from the maps.
+  let needFullRebuild = false;
+
+  const applyRemote = (changed?: {
+    meta: boolean;
+    sheets: ReadonlySet<string>;
+    entities: ReadonlySet<string>;
+  }): void => {
+    let built: Project | null = null;
+    let patched = false;
+    if (changed && lastSynced && !needFullRebuild) {
+      built = patchProjectFromMaps(lastSynced, changed.meta, changed.sheets, changed.entities);
+      patched = built !== null;
+    }
+    if (!built) built = buildProjectFromMaps();
+    if (!built) {
+      needFullRebuild = true;
+      return;
+    }
+    needFullRebuild = false;
     // A room can hold entities saved with a layer name as their layerId, which
     // are never drawn (see repairLayerNames). Files and autosaves are repaired
     // when they load; a room is repaired here, each time it is read, and only
@@ -314,7 +461,8 @@ export function bindStoreToYjs(
     const next = repairLayerNames(built);
     // Refresh the mirrors first so the next local diff compares against
     // what the doc now holds, not what we last wrote.
-    refreshMirrors();
+    if (patched && changed) refreshMirrorKeys(changed.sheets, changed.entities);
+    else refreshMirrors();
     applyingRemote = true;
     try {
       applyAuthenticatedCollaborationUpdate(() => store.getState().setProject(next));
@@ -349,6 +497,11 @@ export function bindStoreToYjs(
   // own observer call but they share one Transaction object, so dedupe
   // on it and rebuild the project once.
   let handledTx: Y.Transaction | null = null;
+  const changedKeys = (tx: Y.Transaction, map: Y.Map<unknown>): Set<string> => {
+    const keys = new Set<string>();
+    for (const key of tx.changed.get(map as unknown as Y.AbstractType<Y.YEvent<any>>) ?? []) if (key !== null) keys.add(key);
+    return keys;
+  };
   const onRemoteChange = (
     _event: Y.YMapEvent<unknown>,
     transaction: Y.Transaction,
@@ -357,7 +510,11 @@ export function bindStoreToYjs(
     if (transaction.origin === 'local') return; // belt-and-braces
     if (transaction === handledTx) return; // already rebuilt for this tx
     handledTx = transaction;
-    applyRemote();
+    applyRemote({
+      meta: changedKeys(transaction, maps.meta).size > 0,
+      sheets: changedKeys(transaction, maps.sheets),
+      entities: changedKeys(transaction, maps.entities),
+    });
   };
   maps.meta.observe(onRemoteChange);
   maps.sheets.observe(onRemoteChange);
