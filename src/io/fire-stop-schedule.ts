@@ -7,6 +7,7 @@
 
 import type { Project, ContainmentEntity, WallEntity } from '../types';
 import type { PenetrationSeal, FireRating } from '../models/fire';
+import { neutralizeFormula } from './csv-safe';
 import {
   buildExportMetadata,
   exportMetadataSummary,
@@ -31,7 +32,7 @@ export interface FireStopRow {
 }
 
 const csvEsc = (v: unknown): string => {
-  const s = String(v ?? '');
+  const s = neutralizeFormula(String(v ?? ''));
   if (s.includes(',') || s.includes('"') || s.includes('\n')) {
     return `"${s.replace(/"/g, '""')}"`;
   }

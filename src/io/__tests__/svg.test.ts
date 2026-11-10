@@ -70,3 +70,23 @@ describe('exportSheetSVG', () => {
     expect(tagsWithRepeatedAttributes(svg)).toEqual([]);
   });
 });
+
+describe('exportSheetSVG attribute escaping', () => {
+  it('keeps hostile colors, dashes and sheet numbers inside their attribute', () => {
+    const evil = 'x" onload="alert(1)';
+    const project = createEmptyProject();
+    const sheet = project.sheets[project.activeSheetId];
+    (sheet as { number: unknown }).number = `1</text><script>alert(1)</script>`;
+    project.layers[project.activeLayerId].color = evil;
+    const e = {
+      ...base('l', project.activeLayerId), kind: 'line', a: { x: 0, y: 0 }, b: { x: 5, y: 5 },
+      color: evil, lineDash: [evil as unknown as number],
+    } as Entity;
+    sheet.entities[e.id] = e;
+    sheet.entityOrder.push(e.id);
+    const svg = exportSheetSVG(project);
+    expect(svg).not.toContain('" onload=');
+    expect(svg).not.toContain('<script');
+    expect(svg).toContain('x&quot; onload=&quot;alert(1)');
+  });
+});

@@ -4,6 +4,7 @@
 
 import type { Project, ContainmentEntity } from '../types';
 import type { Cable } from '../models/cable';
+import { neutralizeFormula } from './csv-safe';
 import {
   buildExportMetadata,
   exportMetadataSummary,
@@ -29,7 +30,7 @@ export interface CableScheduleRow {
 }
 
 const csvEsc = (v: unknown): string => {
-  const s = String(v ?? '');
+  const s = neutralizeFormula(String(v ?? ''));
   if (s.includes(',') || s.includes('"') || s.includes('\n')) {
     return `"${s.replace(/"/g, '""')}"`;
   }

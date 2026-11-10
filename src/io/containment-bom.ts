@@ -19,6 +19,7 @@ import { detectFittings } from '../lib/fittings';
 import { distance3, equipmentPorts, routeLength, routePath } from '../lib/route-path';
 import { placeSupportsForContainment } from '../lib/support-placer';
 import { prependCSVExportMetadata } from './export-metadata';
+import { neutralizeFormula } from './csv-safe';
 
 export interface ContainmentBOMRow {
   ref: string;
@@ -335,7 +336,7 @@ export const generateContainmentBOM = (
 };
 
 const csvEsc = (v: unknown): string => {
-  const s = String(v ?? '');
+  const s = neutralizeFormula(String(v ?? ''));
   if (s.includes(',') || s.includes('"') || s.includes('\n')) {
     return `"${s.replace(/"/g, '""')}"`;
   }

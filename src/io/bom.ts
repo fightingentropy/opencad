@@ -1,6 +1,7 @@
 import type { Project, SymbolEntity } from '../types';
 import { getSymbol } from '../symbols';
 import { prependCSVExportMetadata } from './export-metadata';
+import { neutralizeFormula } from './csv-safe';
 
 export interface BOMRow {
   tag: string;
@@ -67,7 +68,7 @@ export const bomToCSV = (rows: BOMRow[], project: Project): string => {
 };
 
 const csvEsc = (v: any): string => {
-  const s = String(v ?? '');
+  const s = neutralizeFormula(String(v ?? ''));
   if (s.includes(',') || s.includes('"') || s.includes('\n')) {
     return `"${s.replace(/"/g, '""')}"`;
   }

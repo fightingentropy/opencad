@@ -6,6 +6,7 @@
 import type { Project } from '../types';
 import { generateContainmentBOM } from './containment-bom';
 import type { ContainmentBOMRow } from './containment-bom';
+import { neutralizeFormula } from './csv-safe';
 import {
   buildExportMetadata,
   exportMetadataSummary,
@@ -65,7 +66,7 @@ const DEFAULTS: Required<CostEstimateOptions> = {
 };
 
 const csvEsc = (v: unknown): string => {
-  const s = String(v ?? '');
+  const s = neutralizeFormula(String(v ?? ''));
   if (s.includes(',') || s.includes('"') || s.includes('\n')) {
     return `"${s.replace(/"/g, '""')}"`;
   }

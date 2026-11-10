@@ -9,6 +9,7 @@ import { routeLength } from '../lib/route-path';
 import { DEFAULT_STANDARDS } from '../models/standards';
 import { computeContainmentFill, type FillStatus } from '../calc/fill';
 import { prependCSVExportMetadata } from './export-metadata';
+import { neutralizeFormula } from './csv-safe';
 
 export interface ContainmentScheduleRow {
   ref: string;
@@ -28,7 +29,7 @@ export interface ContainmentScheduleRow {
 }
 
 const csvEsc = (v: unknown): string => {
-  const s = String(v ?? '');
+  const s = neutralizeFormula(String(v ?? ''));
   if (s.includes(',') || s.includes('"') || s.includes('\n')) {
     return `"${s.replace(/"/g, '""')}"`;
   }
