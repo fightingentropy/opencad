@@ -103,6 +103,7 @@ export function CostEstimationModal({ onClose }: { onClose: () => void }) {
             {row(`Profit (${profitPct}%)`, fmtMoney(estimate.profit))}
             {row(`Contingency (${contingencyPct}%)`, fmtMoney(estimate.contingency))}
             {row('Grand Total', fmtMoney(estimate.grandTotal), true)}
+            <CostWarnings warnings={estimate.warnings} />
             <h3 className="cost-section-title" style={{ marginTop: 12 }}>Materials ({materialItems.length})</h3>
             <div className="cost-line-list">
               {materialItems.length === 0 && (
@@ -138,6 +139,21 @@ export function CostEstimationModal({ onClose }: { onClose: () => void }) {
           <button className="btn-ghost" onClick={onClose}>Close</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+export function CostWarnings({ warnings }: { warnings: string[] }) {
+  if (warnings.length === 0) return null;
+  return (
+    <div className="cost-warnings" role="alert" style={{ color: 'var(--warning, #b45309)', fontSize: 11, padding: 4 }}>
+      <strong>Total is incomplete ({warnings.length})</strong>
+      <ul style={{ margin: '4px 0 0', paddingLeft: 16 }}>
+        {warnings.slice(0, 10).map((w, i) => (
+          <li key={i}>{w}</li>
+        ))}
+      </ul>
+      {warnings.length > 10 && <div>…and {warnings.length - 10} more (export CSV for the full list)</div>}
     </div>
   );
 }
