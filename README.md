@@ -176,6 +176,6 @@ MIT — see `LICENSE`.
 
 The collaboration Worker uses `npm run collab:build`, `npm run collab:dry-run`, and `npm run collab:deploy`. Its `CollaborationRoom` export keeps SQLite storage. The static site is a separate Worker configured in `site/`; `npm run deploy` builds and uploads it the same way.
 
-Pinned CLI: `cf@1.0.0-beta.17` on Node 22.18 or newer. `cf auth login` is separate from Wrangler login. Verify the selected account before remote operations. Deployment settings live in `cloudflare.config.ts`; keep the original Wrangler configuration for local data and any remaining Wrangler commands.
+Pinned CLI: `cf@1.0.0-beta.29` on Node 22.18 or newer. `cf auth login` is separate from Wrangler login. Verify the selected account before remote operations. Deployment settings live in `cloudflare.config.ts`; keep the original Wrangler configuration for local data and any remaining Wrangler commands.
 
 The explicit Wrangler builder reads the new TypeScript configuration and writes `.cloudflare/output/v0/` using `--experimental-new-config --experimental-cf-build-output`. Deployment then uses `cf deploy --prebuilt`. This preserves custom build steps and avoids the beta CLI's framework detection choosing an unrelated frontend build. Use the package scripts rather than bare `cf build` or `cf deploy` in these mixed projects.
