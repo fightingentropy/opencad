@@ -46,6 +46,8 @@ export interface CostEstimate {
   profit: number;
   contingency: number;
   grandTotal: number;
+  /** Rows left out of the material total because they carry no unit cost. */
+  warnings: string[];
   options: Required<CostEstimateOptions>;
 }
 
@@ -93,6 +95,17 @@ const buildMaterialLines = (bom: ContainmentBOMRow[]): CostLineItem[] => {
   }
   return items;
 };
+
+// Piece rows (straights, fittings, supports, covers) with no catalogue price
+// are not in the material total. Say so instead of silently understating it.
+// Linear-metre rows are an alternate view of the straights and never priced.
+const buildUnpricedWarnings = (bom: ContainmentBOMRow[]): string[] =>
+  bom
+    .filter((row) => row.unit === 'pcs' && !(row.unitCost > 0))
+    .map(
+      (row) =>
+        `Not priced, excluded from material total: ${row.quantity} x ${row.kind} — ${row.description}`.trim(),
+    );
 
 // Build a labour breakdown from the BOM rows (linear-metre runs +
 // fittings + supports). Tray/trunking/conduit get distinct rates.
@@ -142,7 +155,8 @@ const buildLabourLines = (
   let supportCount = 0;
   for (const row of bom) {
     if (row.unit !== 'pcs') continue;
-    if (row.kind.includes('flat-bend') || row.kind.includes('tee') ||
+    if (row.kind.includes('flat-bend') || row.kind.includes('inside-riser') ||
+        row.kind.includes('outside-riser') || row.kind.includes('tee') ||
         row.kind.includes('cross') || row.kind.includes('coupler') ||
         row.kind.includes('end-cap')) {
       fittingCount += row.quantity;
@@ -231,6 +245,7 @@ export const generateCostEstimate = (
     profit,
     contingency,
     grandTotal,
+    warnings: buildUnpricedWarnings(bom),
     options: opts,
   };
 };
@@ -267,8 +282,9 @@ export const costEstimateToCSV = (
     `,Contingency,,,,${est.contingency.toFixed(2)}`,
     `,Grand total (${est.currency}),,,,${est.grandTotal.toFixed(2)}`,
   ];
+  const warnings = est.warnings.map((w) => `WARNING,${csvEsc(w)},,,,`);
   return prependCSVExportMetadata(
-    [header, ...lines, '', ...totals].join('\n'),
+    [header, ...lines, '', ...totals, ...(warnings.length ? ['', ...warnings] : [])].join('\n'),
     project,
     'cost-estimate-csv',
   );
@@ -322,6 +338,7 @@ th { background: #f4f6fa; }
 <div class="meta">${escHtml(exportMetadataSummary(metadata))}</div>
 ${renderGroup('Materials', 'material')}
 ${renderGroup('Labour', 'labour')}
+${est.warnings.length ? `<h3>Warnings</h3><ul>${est.warnings.map((w) => `<li>${escHtml(w)}</li>`).join('')}</ul>` : ''}
 <h3>Summary</h3>
 <table class="totals">
 <tr><td>Material total</td><td>${fmt(est.materialTotal)}</td></tr>
