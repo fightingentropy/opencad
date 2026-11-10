@@ -483,6 +483,9 @@ interface Store {
   addLayer: (layer: Partial<Layer>) => void;
   updateLayer: (id: LayerId, patch: Partial<Layer>) => void;
   removeLayer: (id: LayerId) => void;
+  // Remove a layer only if no entity on any sheet uses it. Otherwise nothing
+  // changes, the user is told why, and false is returned.
+  removeLayerIfUnused: (id: LayerId) => boolean;
   toggleLayerVisible: (id: LayerId) => void;
   toggleLayerLocked: (id: LayerId) => void;
 
@@ -794,6 +797,20 @@ export const useStore = create<Store>((rawSet, get) => {
         modified: Date.now(),
       },
     });
+  },
+
+  removeLayerIfUnused: (id) => {
+    const { project } = get();
+    if (!project.layers[id] || project.layerOrder.length <= 1) return false;
+    const used = Object.values(project.sheets).reduce(
+      (n, sheet) => n + Object.values(sheet.entities).filter((e) => e.layerId === id).length, 0);
+    if (used > 0) {
+      notify('warning', `Layer "${project.layers[id].name}" holds ${used} ${used === 1 ? 'item' : 'items'}. Move or delete them before removing the layer.`,
+        { id: 'layer-in-use', timeoutMs: 6000 });
+      return false;
+    }
+    get().removeLayer(id);
+    return true;
   },
 
   toggleLayerVisible: (id) => {

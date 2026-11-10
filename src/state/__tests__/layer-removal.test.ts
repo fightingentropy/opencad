@@ -106,3 +106,29 @@ describe('removing a layer the app created by name', () => {
     expect(drawn(current(), 'dxf')).toBe(true);
   });
 });
+
+describe('removing a layer from the layers panel', () => {
+  it('refuses while an entity on any sheet still uses the layer', () => {
+    const layerId = current().activeLayerId;
+    useStore.getState().addEntity(line('kept', layerId));
+    const before = current();
+
+    expect(useStore.getState().removeLayerIfUnused(layerId)).toBe(false);
+
+    expect(current()).toBe(before);
+    expect(useStore.getState().past).toHaveLength(1);
+    expect(drawn(current(), 'kept')).toBe(true);
+  });
+
+  it('removes a layer nothing uses, and the removal can be undone', () => {
+    const [first, second] = current().layerOrder;
+    useStore.getState().addEntity(line('kept', first));
+    const before = current();
+
+    expect(useStore.getState().removeLayerIfUnused(second)).toBe(true);
+    expect(current().layers[second]).toBeUndefined();
+
+    useStore.getState().undo();
+    expect(current()).toBe(before);
+  });
+});

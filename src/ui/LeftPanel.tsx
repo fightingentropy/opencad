@@ -242,7 +242,7 @@ function Layers() {
   const toggleLayerLocked = useStore((s) => s.toggleLayerLocked);
   const updateLayer = useStore((s) => s.updateLayer);
   const addLayer = useStore((s) => s.addLayer);
-  const removeLayer = useStore((s) => s.removeLayer);
+  const removeLayer = useStore((s) => s.removeLayerIfUnused);
 
   return (
     <div className="panel-section">
