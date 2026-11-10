@@ -35,4 +35,11 @@ describe('import resource limits', () => {
     const dxf = `0\nSECTION\n2\nENTITIES\n${entities}0\nENDSEC\n0\nEOF\n`;
     expect(() => parseDXF(dxf)).toThrow(/more than 50,000 entities/);
   });
+
+  it('does not count block definition entities toward the top-level DXF limit', () => {
+    const half = Math.floor(IMPORT_LIMITS.dxf.maxEntities * 0.6);
+    const block = `0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\nB\n${'0\nLINE\n'.repeat(half)}0\nENDBLK\n0\nENDSEC\n`;
+    const ents = `0\nSECTION\n2\nENTITIES\n${'0\nLINE\n'.repeat(half)}0\nENDSEC\n0\nEOF\n`;
+    expect(() => parseDXF(block + ents)).not.toThrow();
+  });
 });

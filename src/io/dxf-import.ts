@@ -171,6 +171,7 @@ const collectEntities = (pairs: DxfPair[]): ParsedEntities => {
   let block: DxfBlock | null = null;
   let current: EntityFields | null = null;
   let total = 0;
+  let blockTotal = 0;
 
   const appendCurrent = (): void => {
     if (!current) return;
@@ -193,10 +194,16 @@ const collectEntities = (pairs: DxfPair[]): ParsedEntities => {
       current = null;
       return;
     }
-    if (++total > IMPORT_LIMITS.dxf.maxEntities) {
+    // Top-level entities keep the original cap; block definitions are counted
+    // separately (with the same 4x headroom as expansion) so a file that was
+    // under the limit before blocks were read still imports.
+    const inBlocks = section === 'BLOCKS';
+    const count = inBlocks ? ++blockTotal : ++total;
+    const cap = IMPORT_LIMITS.dxf.maxEntities * (inBlocks ? 4 : 1);
+    if (count > cap) {
       throw new ImportLimitError(
         'DXF',
-        `more than ${IMPORT_LIMITS.dxf.maxEntities.toLocaleString()} entities`,
+        `more than ${cap.toLocaleString()} ${inBlocks ? 'block ' : ''}entities`,
       );
     }
     if (section === 'BLOCKS') block?.entities.push(current);
