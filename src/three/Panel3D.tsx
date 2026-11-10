@@ -4,6 +4,7 @@
 // DIN-rail enclosure.
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
+import { defaultElevation } from './elevations';
 import { subscribeTo3DViewCommands } from '../lib/commands';
 import type {
   Project,
@@ -1128,15 +1129,6 @@ function wireColor(t?: string): number {
 }
 
 // ---------- Building-mode scenery -------------------------------------------
-// Default elevation (mm) for each containment type in building mode.
-// Tuned to a real 3 m wall height — runs hang just below the ceiling like
-// a real ceiling-mount BIM model.
-const BUILDING_ELEVATION: Record<string, number> = {
-  trunking: 2700,
-  basket: 2400,
-  tray: 2100,
-  conduit: 1800,
-};
 
 // ---------- Containment builder ---------------------------------------------
 // Build a Group representing one containment run by walking each polyline
@@ -1340,6 +1332,47 @@ export function buildContainmentGroup(
       wrap.userData.builtLen = len;
       grp.add(wrap);
       continue;
+    }
+
+    if (c.containmentType === 'ladder') {
+      // Ladder rack — two side rails joined by evenly spaced rungs.
+      const wrap = new THREE.Group();
+      const ladderMat = matFor(mats.steel, 0.4, 0.45);
+      for (const sy of [-1, 1]) {
+        const side = new THREE.Mesh(new THREE.BoxGeometry(len, 3, h), ladderMat);
+        side.position.set(0, sy * (w / 2 - 1.5), 0);
+        side.castShadow = true;
+        wrap.add(side);
+      }
+      const rungCount = Math.max(2, Math.floor(len / 300));
+      for (let k = 0; k < rungCount; k++) {
+        const rung = new THREE.Mesh(new THREE.BoxGeometry(20, w, 3), ladderMat);
+        rung.position.set(-len / 2 + (k + 0.5) * (len / rungCount), 0, -h / 2 + 1.5);
+        wrap.add(rung);
+      }
+      wrap.position.set(cx, cy, baseZ + h / 2);
+      wrap.rotation.z = heading;
+      wrap.userData.segIndex = i;
+      wrap.userData.builtLen = len;
+      grp.add(wrap);
+      continue;
+    }
+
+    // Duct and busbar are solid rectangular sections.
+    {
+      const wrap = new THREE.Group();
+      const body = new THREE.Mesh(
+        new THREE.BoxGeometry(len, w, h),
+        c.containmentType === 'busbar' ? matFor(mats.steel, 0.4, 0.45) : matFor(mats.grayPlastic, 0.1, 0.55)
+      );
+      body.castShadow = true;
+      body.receiveShadow = true;
+      wrap.add(body);
+      wrap.position.set(cx, cy, baseZ + h / 2);
+      wrap.rotation.z = heading;
+      wrap.userData.segIndex = i;
+      wrap.userData.builtLen = len;
+      grp.add(wrap);
     }
   }
 
@@ -2706,7 +2739,7 @@ export function Panel3D({
         if (!e || e.visible === false || e.kind !== 'containment') continue;
         const c = e as ContainmentEntity;
         const baseZ = isBuilding
-          ? BUILDING_ELEVATION[c.containmentType] ?? 2200
+          ? defaultElevation(c)
           : 30;
         let entry = containmentMap.get(id);
         let action: SigDiff = entry
@@ -2754,7 +2787,7 @@ export function Panel3D({
           const e = sheet.entities[id];
           if (!e || e.visible === false || e.kind !== 'containment') continue;
           const c = e as ContainmentEntity;
-          const cBaseZ = BUILDING_ELEVATION[c.containmentType] ?? 2200;
+          const cBaseZ = defaultElevation(c);
           containmentRuns.push({
             points: c.points,
             containmentType: c.containmentType,

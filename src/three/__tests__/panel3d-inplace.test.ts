@@ -148,3 +148,21 @@ describe('updateContainmentGroupInPlace', () => {
     mats.dispose();
   });
 });
+
+describe('ladder, duct and busbar runs', () => {
+  const pts = [{ x: 0, y: 0 }, { x: 600, y: 0 }, { x: 600, y: 400 }];
+  const baseZ = 2000;
+  for (const containmentType of ['ladder', 'duct', 'busbar'] as const) {
+    it(`draws ${containmentType} runs and re-poses them in place`, () => {
+      const mats = buildMaterials();
+      const run = { ...trunking(pts), containmentType } as ContainmentEntity;
+      const grp = buildContainmentGroup(run, H, mats, baseZ)!;
+      expect(grp.children.length).toBe(2);
+      const geo = (grp.children[0].children[0] as THREE.Mesh).geometry;
+      const moved = { ...run, points: [pts[0], { x: 620, y: 0 }, pts[2]] };
+      expect(updateContainmentGroupInPlace(grp, moved, H, baseZ)).toBe(true);
+      expect((grp.children[0].children[0] as THREE.Mesh).geometry).toBe(geo);
+      mats.dispose();
+    });
+  }
+});
