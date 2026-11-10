@@ -56,19 +56,27 @@ describe('computeContainmentFill', () => {
   });
 
   it('uses BS 7671 space factor table for trunking when standards = BS7671', () => {
-    // 100×50 trunking, 1× 2.5mm² 2-core -> space factor 11.4 * 2 = 22.8 mm²
-    // Inner area 97 × 47 = 4559 mm² -> ~0.5% fill
+    // 100×50 trunking, 1× 2.5mm² single-core -> Table 12A factor 11.4 mm²
+    // Inner area 97 × 47 = 4559 mm² -> ~0.25% fill
     const c = makeContainment({
       containmentType: 'trunking',
       width: 100,
       height: 50,
     });
-    const cable = makeCable({ csa: 2.5, cores: 2, outerDiameter: 12 });
+    const cable = makeCable({ csa: 2.5, cores: 1, outerDiameter: 5 });
     const r = computeContainmentFill(c, [cable], bs7671);
     expect(r.fillPct).toBeGreaterThan(0);
     expect(r.fillPct).toBeLessThan(1.0);
-    expect(r.occupiedAreaMm2).toBeCloseTo(11.4 * 2, 2);
+    expect(r.occupiedAreaMm2).toBeCloseTo(11.4, 2);
     expect(r.fillStatus).toBe('ok');
+  });
+
+  it('charges a multicore cable its overall-diameter area in BS 7671 trunking', () => {
+    // 4c 16mm² SWA, ~24mm OD: ~452 mm², not 4 × 50.3 = 201 mm²
+    const c = makeContainment({ containmentType: 'trunking', width: 100, height: 50 });
+    const cable = makeCable({ csa: 16, cores: 4, outerDiameter: 24 });
+    const r = computeContainmentFill(c, [cable], bs7671);
+    expect(r.occupiedAreaMm2).toBeCloseTo((Math.PI / 4) * 24 * 24, 2);
   });
 
   it('uses circular OD area for trunking under non-BS7671 standards', () => {
@@ -91,7 +99,7 @@ describe('computeContainmentFill', () => {
       width: 25,
       height: 25,
     });
-    // Use 5× 16mm² 2-core: 50.3 × 2 × 5 = 503 mm² which is > 484 mm² inner.
+    // Use 5× 16mm² 2-core at 18mm OD: 5 × 254 = 1272 mm² which is > 484 mm² inner.
     const cables = Array.from({ length: 5 }, () =>
       makeCable({ csa: 16, cores: 2, outerDiameter: 18 }),
     );
@@ -107,11 +115,9 @@ describe('computeContainmentFill', () => {
       width: 100,
       height: 50,
     });
-    // Pack ~38% via 16 cables of 1.5mm² 2-core (8.1 mm² each per core)
-    // 16 cables × 2 cores × 8.1 = 259.2 — too few. Use 25mm² 2-core: 75.4*2=150.8 ea
-    // 12 cables × 150.8 = 1810 mm² => 39.7%
-    const cables = Array.from({ length: 12 }, () =>
-      makeCable({ csa: 25, cores: 2, outerDiameter: 22 }),
+    // 24 single-core 25mm² cables at 75.4 mm² each = 1810 mm² => 39.7%
+    const cables = Array.from({ length: 24 }, () =>
+      makeCable({ csa: 25, cores: 1, outerDiameter: 10 }),
     );
     const r = computeContainmentFill(c, cables, bs7671);
     expect(r.fillPct).toBeGreaterThanOrEqual(35);

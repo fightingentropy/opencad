@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { suggestContainmentSize, standardSizesFor } from '../containment-sizing';
-import { resetIds, makeCable, bs7671 } from './helpers';
+import { computeContainmentFill } from '../fill';
+import { resetIds, makeCable, makeContainment, bs7671 } from './helpers';
 
 describe('suggestContainmentSize', () => {
   beforeEach(resetIds);
@@ -25,6 +26,16 @@ describe('suggestContainmentSize', () => {
     expect(
       sizes.some((s) => s.width === r.width && s.height === r.height),
     ).toBe(true);
+  });
+
+  it('uses the same occupied area as the fill check for BS 7671 trunking', () => {
+    const cables = [
+      makeCable({ csa: 2.5, cores: 1, outerDiameter: 5 }),
+      makeCable({ csa: 16, cores: 4, outerDiameter: 24 }),
+    ];
+    const r = suggestContainmentSize(cables, 'trunking', bs7671);
+    const cont = makeContainment({ containmentType: 'trunking', width: r.width, height: r.height });
+    expect(r.occupied).toBeCloseTo(computeContainmentFill(cont, cables, bs7671).occupiedAreaMm2, 6);
   });
 
   it('returns ok: false when bundle exceeds the largest standard size', () => {

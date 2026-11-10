@@ -8,7 +8,7 @@ import {
   type StandardsProfile,
   type StandardsTrace,
 } from '../models/standards';
-import { containmentInnerArea } from './fill';
+import { cableOccupiedAreaMm2, containmentInnerArea } from './fill';
 
 // Common standard sizes for each containment type.
 // Width / Height in mm for rectangular; width = diameter for round.
@@ -56,13 +56,13 @@ const STANDARD_SIZES: Record<ContainmentType, { width: number; height: number }[
   ],
 };
 
-const occupiedArea = (cables: Cable[]): number => {
+const occupiedArea = (
+  cables: Cable[],
+  type: ContainmentType,
+  standards: StandardsProfile,
+): number => {
   let total = 0;
-  for (const c of cables) {
-    const od = c.outerDiameter;
-    if (od <= 0) continue;
-    total += (Math.PI / 4) * od * od;
-  }
+  for (const c of cables) total += cableOccupiedAreaMm2(c, standards, type);
   return total;
 };
 
@@ -92,7 +92,7 @@ export const suggestContainmentSize = (
   standards: StandardsProfile,
   fillTargetOverride?: number,
 ): ContainmentSizingResult => {
-  const occupied = occupiedArea(cables);
+  const occupied = occupiedArea(cables, type, standards);
   const trace = createStandardsTrace(standards, ['fill-limits']);
   const target = Math.min(fillTargetOverride ?? 1, limitFor(type, standards));
   const candidates = STANDARD_SIZES[type] ?? STANDARD_SIZES.tray;

@@ -50,10 +50,20 @@ const cableCsaCircle = (cable: Cable): number => {
   return (Math.PI / 4) * od * od;
 };
 
-const cableCsaBs7671Trunking = (cable: Cable): number => {
-  const factor = SPACE_FACTOR_TRUNKING_BS7671[cable.csa];
-  if (typeof factor === 'number') return factor * cable.cores;
-  return cableCsaCircle(cable) * cable.cores;
+// Area one cable occupies in its containment, in mm2. BS 7671 Table 12A
+// space factors are per single-core cable; anything else is charged its
+// overall-diameter area. Shared with containment sizing so both agree.
+// Returns 0 when the cable has no usable data.
+export const cableOccupiedAreaMm2 = (
+  cable: Cable,
+  standards: StandardsProfile,
+  containmentType: ContainmentType,
+): number => {
+  if (standards.code === 'BS7671' && containmentType === 'trunking' && cable.cores === 1) {
+    const factor = SPACE_FACTOR_TRUNKING_BS7671[cable.csa];
+    if (typeof factor === 'number') return factor;
+  }
+  return cableCsaCircle(cable);
 };
 
 const necTierLimit = (count: number, limits: typeof FILL_LIMITS[StandardsCode]): number => {
@@ -110,7 +120,7 @@ export const computeContainmentFill = (
   let occupiedAreaMm2 = 0;
   let incomplete = false;
   for (const c of cables) {
-    const area = useBs7671Trunking ? cableCsaBs7671Trunking(c) : cableCsaCircle(c);
+    const area = cableOccupiedAreaMm2(c, standards, containment.containmentType);
     if (!(area > 0)) incomplete = true;
     occupiedAreaMm2 += area;
   }
