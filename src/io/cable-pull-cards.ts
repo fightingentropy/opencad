@@ -9,7 +9,7 @@
 
 import type { Project, ContainmentEntity } from '../types';
 import type { Cable } from '../models/cable';
-import { dist } from '../lib/math';
+import { routeLength, routePath, type Point3 } from '../lib/route-path';
 import { textExportMetadataPreamble } from './export-metadata';
 
 export interface CablePullCardSegment {
@@ -18,6 +18,8 @@ export interface CablePullCardSegment {
   size: string;
   lengthM: number;
   bends: number;
+  /** Total deflection in 90 degree bend equivalents; drives tension. */
+  bendEquivalents: number;
   elevation: number;
 }
 
@@ -46,27 +48,33 @@ const sizeLabel = (c: ContainmentEntity): string => {
   return c.width ? `${c.width} mm` : '';
 };
 
-const bendsInPolyline = (points: { x: number; y: number }[]): number => {
-  if (points.length < 3) return 0;
-  let n = 0;
+// Deflection below this is a drafting wobble, not a bend the cable feels.
+const MIN_BEND_RAD = (1 * Math.PI) / 180;
+
+/** Deflection angle (radians) at every interior vertex of a 3D polyline. */
+const deflections = (points: Point3[]): number[] => {
+  const out: number[] = [];
   for (let i = 1; i < points.length - 1; i++) {
-    const ax = points[i].x - points[i - 1].x;
-    const ay = points[i].y - points[i - 1].y;
-    const bx = points[i + 1].x - points[i].x;
-    const by = points[i + 1].y - points[i].y;
-    if (Math.abs(ax * by - ay * bx) > 1e-3) n++;
+    const a = points[i - 1];
+    const b = points[i];
+    const c = points[i + 1];
+    const ux = b.x - a.x, uy = b.y - a.y, uz = b.z - a.z;
+    const vx = c.x - b.x, vy = c.y - b.y, vz = c.z - b.z;
+    const lu = Math.hypot(ux, uy, uz);
+    const lv = Math.hypot(vx, vy, vz);
+    if (lu === 0 || lv === 0) continue;
+    const cos = (ux * vx + uy * vy + uz * vz) / (lu * lv);
+    out.push(Math.acos(Math.max(-1, Math.min(1, cos))));
   }
-  return n;
+  return out;
 };
 
-const lengthMm = (points: { x: number; y: number }[]): number => {
-  if (points.length < 2) return 0;
-  let total = 0;
-  for (let i = 1; i < points.length; i++) {
-    total += dist(points[i - 1], points[i]);
-  }
-  return total;
-};
+const bendsInPolyline = (points: Point3[]): number =>
+  deflections(points).filter((t) => t > MIN_BEND_RAD).length;
+
+/** Total deflection expressed in 90 degree bend equivalents. */
+const bendEquivalents = (points: Point3[]): number =>
+  deflections(points).reduce((a, t) => a + t / (Math.PI / 2), 0);
 
 const findContainment = (
   project: Project,
@@ -89,12 +97,14 @@ const buildSegments = (
   for (const id of cable.route) {
     const c = findContainment(project, id);
     if (!c) continue;
+    const path = routePath(c);
     segs.push({
       containmentRef: c.label ?? `CT-${String(auto++).padStart(3, '0')}`,
       type: `${c.containmentType}${c.subType ? ` (${c.subType})` : ''}`,
       size: sizeLabel(c),
-      lengthM: +(lengthMm(c.points ?? []) / 1000).toFixed(2),
-      bends: bendsInPolyline(c.points ?? []),
+      lengthM: +(routeLength(c) / 1000).toFixed(2),
+      bends: bendsInPolyline(path),
+      bendEquivalents: bendEquivalents(path),
       elevation: c.elevation ?? 0,
     });
   }
@@ -110,7 +120,7 @@ const estimateTensionN = (
   let tension = 50; // 50 N initial pull (slack)
   for (const s of segments) {
     const straight = massPerM * GRAVITY * s.lengthM * FRICTION_COEFFICIENT;
-    tension = (tension + straight) * Math.pow(BEND_FACTOR, s.bends);
+    tension = (tension + straight) * Math.pow(BEND_FACTOR, s.bendEquivalents);
   }
   return Math.round(tension);
 };
