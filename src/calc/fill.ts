@@ -11,7 +11,9 @@ import {
   type StandardsTrace,
 } from '../models/standards';
 
-export type FillStatus = 'ok' | 'warning' | 'over';
+// 'unknown' means the inputs are incomplete (no usable containment size, or a
+// cable with no usable outer diameter), so no fill figure can be trusted.
+export type FillStatus = 'ok' | 'warning' | 'over' | 'unknown';
 
 export interface FillResult {
   fillPct: number;
@@ -44,7 +46,7 @@ export const containmentInnerArea = (containment: ContainmentEntity): number => 
 
 const cableCsaCircle = (cable: Cable): number => {
   const od = cable.outerDiameter;
-  if (od <= 0) return 0;
+  if (!(od > 0)) return 0;
   return (Math.PI / 4) * od * od;
 };
 
@@ -106,14 +108,19 @@ export const computeContainmentFill = (
   const useBs7671Trunking =
     standards.code === 'BS7671' && containment.containmentType === 'trunking';
   let occupiedAreaMm2 = 0;
+  let incomplete = false;
   for (const c of cables) {
-    occupiedAreaMm2 += useBs7671Trunking ? cableCsaBs7671Trunking(c) : cableCsaCircle(c);
+    const area = useBs7671Trunking ? cableCsaBs7671Trunking(c) : cableCsaCircle(c);
+    if (!(area > 0)) incomplete = true;
+    occupiedAreaMm2 += area;
   }
   const limit = limitFor(standards.code, containment.containmentType, cables.length);
   const fillPct = innerAreaMm2 > 0 ? (occupiedAreaMm2 / innerAreaMm2) * 100 : 0;
   return {
     fillPct,
-    fillStatus: fillStatus(fillPct, standards, containment.containmentType, limit),
+    fillStatus: cables.length > 0 && (incomplete || !(innerAreaMm2 > 0))
+      ? 'unknown'
+      : fillStatus(fillPct, standards, containment.containmentType, limit),
     innerAreaMm2,
     occupiedAreaMm2,
     cableCount: cables.length,

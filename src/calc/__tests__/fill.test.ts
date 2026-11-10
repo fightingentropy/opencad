@@ -172,3 +172,19 @@ describe('computeContainmentFill', () => {
     expect(r.fillStatus).toBe('ok');
   });
 });
+
+describe('computeContainmentFill with incomplete data', () => {
+  beforeEach(resetIds);
+
+  it('reports unknown, not ok, when the containment has no usable size', () => {
+    const c = makeContainment({ containmentType: 'trunking', width: 0, innerCsaMm2: undefined });
+    const r = computeContainmentFill(c, [makeCable({ outerDiameter: 12 })], bs7671);
+    expect(r.fillStatus).toBe('unknown');
+  });
+
+  it('reports unknown when an assigned cable has no outer diameter', () => {
+    const c = makeContainment({ containmentType: 'tray', width: 200, height: 50, innerCsaMm2: undefined });
+    const r = computeContainmentFill(c, [makeCable({ outerDiameter: 0 })], nec);
+    expect(r.fillStatus).toBe('unknown');
+  });
+});

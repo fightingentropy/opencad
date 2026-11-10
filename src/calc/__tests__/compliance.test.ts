@@ -40,6 +40,15 @@ describe('runComplianceChecks', () => {
     expect(r.errors).toBeGreaterThanOrEqual(1);
   });
 
+  it('warns instead of passing silently when fill cannot be computed', () => {
+    const c = makeContainment({ containmentType: 'tray', width: 0, innerCsaMm2: undefined });
+    const cable = makeCable({ route: [c.id] });
+    const r = runComplianceChecks(makeProject({ containments: [c], cables: [cable] }));
+    const fillIssues = r.issues.filter((i) => i.kind === 'fill');
+    expect(fillIssues).toHaveLength(1);
+    expect(fillIssues[0].severity).toBe('warning');
+  });
+
   it('returns the right shape with totalChecks, byKind, generatedAt populated', () => {
     const c = makeContainment({ containmentType: 'tray', width: 200 });
     const cable = makeCable({ route: [c.id] });

@@ -45,10 +45,10 @@ function RouteFeedback({ entity, project, disabled }: { entity: ContainmentEntit
   return <details className="scene-design-checks" key={entity.id}>
     <summary aria-label="Design checks">Design checks{(fillIssue || missingSupports) && <span className="scene-check-count">{Number(fillIssue) + Number(missingSupports)}</span>}</summary>
     <button type="button" className={'scene-feedback-row' + (fillIssue ? ' has-warning' : '')} onClick={() => runCommand('dialog.cable-schedule')}>
-      <span>Capacity</span><strong>{fill.cableCount ? fill.fillPct.toFixed(1) + '% / ' + Math.round(fill.limit * 100) + '%' : 'Assign cables'}</strong>
+      <span>Capacity</span><strong>{fill.cableCount && fill.fillStatus !== 'unknown' ? fill.fillPct.toFixed(1) + '% / ' + Math.round(fill.limit * 100) + '%' : 'Assign cables'}</strong>
     </button>
     {fillIssue && <button type="button" className="scene-check-message" onClick={() => runCommand('dialog.compliance')}>
-      {fill.fillStatus === 'over' ? 'Fill exceeds the selected profile limit.' : 'Fill is approaching the selected profile limit.'} Review →
+      {fill.fillStatus === 'over' ? 'Fill exceeds the selected profile limit.' : fill.fillStatus === 'unknown' ? 'Fill cannot be checked: size or cable diameter is missing.' : 'Fill is approaching the selected profile limit.'} Review →
     </button>}
     <div className="scene-feedback-row"><span>Supports</span><strong>{supports.length} placed</strong></div>
     {hasHeightChanges(entity) && <p className="scene-check-message">Vertical and sloping fixings require a separate support design.</p>}

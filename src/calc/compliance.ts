@@ -151,8 +151,18 @@ export const runComplianceChecks = (project: Project): ComplianceReport => {
     // Fill check
     if (assigned.length > 0) {
       const r = computeContainmentFill(c, assigned, standards);
-      totalFill += r.fillPct;
-      containmentsWithCables++;
+      if (r.fillStatus === 'unknown') {
+        issues.push({
+          entityId: c.id,
+          sheetId,
+          kind: 'fill',
+          severity: 'warning',
+          message: `Containment ${c.label ?? c.id} fill cannot be checked: set its size and an outer diameter on every assigned cable`,
+        });
+      } else {
+        totalFill += r.fillPct;
+        containmentsWithCables++;
+      }
       if (r.fillStatus === 'over') {
         issues.push({
           entityId: c.id,

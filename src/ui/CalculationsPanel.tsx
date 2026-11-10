@@ -94,7 +94,7 @@ function ContainmentCalcs({ entity }: { entity: ContainmentEntity }) {
       <Row label="Length" value={`${fmtNum(lengthM, 2)} m`} />
       <Row
         label="Fill"
-        value={`${fmtNum(fill.fillPct, 1)}% / ${fmtPct(fill.limit)}`}
+        value={fillStatus === 'unknown' ? 'Not checkable (missing size or cable diameter)' : `${fmtNum(fill.fillPct, 1)}% / ${fmtPct(fill.limit)}`}
         accent={fillAccent}
       />
       <Row label="Inner area" value={`${fmtNum(fill.innerAreaMm2, 0)} mm²`} />

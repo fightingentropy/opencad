@@ -2441,9 +2441,11 @@ const drawComplianceOverlay = (
       const list = assigned.get(id) ?? [];
       if (list.length === 0) continue;
       const fill = computeContainmentFill(cont, list, standards);
-      if (fill.innerAreaMm2 <= 0 || !Number.isFinite(fill.fillPct)) continue;
+      if (fill.innerAreaMm2 <= 0 && fill.fillStatus !== 'unknown') continue;
+      if (!Number.isFinite(fill.fillPct)) continue;
       let tint = '#5fbf5f'; // green
-      if (fill.fillStatus === 'over') tint = '#ff5d5d';
+      if (fill.fillStatus === 'unknown') tint = '#9aa0a6'; // grey: cannot be checked
+      else if (fill.fillStatus === 'over') tint = '#ff5d5d';
       else if (fill.fillStatus === 'warning') tint = '#ffb14d';
 
       ctx.save();

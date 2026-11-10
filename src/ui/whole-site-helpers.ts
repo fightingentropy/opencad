@@ -40,7 +40,7 @@ export const computeFill = (
   return {
     fill: r.fillPct / 100,
     limit: r.limit,
-    ok: r.fillStatus !== 'over',
+    ok: r.fillStatus !== 'over' && r.fillStatus !== 'unknown',
   };
 };
 
