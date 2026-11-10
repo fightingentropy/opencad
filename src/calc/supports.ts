@@ -27,23 +27,33 @@ const lookupSpan = (table: Record<number, number>, size: number): number => {
   return table[keys[keys.length - 1]];
 };
 
-export const computeSupportSpacing = (containment: ContainmentEntity): number => {
-  const t = containment.containmentType;
-  const w = containment.width ?? 100;
-  if (t === 'ladder') return lookupSpan(SUPPORT_SPANS_HORIZONTAL_MM.ladder, w);
-  if (t === 'tray') return lookupSpan(SUPPORT_SPANS_HORIZONTAL_MM.tray, w);
-  if (t === 'basket') return lookupSpan(SUPPORT_SPANS_HORIZONTAL_MM.basket, w);
-  if (t === 'trunking') return lookupSpan(SUPPORT_SPANS_HORIZONTAL_MM.trunking, w);
-  if (t === 'conduit') {
-    const sub = containment.subType;
-    const isPvc = sub === 'rigid-pvc' || sub === 'flexible-plastic' || sub === 'lsoh-conduit';
-    const tbl = isPvc
-      ? SUPPORT_SPANS_HORIZONTAL_MM.conduit_pvc
-      : SUPPORT_SPANS_HORIZONTAL_MM.conduit_steel;
-    return lookupSpan(tbl, w);
+// The one span lookup behind the placer, the BOM and the support check.
+// A conduit counts as plastic when either its sub-type or its material says
+// so; steel spans are longer, so a missing field must not pick them.
+export const supportSpanFor = (
+  type: ContainmentEntity['containmentType'],
+  width: number,
+  subType?: ContainmentEntity['subType'],
+  material?: ContainmentEntity['material'],
+): number => {
+  if (type === 'ladder') return lookupSpan(SUPPORT_SPANS_HORIZONTAL_MM.ladder, width);
+  if (type === 'tray') return lookupSpan(SUPPORT_SPANS_HORIZONTAL_MM.tray, width);
+  if (type === 'basket') return lookupSpan(SUPPORT_SPANS_HORIZONTAL_MM.basket, width);
+  if (type === 'trunking') return lookupSpan(SUPPORT_SPANS_HORIZONTAL_MM.trunking, width);
+  if (type === 'conduit') {
+    const isPlastic =
+      subType === 'rigid-pvc' || subType === 'flexible-plastic' || subType === 'lsoh-conduit' ||
+      material === 'pvc' || material === 'lsoh' || material === 'grp';
+    return lookupSpan(
+      isPlastic ? SUPPORT_SPANS_HORIZONTAL_MM.conduit_pvc : SUPPORT_SPANS_HORIZONTAL_MM.conduit_steel,
+      width,
+    );
   }
   return 1500;
 };
+
+export const computeSupportSpacing = (containment: ContainmentEntity): number =>
+  supportSpanFor(containment.containmentType, containment.width ?? 100, containment.subType, containment.material);
 
 export const computeSupportSpacingWithTrace = (
   containment: ContainmentEntity,

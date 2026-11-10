@@ -17,7 +17,7 @@ import type {
   Vec2,
   LayerId,
 } from '../types';
-import { SUPPORT_SPANS_HORIZONTAL_MM } from '../models/standards';
+import { computeSupportSpacing, supportSpanFor } from '../calc/supports';
 import { dist } from './math';
 import { polylineLength } from './fittings';
 import { hasHeightChanges, horizontalRouteSections } from './route-path';
@@ -41,60 +41,16 @@ export interface SupportPlacerOptions {
   supportKind?: SupportKind;
 }
 
-// Snap a containment width to the closest size key in the support span
-// table. Keys are in mm.
-function nearestKey(table: Record<number, number>, w: number): number {
-  const keys = Object.keys(table).map((k) => Number(k));
-  if (keys.length === 0) return w;
-  let best = keys[0];
-  let bestDelta = Math.abs(w - best);
-  for (const k of keys) {
-    const d = Math.abs(w - k);
-    if (d < bestDelta) {
-      best = k;
-      bestDelta = d;
-    }
-  }
-  return best;
-}
-
 // Lookup the recommended max horizontal span (centre-to-centre) for a
-// given containment type and width. Falls back to a conservative default
-// when no entry exists.
+// given containment type and width. Shares one lookup with the support
+// check (calc/supports.ts), so the BOM and the check agree.
 export function maxSpanForContainment(
   type: ContainmentType,
   width: number,
-  material?: ContainmentEntity['material']
+  material?: ContainmentEntity['material'],
+  subType?: ContainmentEntity['subType'],
 ): number {
-  const t = SUPPORT_SPANS_HORIZONTAL_MM as Readonly<
-    Record<string, Record<number, number>>
-  >;
-  let table: Record<number, number> | undefined;
-  switch (type) {
-    case 'ladder':
-      table = t.ladder;
-      break;
-    case 'tray':
-      table = t.tray;
-      break;
-    case 'basket':
-      table = t.basket;
-      break;
-    case 'trunking':
-      table = t.trunking;
-      break;
-    case 'conduit': {
-      const isPlastic =
-        material === 'pvc' || material === 'lsoh' || material === 'grp';
-      table = isPlastic ? t.conduit_pvc : t.conduit_steel;
-      break;
-    }
-    default:
-      table = undefined;
-  }
-  if (!table) return 1500;
-  const key = nearestKey(table, width);
-  return table[key] ?? 1500;
+  return supportSpanFor(type, width, subType, material);
 }
 
 // Pick a sensible support kind based on the containment shape.
@@ -158,10 +114,7 @@ export function placeSupportsForContainment(
   if (!points || points.length < 2) return [];
 
   const layerId = options.layerId ?? containment.layerId;
-  const width = containment.width ?? 200;
-  const maxSpan =
-    options.maxSpanMm ??
-    maxSpanForContainment(containment.containmentType, width, containment.material);
+  const maxSpan = options.maxSpanMm ?? computeSupportSpacing(containment);
   const supportKind = options.supportKind ?? pickSupportKind(containment);
   const anchorType = options.anchorType ?? 'expansion';
 
