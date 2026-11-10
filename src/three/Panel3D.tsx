@@ -1266,18 +1266,24 @@ export function buildContainmentGroup(
       }
       // Perforation indication: a few thin slots along the bottom
       const slotCount = Math.max(2, Math.floor(len / 30));
+      // One instanced mesh with a single shared geometry per segment, not a
+      // mesh and geometry per slot.
+      const slots = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(8, w * 0.5, 0.4),
+        mats.ductSlot,
+        slotCount
+      );
+      const slotPose = new THREE.Matrix4();
       for (let k = 0; k < slotCount; k++) {
-        const slot = new THREE.Mesh(
-          new THREE.BoxGeometry(8, w * 0.5, 0.4),
-          mats.ductSlot
-        );
-        slot.position.set(
+        slotPose.makeTranslation(
           -len / 2 + (k + 0.5) * (len / slotCount),
           0,
           -h / 2 + tk + 0.2
         );
-        wrap.add(slot);
+        slots.setMatrixAt(k, slotPose);
       }
+      slots.instanceMatrix.needsUpdate = true;
+      wrap.add(slots);
       wrap.position.set(cx, cy, baseZ + h / 2);
       wrap.rotation.z = heading;
       wrap.userData.segIndex = i;

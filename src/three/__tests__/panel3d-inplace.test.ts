@@ -166,3 +166,27 @@ describe('ladder, duct and busbar runs', () => {
     });
   }
 });
+
+describe('tray perforation slots', () => {
+  it('builds the slots of a long tray run as one instanced mesh per segment', () => {
+    const tray: ContainmentEntity = {
+      ...trunking([
+        { x: 0, y: 0 },
+        { x: 30000, y: 0 },
+      ]),
+      containmentType: 'tray',
+    };
+    const grp = buildContainmentGroup(tray, H, buildMaterials(), 30);
+    expect(grp).not.toBeNull();
+    let meshes = 0;
+    const instanced: THREE.InstancedMesh[] = [];
+    grp!.traverse((o) => {
+      if (o instanceof THREE.InstancedMesh) instanced.push(o);
+      else if (o instanceof THREE.Mesh) meshes++;
+    });
+    // Bottom plate and two side rails only; the slots are not separate meshes.
+    expect(meshes).toBe(3);
+    expect(instanced).toHaveLength(1);
+    expect(instanced[0].count).toBe(1000);
+  });
+});
