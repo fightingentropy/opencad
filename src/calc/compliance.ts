@@ -10,6 +10,7 @@ import { checkSegregation } from './segregation';
 import { polylineLength, computeSupportSpacing } from './supports';
 import { computeVoltageDrop, loadCategoryForCable } from './voltage-drop';
 import { estimateCableAmpacity } from './cable-sizing';
+import { cablesByContainment } from './route-index';
 import { checkProtectiveDeviceCoordination } from './protective-device';
 import { analyzeSceneClearance, type ClearanceBoxCache } from '../lib/scene-clearance';
 
@@ -52,23 +53,15 @@ export interface ComplianceReport {
   standards: StandardsTrace;
 }
 
-const sheetForEntity = (project: Project, id: EntityId): SheetId | undefined => {
+const sheetIndex = (project: Project): Map<EntityId, SheetId> => {
+  const index = new Map<EntityId, SheetId>();
   for (const sid of project.sheetOrder) {
-    const s = project.sheets[sid];
-    if (s.entities[id]) return sid;
+    for (const eid of Object.keys(project.sheets[sid].entities)) {
+      // First sheet in order wins, as with a linear scan.
+      if (!index.has(eid)) index.set(eid, sid);
+    }
   }
-  return undefined;
-};
-
-const cablesAssignedTo = (
-  containmentId: EntityId,
-  cableMap: Record<string, Cable>,
-): Cable[] => {
-  const out: Cable[] = [];
-  for (const c of Object.values(cableMap)) {
-    if (c.route?.includes(containmentId)) out.push(c);
-  }
-  return out;
+  return index;
 };
 
 const allContainments = (project: Project): ContainmentEntity[] => {
@@ -142,13 +135,15 @@ export const runComplianceChecks = (project: Project): ComplianceReport => {
   const cables = Object.values(cableMap);
   const containments = allContainments(project);
   const supportMap = supportsByContainment(project);
+  const sheetOf = sheetIndex(project);
+  const routeIndex = cablesByContainment(cableMap);
 
   let totalFill = 0;
   let containmentsWithCables = 0;
 
   for (const c of containments) {
-    const sheetId = sheetForEntity(project, c.id);
-    const assigned = cablesAssignedTo(c.id, cableMap);
+    const sheetId = sheetOf.get(c.id);
+    const assigned = routeIndex.get(c.id) ?? [];
 
     // Fill check
     if (assigned.length > 0) {
@@ -268,7 +263,7 @@ export const runComplianceChecks = (project: Project): ComplianceReport => {
     // Without a stored calculation, Iz falls back to the same conservative
     // estimate the cable schedule shows, and a failure is only a warning.
     const storedAmpacity = cable.calculated?.ampacity ?? cable.calculated?.baseAmpacity;
-    const cableAmpacity = storedAmpacity ?? estimateCableAmpacity(cable, cables);
+    const cableAmpacity = storedAmpacity ?? estimateCableAmpacity(cable, cables, routeIndex);
     if (
       standards.code === 'BS7671' &&
       cable.designCurrent !== undefined &&

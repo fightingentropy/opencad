@@ -17,6 +17,7 @@ import { computeOrthogonalRoute } from '../lib/autoroute';
 import type { Cable } from '../models/cable';
 import { normalizeStandardsProfile } from '../models/standards';
 import { computeContainmentFill } from '../calc/fill';
+import { cablesByContainment } from '../calc/route-index';
 import { checkSegregation } from '../calc/segregation';
 
 export interface RenderOptions {
@@ -2435,18 +2436,10 @@ const drawComplianceOverlay = (
 ): void => {
   if (mode === 'support-spacing') return; // stub for now
 
-  const cables = Object.values(project.cableSchedule?.cables ?? {});
   const standards = normalizeStandardsProfile(project.standardsProfile);
-
-  // Map containmentId -> assigned cable list
-  const assigned = new Map<string, Cable[]>();
-  for (const c of cables) {
-    for (const cid of new Set(c.route)) {
-      const arr = assigned.get(cid) ?? [];
-      arr.push(c);
-      assigned.set(cid, arr);
-    }
-  }
+  const assigned = project.cableSchedule?.cables
+    ? cablesByContainment(project.cableSchedule.cables)
+    : new Map<string, Cable[]>();
 
   for (const id of sheet.entityOrder) {
     const e = sheet.entities[id] as Entity | undefined;

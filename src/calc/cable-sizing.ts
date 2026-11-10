@@ -83,11 +83,19 @@ export const suggestCableSize = (opts: CableSizingOptions): CableSizingResult =>
 // Iz for a scheduled cable that has no stored calculation: the conservative
 // Reference Method B seed table, derated for the most crowded containment on
 // the cable's route at 30 °C on tray. Returns 0 when the size isn't tabulated.
-export const estimateCableAmpacity = (cable: Cable, scheduled: readonly Cable[]): number => {
+// `routeIndex` (containment id -> cables through it) avoids rescanning
+// `scheduled` per hop when the caller already holds one.
+export const estimateCableAmpacity = (
+  cable: Cable,
+  scheduled: readonly Cable[],
+  routeIndex?: ReadonlyMap<string, readonly Cable[]>,
+): number => {
   const base = ampacityFor(cable.csa, cable.construction);
   let numCircuits = 1;
   for (const containmentId of cable.route) {
-    const shared = scheduled.filter((c) => c.route.includes(containmentId)).length;
+    const shared = routeIndex
+      ? (routeIndex.get(containmentId)?.length ?? 0)
+      : scheduled.filter((c) => c.route.includes(containmentId)).length;
     if (shared > numCircuits) numCircuits = shared;
   }
   const factors = computeDeratingFactors({
