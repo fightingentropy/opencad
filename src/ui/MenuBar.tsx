@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useStore } from '../state/store';
+import { activeSheetEditBlocked, useStore } from '../state/store';
 import { createContainmentSampleProject } from '../sample-containment';
 import { exportProjectJSON, importProjectJSON } from '../io/project';
 import { exportSheetSVG } from '../io/svg';
@@ -228,6 +228,7 @@ export function MenuBar({
       setStatus('Select one or more containments to re-run auto-features');
       return;
     }
+    if (activeSheetEditBlocked()) return;
     const regeneration = regenerateAutoFeaturesForContainments(selectedContainmentIds);
     setStatus(`Auto-features regenerated for ${regeneration.containmentCount} containment${regeneration.containmentCount === 1 ? '' : 's'}${regeneration.retainedCount ? ` · ${regeneration.retainedCount} recorded parts retained for review` : ''}`);
   };
@@ -246,6 +247,7 @@ export function MenuBar({
       setStatus('Select at least two containments to straighten and space');
       return;
     }
+    if (activeSheetEditBlocked()) return;
     const result = layoutContainmentsSideBySide(proj, sheetId, selectedContainmentIds, 150);
     if (!result || result.changedIds.length < 2) {
       setStatus('Selected containments need valid two-point routes');

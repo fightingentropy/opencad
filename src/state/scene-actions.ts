@@ -146,6 +146,7 @@ export function addRouteSupports(id: string): void {
   if (entity?.kind !== 'containment') return;
   const problem = physicalEditProblem(entity, state.project);
   if (problem) { reportSceneEditProblem(problem); return; }
+  if (activeSheetEditBlocked()) return;
   try {
     const staged = projectWithAutoFeatures(state.project, [id]).project;
     if (staged !== state.project) state.setProjectPatch({ sheets: staged.sheets, penetrationSeals: staged.penetrationSeals });

@@ -1,4 +1,4 @@
-import { useStore } from '../state/store';
+import { activeSheetEditBlocked, useStore } from '../state/store';
 import { shouldRejectLocalProjectMutation } from '../state/collaboration-guard';
 import type { Entity, EntityId, PenetrationSeal, Project } from '../types';
 import {
@@ -199,6 +199,9 @@ export function regenerateAutoFeaturesForContainments(containmentIds: EntityId[]
   const state = useStore.getState();
   if (shouldRejectLocalProjectMutation()) {
     state.setStatus('Collaboration viewer: auto-feature edits are disabled');
+    return { containmentCount: 0, removedCount: 0, addedCount: 0, sealCount: 0, matchedCount: 0, retainedCount: 0 };
+  }
+  if (activeSheetEditBlocked()) {
     return { containmentCount: 0, removedCount: 0, addedCount: 0, sealCount: 0, matchedCount: 0, retainedCount: 0 };
   }
   const { project, result } = projectWithAutoFeatures(state.project, containmentIds);
