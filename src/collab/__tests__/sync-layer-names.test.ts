@@ -10,7 +10,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as Y from 'yjs';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { bindStoreToYjs, getCollabMaps } from '../sync';
-import type { Entity, EntityId, Layer, LineEntity, Project, Sheet } from '../../types';
+import { createLayerNameResolver, withLayerRemoved } from '../../lib/layer-names';
+import type { Entity, EntityId, Layer, LayerId, LineEntity, Project, Sheet } from '../../types';
 
 interface StoreShape {
   project: Project;
@@ -113,6 +114,38 @@ const edit = (peer: Peer, id: EntityId, x: number): void => {
   });
 };
 
+// The project changes the store's removeLayer and addEntitiesByLayerName make.
+const removeLayer = (peer: Peer, id: LayerId): void => {
+  const project = projectOf(peer);
+  const layers = { ...project.layers };
+  delete layers[id];
+  const removedLayers = withLayerRemoved(project.removedLayers, project.layers[id]);
+  peer.store.getState().setProject({
+    ...project,
+    layers,
+    layerOrder: project.layerOrder.filter((l) => l !== id),
+    ...(removedLayers ? { removedLayers } : {}),
+    modified: project.modified + 1,
+  });
+};
+
+const addByLayerName = (peer: Peer, e: Entity): void => {
+  const project = projectOf(peer);
+  const sheet = project.sheets[SHEET_ID];
+  const resolver = createLayerNameResolver(project);
+  const added = { ...e, layerId: resolver.resolve(e.layerId) };
+  peer.store.getState().setProject({
+    ...project,
+    layers: resolver.layers,
+    layerOrder: resolver.layerOrder,
+    modified: project.modified + 1,
+    sheets: {
+      ...project.sheets,
+      [SHEET_ID]: { ...sheet, entities: { ...sheet.entities, [e.id]: added }, entityOrder: [...sheet.entityOrder, e.id] },
+    },
+  });
+};
+
 const oldRoom = (): Y.Doc =>
   roomSavedWith([line('note', 'Annotation'), line('dxf-1', 'underlay'), line('dxf-2', 'underlay'), line('wire', LAYER_ID)]);
 
@@ -200,5 +233,56 @@ describe('layer names saved as layer ids, in a shared room', () => {
     expect(undrawn(a)).toEqual([]);
     expect(layersNamed(a, 'Underlay')).toHaveLength(1);
     expect((projectOf(a).sheets[SHEET_ID].entities['dxf-1'] as LineEntity).a.x).toBe(11);
+  });
+
+  it('keeps a layer one peer removed removed, for every peer and on every later read', () => {
+    const room = oldRoom();
+    const a = join(room);
+    const b = join(room);
+    edit(a, 'dxf-1', 11); // dxf-1 is now in the room by layer id; dxf-2 is still there by name
+    exchange(a, b);
+
+    removeLayer(a, layersNamed(a, 'Underlay')[0].id);
+    exchange(a, b);
+    // More reads of the room, on both peers, with the removed layer's entities still in it.
+    edit(b, 'wire', 5);
+    exchange(a, b);
+    edit(a, 'wire', 6);
+    exchange(a, b);
+
+    for (const peer of [a, b]) {
+      expect(layersNamed(peer, 'Underlay')).toEqual([]);
+      expect(undrawn(peer).sort()).toEqual(['dxf-1', 'dxf-2']);
+      expect(layersNamed(peer, 'Annotation')).toHaveLength(1); // other repairs are unaffected
+    }
+    expect(projectOf(a).layerOrder).toEqual(projectOf(b).layerOrder);
+    // A peer that joins later reads the same thing.
+    const late = join(a.doc);
+    expect(layersNamed(late, 'Underlay')).toEqual([]);
+    expect(undrawn(late).sort()).toEqual(['dxf-1', 'dxf-2']);
+  });
+
+  it('puts imports after a removal on a new layer that peers agree on, without the removed entities', () => {
+    const room = oldRoom();
+    const a = join(room);
+    const b = join(room);
+    edit(a, 'dxf-1', 11);
+    exchange(a, b);
+    removeLayer(a, layersNamed(a, 'Underlay')[0].id);
+    exchange(a, b);
+
+    // Both import at once, before hearing from each other.
+    addByLayerName(a, line('new-a', 'underlay', 1));
+    addByLayerName(b, line('new-b', 'underlay', 2));
+    exchange(a, b);
+
+    for (const peer of [a, b]) {
+      expect(layersNamed(peer, 'Underlay')).toHaveLength(1);
+      expect(undrawn(peer).sort()).toEqual(['dxf-1', 'dxf-2']);
+      const { entities } = projectOf(peer).sheets[SHEET_ID];
+      expect(entities['new-a'].layerId).toBe(layersNamed(peer, 'Underlay')[0].id);
+      expect(entities['new-b'].layerId).toBe(entities['new-a'].layerId);
+    }
+    expect(projectOf(a).layers).toEqual(projectOf(b).layers);
   });
 });

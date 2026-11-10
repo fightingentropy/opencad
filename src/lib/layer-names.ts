@@ -30,17 +30,61 @@ const KNOWN_LAYERS = new Map<string, LayerSpec>(
   [...STANDARD_LAYERS, ...ON_DEMAND_LAYERS].map((spec) => [nameKey(spec.name), spec]),
 );
 
+/** `Project.removedLayers`: how many layers the user has removed, per layer name key. */
+export type RemovedLayerCounts = Record<string, number>;
+
+const idPart = (key: string): string => key.replace(/\s+/g, '-');
+
 // The id one of these layers gets when it has to be created: 'layer-underlay',
 // 'layer-wire-labels'. It comes from the name, not from a random id, because in
 // a shared room several peers can create the same layer at the same moment, and
 // the project fields that hold the layers resolve as last writer wins. With the
 // same id on every peer, whichever write wins, the layer is the one the other
 // peers' entities point at. (A new project's standard layers keep random ids.)
-const knownLayerId = (key: string): LayerId => `layer-${key.replace(/\s+/g, '-')}`;
+//
+// `removed` is how many layers the user has removed for the name. Each one
+// after the first gets a number, 'layer-underlay-2', so the entities that were
+// left on a removed layer are not on the next one.
+const knownLayerId = (key: string, removed: number): LayerId =>
+  removed === 0 ? `layer-${idPart(key)}` : `layer-${idPart(key)}-${removed + 1}`;
 
-const KNOWN_LAYER_KEY_BY_ID = new Map<LayerId, string>(
-  [...KNOWN_LAYERS.keys()].map((key) => [knownLayerId(key), key]),
+const KNOWN_KEY_BY_ID_PART = new Map<string, string>(
+  [...KNOWN_LAYERS.keys()].map((key) => [idPart(key), key]),
 );
+
+// The name key and the number of earlier layers for an id made by knownLayerId.
+const parseKnownLayerId = (id: string): { key: string; removed: number } | null => {
+  const match = /^layer-(.+?)(?:-(\d+))?$/.exec(id);
+  const key = match ? KNOWN_KEY_BY_ID_PART.get(match[1]) : undefined;
+  if (!match || key === undefined) return null;
+  if (match[2] === undefined) return { key, removed: 0 };
+  const number = Number(match[2]);
+  return number >= 2 && String(number) === match[2] ? { key, removed: number - 1 } : null;
+};
+
+const removedCount = (counts: RemovedLayerCounts | undefined, key: string): number => {
+  const count = counts && typeof counts === 'object' ? counts[key] : undefined;
+  return typeof count === 'number' && Number.isSafeInteger(count) && count > 0 ? count : 0;
+};
+
+/**
+ * `Project.removedLayers` after the user removes `layer`. Only layers that
+ * stand for one of the app's own layer names are counted: one with an id this
+ * module made, or one that has such a name.
+ */
+export const withLayerRemoved = (
+  counts: RemovedLayerCounts | undefined,
+  layer: Layer | undefined,
+): RemovedLayerCounts | undefined => {
+  if (!layer) return counts;
+  const byId = parseKnownLayerId(layer.id);
+  const byName = typeof layer.name === 'string' && KNOWN_LAYERS.has(nameKey(layer.name)) ? nameKey(layer.name) : undefined;
+  if (!byId && byName === undefined) return counts;
+  const next: RemovedLayerCounts = { ...(counts && typeof counts === 'object' ? counts : {}) };
+  if (byId) next[byId.key] = Math.max(removedCount(counts, byId.key), byId.removed + 1);
+  if (byName !== undefined && byName !== byId?.key) next[byName] = removedCount(counts, byName) + 1;
+  return next;
+};
 
 // Each layer gets its own lineDash array: committed projects are frozen in dev builds.
 export const layerFromSpec = (id: LayerId, spec: LayerSpec): Layer => ({
@@ -56,9 +100,10 @@ export interface LayerNameResolver {
    */
   resolve(ref: string): LayerId;
   /**
-   * Like `resolve`, but only for the names the app's own generators and
-   * importers use, and the ids this resolver gives the layers it creates for
-   * them. Null for anything else, such as the id of a deleted layer.
+   * For repairing saved entities. Like `resolve`, but only for the names the
+   * app's own generators and importers use, and the ids this resolver gives
+   * the layers it creates for them. Null for anything else, and for a layer
+   * the user removed: the entities left on it stay as they are.
    */
   resolveKnownName(ref: string): LayerId | null;
   /** The project's layers, including any that were created. */
@@ -82,6 +127,7 @@ export interface LayerNameResolver {
 export const createLayerNameResolver = (project: {
   layers: Record<LayerId, Layer>;
   layerOrder: LayerId[];
+  removedLayers?: RemovedLayerCounts;
 }): LayerNameResolver => {
   let layers = project.layers;
   let layerOrder = project.layerOrder;
@@ -104,32 +150,47 @@ export const createLayerNameResolver = (project: {
     return id;
   };
 
-  // `ref` as one of the app's own layers: by name, or by the id such a layer is
-  // created with. That id can outlive its layer in a shared room, when a peer
-  // that never had the layer writes the project fields last.
-  const resolveKnown = (ref: string): LayerId | null => {
-    const key = KNOWN_LAYER_KEY_BY_ID.get(ref) ?? nameKey(ref);
-    const known = KNOWN_LAYERS.get(key);
-    if (!known) return null;
+  const removed = (key: string): number => removedCount(project.removedLayers, key);
+
+  // The layer one of the app's own names stands for now, if the project has it:
+  // the first layer with the name, else the one created for it and since renamed.
+  const current = (key: string): LayerId | undefined => {
     const named = idByName.get(key);
     if (named !== undefined) return named;
-    const id = knownLayerId(key);
-    return Object.hasOwn(layers, id) ? id : create(id, key, known);
+    const id = knownLayerId(key, removed(key));
+    return Object.hasOwn(layers, id) ? id : undefined;
   };
 
   return {
     resolve(ref) {
       if (Object.hasOwn(layers, ref)) return ref;
       const key = nameKey(ref);
+      const known = KNOWN_LAYERS.get(key);
+      // New entities for a name whose layer was removed get the next layer for it.
+      if (known) return current(key) ?? create(knownLayerId(key, removed(key)), key, known);
       return (
-        resolveKnown(ref)
-        ?? idByName.get(key)
+        idByName.get(key)
         ?? create(nanoid(10), key, { name: ref, color: '#cccccc', visible: true, locked: false, lineWidth: 0.5 })
       );
     },
     resolveKnownName(ref) {
       if (Object.hasOwn(layers, ref)) return ref;
-      return resolveKnown(ref);
+      const byId = parseKnownLayerId(ref);
+      if (byId) {
+        // An id this resolver gave a layer the project does not have. Either the
+        // user removed that layer, which is recorded, and its entities stay as
+        // they are. Or, in a shared room, a peer that never had the layer wrote
+        // the project fields last, and the layer is created again.
+        if (byId.removed < removed(byId.key)) return null;
+        return idByName.get(byId.key) ?? create(ref, byId.key, KNOWN_LAYERS.get(byId.key)!);
+      }
+      const key = nameKey(ref);
+      const known = KNOWN_LAYERS.get(key);
+      if (!known) return null;
+      // A layer name saved as a layer id. Once the user has removed the layer for
+      // that name, what was saved by name was removed with it.
+      if (removed(key) > 0) return null;
+      return current(key) ?? create(knownLayerId(key, 0), key, known);
     },
     get layers() {
       return layers;
@@ -144,9 +205,13 @@ export const createLayerNameResolver = (project: {
  * Generated views and DXF/IFC imports used to be saved with a layer name
  * ('Annotation', 'underlay') as their layerId. No layer has such an id, so
  * those entities are never drawn. This points them at the layer with that
- * name, creating it when the project has none. An entity whose layer was
- * deleted is left alone: its layerId is an old id, not one of the names the
- * app uses.
+ * name, creating it when the project has none.
+ *
+ * An entity whose layer the user removed is left alone. Its layerId is either
+ * an old random id, or the id of a layer this module created, in which case
+ * `removedLayers` says it was removed (see withLayerRemoved). Without that
+ * record, such an id whose layer is missing means the layer was lost in a
+ * shared room, and it is created again.
  *
  * Copy-on-write: returns `project` itself when there is nothing to repair, and
  * otherwise a copy that shares every sheet and entity it did not change. The
@@ -154,7 +219,12 @@ export const createLayerNameResolver = (project: {
  * repairs it to the same thing.
  */
 export const repairLayerNames = <
-  P extends { layers: Record<LayerId, Layer>; layerOrder: LayerId[]; sheets: Record<SheetId, Sheet> },
+  P extends {
+    layers: Record<LayerId, Layer>;
+    layerOrder: LayerId[];
+    removedLayers?: RemovedLayerCounts;
+    sheets: Record<SheetId, Sheet>;
+  },
 >(project: P): P => {
   if (!project.layers || !Array.isArray(project.layerOrder) || !project.sheets) return project;
   const resolver = createLayerNameResolver(project);

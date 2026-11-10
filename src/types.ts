@@ -786,6 +786,13 @@ export interface Project {
   modified: number;
   layers: Record<LayerId, Layer>;
   layerOrder: LayerId[];
+  /**
+   * How many times the user has removed the layer for one of the app's own
+   * layer names, keyed by the lower-cased name ('underlay'). Removing a layer
+   * leaves its entities in place, and the repair in lib/layer-names would
+   * otherwise take them for a layer that was lost and create it again.
+   */
+  removedLayers?: Record<string, number>;
   sheets: Record<SheetId, Sheet>;
   sheetOrder: SheetId[];
   activeSheetId: SheetId;

@@ -22,7 +22,7 @@ import { assembleDrawingNumber, nextSequenceNumber } from '../drawing/numbering'
 import { shouldRejectLocalProjectMutation } from './collaboration-guard';
 import { keepRouteConnections } from '../lib/route-connections';
 import { projectWithAutoFeatures } from '../lib/auto-feature-actions';
-import { createLayerNameResolver, layerFromSpec, STANDARD_LAYERS } from '../lib/layer-names';
+import { createLayerNameResolver, layerFromSpec, STANDARD_LAYERS, withLayerRemoved } from '../lib/layer-names';
 import { notify } from './notifications';
 
 const newId = () => nanoid(10);
@@ -772,10 +772,20 @@ export const useStore = create<Store>((rawSet, get) => {
     delete layers[id];
     const layerOrder = project.layerOrder.filter((l) => l !== id);
     const activeLayerId = project.activeLayerId === id ? layerOrder[0] : project.activeLayerId;
+    // The layer's entities stay where they are, still pointing at it. Record the
+    // removal so the layer-name repair does not create the layer again for them.
+    const removedLayers = withLayerRemoved(project.removedLayers, project.layers[id]);
     set({
       past: pushPast(past, project),
       future: [],
-      project: { ...project, layers, layerOrder, activeLayerId, modified: Date.now() },
+      project: {
+        ...project,
+        layers,
+        layerOrder,
+        activeLayerId,
+        ...(removedLayers ? { removedLayers } : {}),
+        modified: Date.now(),
+      },
     });
   },
 
