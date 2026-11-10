@@ -14,9 +14,10 @@ import type {
 } from '../types';
 import type { Cable } from '../models/cable';
 import type { PenetrationSeal } from '../models/fire';
+import { computeContainmentFill } from '../calc/fill';
 import { dist, distToSegment, segIntersect } from '../lib/math';
 import {
-  FILL_LIMITS,
+  DEFAULT_STANDARDS,
   SUPPORT_SPANS_HORIZONTAL_MM,
   SEGREGATION_MIN_MM,
   VDROP_LIMITS,
@@ -53,15 +54,6 @@ const routeLengthMm = (c: ContainmentEntity): number => {
   let n = 0;
   for (let i = 1; i < c.points.length; i++) n += dist(c.points[i - 1], c.points[i]);
   return n;
-};
-
-const innerCsa = (c: ContainmentEntity): number => {
-  if (c.innerCsaMm2 && c.innerCsaMm2 > 0) return c.innerCsaMm2;
-  if (c.containmentType === 'conduit' && c.width) {
-    return Math.PI * (c.width / 2) ** 2 * 0.8;
-  }
-  if (c.width && c.height) return c.width * c.height * 0.85;
-  return 0;
 };
 
 const supportSpanMm = (c: ContainmentEntity): number => {
@@ -112,19 +104,6 @@ const collectWalls = (project: Project): WallEntity[] => {
   return walls;
 };
 
-const fillLimitFor = (project: Project, c: ContainmentEntity): number => {
-  const code = project.standardsProfile?.code ?? 'BS7671';
-  const limits = FILL_LIMITS[code];
-  switch (c.containmentType) {
-    case 'trunking': return limits.trunking;
-    case 'conduit': return limits.conduit;
-    case 'tray': return limits.cableTray;
-    case 'ladder': return limits.cableLadder;
-    case 'basket': return limits.cableBasket;
-    default: return 1.0;
-  }
-};
-
 const cablesIn = (project: Project, id: string): Cable[] => {
   const sched = project.cableSchedule;
   if (!sched) return [];
@@ -135,18 +114,20 @@ const evaluateFill = (project: Project, containments: ContainmentEntity[]): Comp
   let pass = 0;
   let fail = 0;
   const details: string[] = [];
+  const standards = project.standardsProfile ?? DEFAULT_STANDARDS.BS7671;
   for (const c of containments) {
-    const csa = innerCsa(c);
-    if (csa <= 0) continue;
     const cables = cablesIn(project, c.id);
-    const occupied = cables.reduce((a, b) => a + Math.PI * (b.outerDiameter / 2) ** 2, 0);
-    const ratio = occupied / csa;
-    const limit = fillLimitFor(project, c);
-    if (ratio > limit) {
+    // Same calculation as the fill calculation panels and the compliance checks.
+    const r = computeContainmentFill(c, cables, standards);
+    if (cables.length === 0 && !(r.innerAreaMm2 > 0)) continue;
+    const name = c.label ?? c.id.slice(0, 6);
+    if (r.fillStatus === 'unknown') {
+      // Missing size or cable diameter: cannot be shown to comply.
       fail++;
-      details.push(
-        `${c.label ?? c.id.slice(0, 6)}: ${(ratio * 100).toFixed(1)}% (limit ${(limit * 100).toFixed(0)}%)`,
-      );
+      details.push(`${name}: fill cannot be checked (missing containment size or cable diameter)`);
+    } else if (r.fillStatus === 'over') {
+      fail++;
+      details.push(`${name}: ${r.fillPct.toFixed(1)}% (limit ${(r.limit * 100).toFixed(0)}%)`);
     } else {
       pass++;
     }

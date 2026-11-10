@@ -152,3 +152,31 @@ describe('export provenance metadata', () => {
     expect(fireStopPdf.size).toBeGreaterThan(1_000);
   });
 });
+
+describe('compliance report containment fill', () => {
+  it('does not pass a containment whose fill cannot be checked', () => {
+    const base = projectFixture();
+    const sheet = Object.values(base.sheets)[0] as Sheet;
+    const cont = {
+      id: 'fill-c1', kind: 'containment', layerId: 'l', visible: true, locked: false,
+      containmentType: 'tray', width: 0, height: 0, points: [{ x: 0, y: 0 }, { x: 1000, y: 0 }],
+    } as never;
+    sheet.entities['fill-c1'] = cont;
+    sheet.entityOrder.push('fill-c1');
+    const mk = (od: number, id: string) => ({
+      id, reference: id, from: 'A', to: 'B', construction: 'PVC/PVC', cores: 2, csa: 2.5,
+      hasEarth: true, outerDiameter: od, voltage: 230, route: ['fill-c1'],
+    }) as unknown as Cable;
+    base.cableSchedule = { cables: { x1: mk(12, 'x1') }, cableOrder: ['x1'] } as never;
+    const noSize = generateComplianceReport(base).fill;
+    expect(noSize.fail).toBe(1);
+    expect(noSize.pass).toBe(0);
+
+    (cont as { width: number }).width = 200;
+    (cont as { height: number }).height = 100;
+    base.cableSchedule = { cables: { x2: mk(Number.NaN, 'x2') }, cableOrder: ['x2'] } as never;
+    expect(generateComplianceReport(base).fill.fail).toBe(1);
+    base.cableSchedule = { cables: { x3: mk(12, 'x3') }, cableOrder: ['x3'] } as never;
+    expect(generateComplianceReport(base).fill.pass).toBe(1);
+  });
+});
