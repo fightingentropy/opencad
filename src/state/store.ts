@@ -20,6 +20,7 @@ import { emptyCableSchedule } from '../models/cable';
 import type { SheetMeta } from '../models/revision';
 import { assembleDrawingNumber, nextSequenceNumber } from '../drawing/numbering';
 import { shouldRejectLocalProjectMutation } from './collaboration-guard';
+import { canEditSheet } from '../drawing/revision-utils';
 import { nextEquipmentTag } from '../lib/component-library';
 import { keepRouteConnections } from '../lib/route-connections';
 import { projectWithAutoFeatures } from '../lib/auto-feature-actions';
@@ -536,6 +537,22 @@ interface Store {
   setAutoRoute: (on: boolean) => void;
 }
 
+/**
+ * True, with a message, when the active sheet is locked by its issue status
+ * (S3, S4, S6, S7). Entity edits on the sheet are refused; revision, issue
+ * and installation records are not entity edits and stay open, so a sheet can
+ * still be moved on to a new revision.
+ */
+export function activeSheetEditBlocked(): boolean {
+  const { project, editor } = useStore.getState();
+  const sheet = project.sheets[project.activeSheetId];
+  if (!sheet || canEditSheet(sheet)) return false;
+  const message = `${sheet.name} is issued as ${sheet.meta?.status} and locked from editing. Add a new revision in the Revisions panel to edit it.`;
+  notify('warning', message, { id: 'sheet-locked', timeoutMs: 5000 });
+  useStore.setState({ editor: { ...editor, statusMessage: message } });
+  return true;
+}
+
 export const useStore = create<Store>((rawSet, get) => {
   // All history-bearing geometry edits share the same locked-joint rule,
   // including legacy plan tools. Loads, remote snapshots and undo/redo
@@ -839,6 +856,7 @@ export const useStore = create<Store>((rawSet, get) => {
   },
 
   addEntity: (e) => {
+    if (activeSheetEditBlocked()) return;
     const { project, past } = get();
     const sheet = project.sheets[project.activeSheetId];
     if (!sheet) return;
@@ -859,6 +877,7 @@ export const useStore = create<Store>((rawSet, get) => {
   },
 
   addEntities: (es) => {
+    if (activeSheetEditBlocked()) return;
     if (es.length === 0) return;
     const { project, past } = get();
     const sheet = project.sheets[project.activeSheetId];
@@ -885,6 +904,7 @@ export const useStore = create<Store>((rawSet, get) => {
   // layerId. Map each name to the layer that has it, creating missing layers,
   // and add the entities in the same undo step.
   addEntitiesByLayerName: (es) => {
+    if (activeSheetEditBlocked()) return;
     if (es.length === 0) return;
     const { project, past } = get();
     const sheet = project.sheets[project.activeSheetId];
@@ -911,6 +931,7 @@ export const useStore = create<Store>((rawSet, get) => {
   },
 
   updateEntity: (id, patch) => {
+    if (activeSheetEditBlocked()) return;
     const { project, past } = get();
     const sheet = project.sheets[project.activeSheetId];
     if (!sheet) return;
@@ -936,6 +957,7 @@ export const useStore = create<Store>((rawSet, get) => {
   },
 
   removeEntities: (ids) => {
+    if (activeSheetEditBlocked()) return;
     if (ids.length === 0) return;
     const { project, past, editor } = get();
     const sheet = project.sheets[project.activeSheetId];
@@ -1052,6 +1074,7 @@ export const useStore = create<Store>((rawSet, get) => {
   },
 
   pasteFromClipboard: (anchor) => {
+    if (activeSheetEditBlocked()) return;
     const { clipboard, project, past, editor } = get();
     if (clipboard.length === 0) return;
     const sheet = project.sheets[project.activeSheetId];
@@ -1176,6 +1199,7 @@ export const useStore = create<Store>((rawSet, get) => {
   },
 
   alignEntities: (axis) => {
+    if (activeSheetEditBlocked()) return;
     const { project, past, editor } = get();
     const sheet = project.sheets[project.activeSheetId];
     if (!sheet) return;
@@ -1255,6 +1279,7 @@ export const useStore = create<Store>((rawSet, get) => {
   },
 
   distributeEntities: (axis) => {
+    if (activeSheetEditBlocked()) return;
     const { project, past, editor } = get();
     const sheet = project.sheets[project.activeSheetId];
     if (!sheet) return;
@@ -1304,6 +1329,7 @@ export const useStore = create<Store>((rawSet, get) => {
   },
 
   flipEntities: (axis) => {
+    if (activeSheetEditBlocked()) return;
     const { project, past, editor } = get();
     const sheet = project.sheets[project.activeSheetId];
     if (!sheet) return;

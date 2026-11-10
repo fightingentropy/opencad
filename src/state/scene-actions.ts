@@ -6,7 +6,7 @@ import {
 } from '../lib/scene-edit';
 import { shouldRejectLocalProjectMutation } from './collaboration-guard';
 import { notify } from './notifications';
-import { useStore } from './store';
+import { activeSheetEditBlocked, useStore } from './store';
 import { distance3, routePath, withRoutePath } from '../lib/route-path';
 import { discoverRouteConnections, keepRouteConnections } from '../lib/route-connections';
 
@@ -41,6 +41,7 @@ function connectedRoutes(entity: PhysicalEntity, project: Project): string[] {
 export function commitPhysicalEntity(entity: PhysicalEntity, expectedProject: Project, add = false): PhysicalEntity | null {
   const state = useStore.getState();
   if (state.project !== expectedProject) return null;
+  if (activeSheetEditBlocked()) return null;
   const sheet = expectedProject.sheets[expectedProject.activeSheetId];
   const previous = sheet?.entities[entity.id];
   if (!sheet || (!add && !isPhysicalEntity(previous))) return null;

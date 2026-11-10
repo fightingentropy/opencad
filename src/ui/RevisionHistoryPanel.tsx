@@ -13,7 +13,9 @@ export function RevisionHistoryPanel() {
 
   const meta: SheetMeta = sheet.meta ?? {};
   const revisions = meta.revisions ?? [];
-  const editable = !meta.status || REVISION_STATUSES[meta.status].editable;
+  // Revision rows are records, not drawing edits: they stay available on an
+  // issued sheet so it can move to a new revision or be reissued. Only entity
+  // edits are locked (see activeSheetEditBlocked in the store).
 
   // Spread the live project from getState() so the panel only subscribes to
   // the active sheet it renders.
@@ -79,10 +81,10 @@ export function RevisionHistoryPanel() {
           <span className={`status-pill status-${meta.status ?? 'S0'}`}>
             {meta.status ?? 'S0'} · {REVISION_STATUSES[meta.status ?? 'S0'].name}
           </span>
-          <button className="btn-ghost btn-tiny" onClick={onAdd} disabled={!editable}>
+          <button className="btn-ghost btn-tiny" onClick={onAdd}>
             + Revision
           </button>
-          <button className="btn-primary btn-tiny" onClick={onIssue} disabled={!editable}>
+          <button className="btn-primary btn-tiny" onClick={onIssue}>
             Issue Drawing
           </button>
         </div>
