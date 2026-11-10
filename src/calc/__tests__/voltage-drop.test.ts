@@ -3,6 +3,23 @@ import { computeVoltageDrop, loadCategoryForCable } from '../voltage-drop';
 import type { Cable } from '../../models/cable';
 
 describe('computeVoltageDrop', () => {
+  it('does not understate the drop for sizes missing from the table', () => {
+    const base = {
+      construction: 'XLPE/SWA/PVC' as const,
+      lengthM: 30,
+      designCurrentA: 10,
+      systemVoltageV: 400,
+      phasing: 'three' as const,
+      loadCategory: 'other' as const,
+    };
+    // 1.0 mm² is below the first XLPE entry (1.5 mm² = 25): scale up, not 25.
+    expect(computeVoltageDrop({ ...base, csa: 1.0 }).mvAm).toBeCloseTo(37.5, 6);
+    // 3.0 mm² sits between 2.5 (15) and 4.0 (9.5): use the smaller size.
+    expect(computeVoltageDrop({ ...base, csa: 3.0 }).mvAm).toBe(15);
+    // Tabulated sizes are unchanged.
+    expect(computeVoltageDrop({ ...base, csa: 4.0 }).mvAm).toBe(9.5);
+  });
+
   it('single-phase PVC 2.5mm² 16A 30m 230V matches the BS 7671 Table 4D2B value', () => {
     // mV/A/m for 2.5mm² PVC SP = 18 (per the standards table)
     // vdropV = 18 × 16 × 30 / 1000 = 8.64V

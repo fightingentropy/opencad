@@ -45,10 +45,13 @@ const lookupVdropTable = (csa: number, table: Record<number, number>): number =>
     .map((k) => Number(k))
     .sort((a, b) => a - b);
   if (keys.length === 0) return 0;
-  if (csa <= keys[0]) return table[keys[0]];
-  if (csa >= keys[keys.length - 1]) return table[keys[keys.length - 1]];
-  for (let i = 0; i < keys.length - 1; i++) {
-    if (csa > keys[i] && csa < keys[i + 1]) return table[keys[i + 1]];
+  // Errs high wherever the size is not tabulated: below the smallest size the
+  // drop scales up in inverse proportion to csa, and between sizes the next
+  // smaller (higher drop) entry is used. Above the largest size the largest
+  // entry still applies, which is also higher than the true figure.
+  if (csa < keys[0]) return (table[keys[0]] * keys[0]) / csa;
+  for (let i = keys.length - 1; i >= 0; i--) {
+    if (csa >= keys[i]) return table[keys[i]];
   }
   return table[keys[keys.length - 1]];
 };
