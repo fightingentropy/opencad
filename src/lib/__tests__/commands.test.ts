@@ -291,3 +291,40 @@ describe('view command routing', () => {
     expect(nextViewer).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('edit.select-all', () => {
+  it('leaves out hidden and locked entities and those on hidden or locked layers', () => {
+    const { project } = useStore.getState();
+    const sheet = project.sheets[project.activeSheetId];
+    const [layerA, layerB, layerC] = project.layerOrder;
+    const mk = (id: string, layerId: string, extra: Record<string, unknown> = {}) =>
+      ({ id, kind: 'line', layerId, visible: true, locked: false, a: { x: 0, y: 0 }, b: { x: 1, y: 1 }, ...extra }) as never;
+    const entities = {
+      ok: mk('ok', layerA),
+      hidden: mk('hidden', layerA, { visible: false }),
+      locked: mk('locked', layerA, { locked: true }),
+      onHiddenLayer: mk('onHiddenLayer', layerB),
+      onLockedLayer: mk('onLockedLayer', layerC),
+    };
+    useStore.setState({
+      project: {
+        ...project,
+        layers: {
+          ...project.layers,
+          [layerB]: { ...project.layers[layerB], visible: false },
+          [layerC]: { ...project.layers[layerC], locked: true },
+        },
+        sheets: {
+          ...project.sheets,
+          [sheet.id]: { ...sheet, entities, entityOrder: Object.keys(entities) },
+        },
+      },
+    });
+    try {
+      expect(runCommand('edit.select-all')).toBe(true);
+      expect(Array.from(useStore.getState().editor.selection)).toEqual(['ok']);
+    } finally {
+      useStore.setState({ project });
+    }
+  });
+});

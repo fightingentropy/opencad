@@ -296,7 +296,19 @@ const commands: CommandDef[] = [
     shortcut: { display: `${MOD}A`, matches: modKey('a') },
     run: ({ store }) => {
       const sheet = store.project.sheets[store.project.activeSheetId];
-      if (sheet) store.setSelection(sheet.entityOrder);
+      if (!sheet) return;
+      // Skip hidden and locked entities and entities on hidden or locked
+      // layers, so Select All followed by Delete or an edit cannot touch
+      // anything the user cannot see or has locked. Matches the canvas
+      // context menu's Select all.
+      store.setSelection(
+        sheet.entityOrder.filter((id) => {
+          const e = sheet.entities[id];
+          if (!e || !e.visible || e.locked) return false;
+          const layer = store.project.layers[e.layerId];
+          return (layer?.visible ?? true) && !layer?.locked;
+        }),
+      );
     },
   },
   {
