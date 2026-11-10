@@ -115,6 +115,41 @@ const projectMetaUnchanged = (a: Project, b: Project): boolean => {
   return true;
 };
 
+// Carry the records a remote transaction touched into an undo/redo snapshot, so
+// that undo reverts local edits without restoring stale copies of what a peer
+// changed or deleted. Sheets the snapshot does not have are left alone.
+const rebaseSnapshot = (
+  snapshot: Project,
+  remote: Project,
+  sheetKeys: ReadonlySet<string>,
+  entityKeys: ReadonlySet<string>,
+): Project => {
+  const ids = new Map<SheetId, EntityId[]>();
+  for (const sheetId of sheetKeys) if (snapshot.sheets[sheetId] && remote.sheets[sheetId]) ids.set(sheetId, []);
+  for (const key of entityKeys) {
+    const parts = splitEntityKey(key);
+    if (!parts || !snapshot.sheets[parts[0]] || !remote.sheets[parts[0]]) continue;
+    ids.set(parts[0], [...(ids.get(parts[0]) ?? []), parts[1]]);
+  }
+  if (ids.size === 0) return snapshot;
+  const sheets = { ...snapshot.sheets };
+  for (const [sheetId, entityIds] of ids) {
+    const { entities: _remoteEntities, ...remoteShell } = remote.sheets[sheetId];
+    const entities = { ...snapshot.sheets[sheetId].entities };
+    for (const id of entityIds) {
+      const current = remote.sheets[sheetId].entities[id];
+      if (current) entities[id] = current;
+      else delete entities[id];
+    }
+    // A sheet whose shell changed takes the remote shell; the order is rebuilt
+    // from the snapshot's own order, so local reordering is not lost.
+    const sheet = { ...(sheetKeys.has(sheetId) ? remoteShell : snapshot.sheets[sheetId]), entities,
+      entityOrder: snapshot.sheets[sheetId].entityOrder };
+    sheets[sheetId] = { ...sheet, entityOrder: reconcileEntityOrder(sheet) };
+  }
+  return { ...snapshot, sheets };
+};
+
 interface BindHandle {
   /** Tear down both directions. */
   dispose: () => void;
@@ -123,6 +158,13 @@ interface BindHandle {
 interface StoreShape {
   project: Project;
   setProject: (p: Project) => void;
+  /**
+   * Replace the project with a remote state. When `rebase` is given, the local
+   * undo and redo snapshots are kept and passed through it; without it the
+   * history is cleared, as setProject does. Stores that do not provide it
+   * fall back to setProject.
+   */
+  applyRemoteProject?: (p: Project, rebase?: (snapshot: Project) => Project) => void;
 }
 
 /**
@@ -465,7 +507,19 @@ export function bindStoreToYjs(
     else refreshMirrors();
     applyingRemote = true;
     try {
-      applyAuthenticatedCollaborationUpdate(() => store.getState().setProject(next));
+      // A remote transaction that left the project settings alone and did not
+      // add or remove a sheet keeps the local undo history, rebased onto the
+      // remote state. Anything wider (settings changed, a sheet added or
+      // removed, or a full rebuild) clears it.
+      const state = store.getState();
+      const keepHistory = patched && changed !== undefined && !changed.meta;
+      applyAuthenticatedCollaborationUpdate(() => {
+        if (state.applyRemoteProject) {
+          state.applyRemoteProject(next, keepHistory
+            ? (snapshot) => rebaseSnapshot(snapshot, next, changed.sheets, changed.entities)
+            : undefined);
+        } else state.setProject(next);
+      });
     } finally {
       applyingRemote = false;
     }

@@ -458,6 +458,9 @@ interface Store {
 
   // Project actions
   setProject: (p: Project) => void;
+  // Replace the project with a remote collaboration state. With `rebase`, local
+  // undo/redo snapshots are kept and rebased; without it the history is cleared.
+  applyRemoteProject: (p: Project, rebase?: (snapshot: Project) => Project) => void;
   resetProject: () => void;
   // Apply a partial patch to the current project, recording undo. Used by
   // companion action modules (cable-actions, site-actions, ...) so they can
@@ -577,6 +580,10 @@ export const useStore = create<Store>((rawSet, get) => {
       future: [],
       viewHistory: initialViewHistory(s.editor.viewport),
     })),
+  applyRemoteProject: (p, rebase) =>
+    set((s) => rebase
+      ? { project: p, past: s.past.map(rebase), future: s.future.map(rebase) }
+      : { project: p, past: [], future: [], viewHistory: initialViewHistory(s.editor.viewport) }),
   resetProject: () =>
     set(() => {
       const ed = initialEditor();
