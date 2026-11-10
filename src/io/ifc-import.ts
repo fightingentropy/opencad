@@ -25,14 +25,15 @@ interface ImportResult {
   warnings: string[];
 }
 
-const RECORD_RX = /#(\d+)=([A-Z0-9_]+)\(([\s\S]*?)\);/g;
-
 const parseRecords = (text: string): Map<number, IfcRecord> => {
   const out = new Map<number, IfcRecord>();
   // Strip header / footer — we're forgiving about whitespace
   const body = text.replace(/\r\n/g, '\n');
+  // Local regex: a shared /g regex keeps its lastIndex when a limit error
+  // aborts the loop, which would corrupt the next import.
+  const recordRx = /#(\d+)=([A-Z0-9_]+)\(([\s\S]*?)\);/g;
   let m: RegExpExecArray | null;
-  while ((m = RECORD_RX.exec(body)) !== null) {
+  while ((m = recordRx.exec(body)) !== null) {
     const id = parseInt(m[1], 10);
     const type = m[2].toUpperCase();
     out.set(id, { id, type, args: m[3] });
