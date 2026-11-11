@@ -2,11 +2,18 @@
 // components are not unit-tested in this repo (node environment, no DOM), so
 // this pins the wiring that keeps the 3D views from going stale or from
 // returning to a continuous render loop.
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import panelSource from '../Panel3D.tsx?raw';
+import siteSource from '../SiteSceneViewer.tsx?raw';
+import selectionSource from '../SceneSelectionOverlay.tsx?raw';
+import clearanceSource from '../SceneClearanceOverlay.tsx?raw';
+import placementSource from '../ScenePlacement.ts?raw';
 
-const source = (name: string) => readFileSync(fileURLToPath(new URL('../' + name, import.meta.url)), 'utf8');
+const sources: Record<string, string> = {
+  'Panel3D.tsx': panelSource, 'SiteSceneViewer.tsx': siteSource, 'SceneSelectionOverlay.tsx': selectionSource,
+  'SceneClearanceOverlay.tsx': clearanceSource, 'ScenePlacement.ts': placementSource,
+};
+const source = (name: string) => sources[name];
 const count = (text: string, needle: string | RegExp) =>
   typeof needle === 'string' ? text.split(needle).length - 1 : (text.match(needle) ?? []).length;
 const RAF = /\brequestAnimationFrame\s*\(/g;
