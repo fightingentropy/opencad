@@ -190,3 +190,19 @@ describe('tray perforation slots', () => {
     expect(instanced[0].count).toBe(1000);
   });
 });
+
+describe('disposeObject', () => {
+  it('disposes InstancedMesh so its instance buffer is released', () => {
+    const slots = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshBasicMaterial(),
+      4
+    );
+    const group = new THREE.Group();
+    group.add(slots);
+    let fired = 0;
+    slots.addEventListener('dispose', () => fired++);
+    disposeObject(group);
+    expect(fired).toBe(1);
+  });
+});

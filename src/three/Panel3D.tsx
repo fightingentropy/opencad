@@ -1783,9 +1783,14 @@ function makeOrbitControls(
 }
 
 // ---------- Disposal helpers -------------------------------------------------
-function disposeObject(obj: THREE.Object3D) {
+export function disposeObject(obj: THREE.Object3D) {
   obj.traverse((child: THREE.Object3D) => {
     const m = child as any;
+    // InstancedMesh owns an instanceMatrix GPU buffer that only its own
+    // dispose() releases.
+    if ((child as THREE.InstancedMesh).isInstancedMesh) {
+      (child as THREE.InstancedMesh).dispose();
+    }
     if (m.geometry && typeof m.geometry.dispose === 'function') {
       m.geometry.dispose();
     }
