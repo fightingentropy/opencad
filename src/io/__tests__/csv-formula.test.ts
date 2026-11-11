@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { neutralizeFormula } from '../csv-safe';
+import { splitRestoredLine, neutralizeFormula } from '../csv-safe';
 import { bomToCSV } from '../bom';
 import { createEmptyProject } from '../../state/store';
 
@@ -19,5 +19,9 @@ describe('csv formula neutralisation', () => {
       createEmptyProject(),
     );
     expect(csv).toContain(`"'=HYPERLINK(""x"")"`);
+  });
+
+  it('restores neutralised cells when the modal splits an imported line', () => {
+    expect(splitRestoredLine(`'-F1,'=Q3,Panel`)).toEqual(['-F1', '=Q3', 'Panel']);
   });
 });

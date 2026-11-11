@@ -12,7 +12,7 @@ import { notify } from '../state/notifications';
 import { nanoid } from 'nanoid';
 import type { Cable, CableCircuitType, CableSchedule } from '../models/cable';
 import type { ContainmentEntity, EquipmentEntity, Vec2 } from '../types';
-import { neutralizeFormula } from '../io/csv-safe';
+import { neutralizeFormula, splitRestoredLine } from '../io/csv-safe';
 import { CableEditDialog } from './CableEditDialog';
 import { cableVoltageDrop, estimateAmpacity, estimateCableLength, estimateVdrop, fmtNum } from './whole-site-helpers';
 import { buildContainmentGraph } from '../lib/containment-graph';
@@ -139,7 +139,7 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
       const cables = { ...schedule.cables };
       const order = [...schedule.cableOrder];
       for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(',');
+        const cols = splitRestoredLine(lines[i]);
         if (cols.length < 6) continue;
         const id = nanoid(10);
         const c: Cable = {

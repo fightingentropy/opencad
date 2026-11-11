@@ -13,3 +13,7 @@ export const neutralizeFormula = (s: string): string =>
 // so identifiers such as "-F1" survive a CSV export and re-import.
 export const restoreFormula = (s: string): string =>
   /^'[=+\-@\t\r]/.test(s) ? s.slice(1) : s;
+
+// Splits one simple comma-separated line and restores neutralised cells.
+export const splitRestoredLine = (line: string): string[] =>
+  line.split(',').map(restoreFormula);
