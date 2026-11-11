@@ -150,7 +150,10 @@ const renderSymbolPreviewSVG = (sym: SymbolEntity, layer: Layer): string => {
 
 // A number read from a project file may be a string or NaN. Anything that is
 // not a finite number is written as 0 so it cannot break out of an attribute.
-const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+const num = (v: unknown): number => {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+  return typeof n === 'number' && Number.isFinite(n) ? n : 0;
+};
 
 const escapeXml = (s: string): string =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

@@ -6,7 +6,7 @@ import type { Cable, CableId } from '../models/cable';
 import type { Project } from '../types';
 import type { BOMRow } from './bom';
 import { assertImportTextLimits, IMPORT_LIMITS, ImportLimitError } from './import-limits';
-import { neutralizeFormula } from './csv-safe';
+import { neutralizeFormula, restoreFormula } from './csv-safe';
 import { prependCSVExportMetadata } from './export-metadata';
 
 const csvEscape = (v: unknown): string => {
@@ -21,7 +21,7 @@ const rowsToCSV = (rows: unknown[][]): string =>
   rows.map((r) => r.map(csvEscape).join(',')).join('\n');
 
 const rowsToTSV = (rows: unknown[][]): string =>
-  rows.map((r) => r.map((v) => String(v ?? '').replace(/\t/g, ' ').replace(/\n/g, ' ')).join('\t')).join('\n');
+  rows.map((r) => r.map((v) => neutralizeFormula(String(v ?? '').replace(/\t/g, ' ').replace(/\n/g, ' '))).join('\t')).join('\n');
 
 const CABLE_HEADERS = [
   'reference', 'description', 'from', 'to', 'systemId', 'circuitType',
@@ -119,7 +119,7 @@ export const cablesFromCSV = (text: string): CableImportResult => {
   const errors: string[] = [];
   const cables: Cable[] = [];
   for (let li = 1; li < rows.length; li++) {
-    const cells = rows[li];
+    const cells = rows[li].map(restoreFormula);
     try {
       const num = (name: string, fallback?: number): number | undefined => {
         const raw = (cells[idx(name)] ?? '').trim();
