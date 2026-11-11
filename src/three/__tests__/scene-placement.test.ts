@@ -132,7 +132,7 @@ describe('3D placement requests a frame for every scene change', () => {
       camera.lookAt(0, 0, 0);
       camera.updateMatrixWorld(true);
       onSceneChange.mockClear();
-      orbit.dispatchEvent(new Event('change'));
+      (orbit as unknown as EventTarget).dispatchEvent(new Event('change'));
       expect(frames).toHaveLength(1);
       runFrames();
       expect(ghost.position.equals(afterMove)).toBe(false);
