@@ -7,10 +7,13 @@ import { componentPlacementPreview, useComponentPlacement } from '../state/compo
 import { useStore } from '../state/store';
 import { shouldRejectLocalProjectMutation } from '../state/collaboration-guard';
 import { DimensionInput } from '../ui/DimensionInput';
+import type { RenderScheduler } from './render-scheduler';
 
-export function SceneClearanceOverlay({ project, selection, cameraRef, mountRef, rootRef }: {
+export function SceneClearanceOverlay({ project, selection, cameraRef, mountRef, rootRef, scheduler }: {
   project: Project; selection: ReadonlySet<string>; cameraRef: RefObject<THREE.PerspectiveCamera>;
   mountRef: RefObject<HTMLDivElement>; rootRef: RefObject<THREE.Group>;
+  /** The viewer's render scheduler: marks are recomputed right after each frame, so they match the picture. */
+  scheduler: RenderScheduler;
 }) {
   const pending = useComponentPlacement(state => state.pending);
   const position = useComponentPlacement(state => state.position);
@@ -43,7 +46,7 @@ export function SceneClearanceOverlay({ project, selection, cameraRef, mountRef,
   const visible = evaluated?.issues.slice(0, 3);
 
   useEffect(() => {
-    let frame = 0, previous = '';
+    let previous = '';
     const update = () => {
       const camera = cameraRef.current, mount = mountRef.current, root = rootRef.current;
       const next: typeof marks = [];
@@ -76,11 +79,13 @@ export function SceneClearanceOverlay({ project, selection, cameraRef, mountRef,
       }
       const key = JSON.stringify(next);
       if (key !== previous) { previous = key; setMarks(next); }
-      frame = requestAnimationFrame(update);
     };
-    frame = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(frame);
-  }, [evaluated, project, cameraRef, mountRef, rootRef]);
+    // Runs after every render of the 3D view, with the camera matrices that
+    // frame used. A change of this effect's inputs asks for a frame.
+    const off = scheduler.onFrame(update);
+    scheduler.invalidate();
+    return off;
+  }, [evaluated, project, cameraRef, mountRef, rootRef, scheduler]);
 
   if (!evaluated) return null;
   const describe = (issue: ClearanceIssue) => issue.kind === 'access' ? 'Access space occupied' : issue.kind === 'overlap' ? 'Overlap' : Math.round(issue.gap) + ' mm gap';

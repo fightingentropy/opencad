@@ -48,6 +48,8 @@ import { SceneClearanceOverlay } from './SceneClearanceOverlay';
 import { PlacementControls } from '../ui/PlacementControls';
 import { RunDrawingDialog } from '../ui/RunDrawingDialog';
 import { trailingDebounce } from './trailing-debounce';
+import { useRenderScheduler, withInvalidate } from './render-scheduler';
+import { settleOrbitStep } from './orbit-settle';
 import './site-workspace.css';
 
 interface Props {
@@ -134,9 +136,12 @@ const objectBoundingSphere = (obj: THREE.Object3D): THREE.Sphere => {
 };
 
 // Frame the given object inside the camera view at a comfortable distance.
+// The camera helpers take a required invalidate: frameObject changes near/far,
+// which does not fire the controls' change event.
 const frameObject = (
   camera: THREE.PerspectiveCamera,
   controls: OrbitControls,
+  invalidate: () => void,
   obj: THREE.Object3D,
   view: CameraView = 'iso',
 ): void => {
@@ -155,16 +160,18 @@ const frameObject = (
   camera.far = fitDist + sphere.radius * 3;
   camera.updateProjectionMatrix();
   controls.update();
+  invalidate();
 };
 
 const placeWalkCamera = (
   camera: THREE.PerspectiveCamera,
   controls: OrbitControls,
+  invalidate: () => void,
   obj: THREE.Object3D,
 ): void => {
   const box = visibleBoundingBox(obj);
   if (box.isEmpty()) {
-    frameObject(camera, controls, obj);
+    frameObject(camera, controls, invalidate, obj);
     return;
   }
 
@@ -191,11 +198,13 @@ const placeWalkCamera = (
   camera.far = Math.max(50000, Math.max(size.x, size.y, size.z) * 8);
   camera.updateProjectionMatrix();
   controls.update();
+  invalidate();
 };
 
 const walkStep = (
   camera: THREE.PerspectiveCamera,
   controls: OrbitControls,
+  invalidate: () => void,
   direction: WalkDirection,
   multiplier = 1,
   bounds?: THREE.Box3 | null,
@@ -253,6 +262,7 @@ const walkStep = (
   camera.position.copy(nextCamera);
   controls.target.copy(nextTarget);
   controls.update();
+  invalidate();
 };
 
 const isTypingTarget = (target: EventTarget | null): boolean => {
@@ -428,6 +438,9 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
   const selection = useStore((s) => s.editor.selection);
   const placement = useComponentPlacement((state) => state.pending);
   const mountRef = useRef<HTMLDivElement>(null);
+  // Render on demand: anything that changes the 3D view calls invalidate().
+  const scheduler = useRenderScheduler();
+  const invalidate = scheduler.invalidate;
   const displayMenuRef = useRef<HTMLDetailsElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -439,7 +452,6 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
   const sceneControlsRef = useRef<SceneControls | null>(null);
   const selectionHelpersRef = useRef<Map<string, THREE.BoxHelper>>(new Map());
   const selectedIdsRef = useRef<Set<string>>(new Set(selection));
-  const animationRef = useRef<number | null>(null);
   const cancelHoverRef = useRef<(() => void) | null>(null);
   const walkHoldRef = useRef<number | null>(null);
   const walkBoundsRef = useRef<THREE.Box3 | null>(null);
@@ -572,11 +584,13 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     selectionHelpersRef.current.clear();
   };
 
+  // Every caller (commits, picks, rebuilds, focus) gets a frame from here.
   const syncSelectionHelpers = (): void => {
     const scene = sceneRef.current;
     const group = sceneGroupRef.current;
     if (!scene || !group) {
       clearSelectionHelpers();
+      invalidate();
       return;
     }
 
@@ -608,6 +622,7 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
       disposeSelectionHelper(helper);
       selectionHelpersRef.current.delete(entityId);
     }
+    invalidate();
   };
 
   useEffect(() => {
@@ -1032,14 +1047,25 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
       camera.updateProjectionMatrix();
     };
     controls.addEventListener('change', updateClippingPlanes);
+    // User drag and wheel, frameObject, placeWalkCamera and walkStep all go
+    // through controls.update(), which fires change. Changes fired from the
+    // frame's own update (damping) are ignored by the scheduler; the settle
+    // step decides whether another frame is needed.
+    controls.addEventListener('change', invalidate);
     orbitRef.current = controls;
 
-    const animate = () => {
-      animationRef.current = requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    };
-    animate();
+    // Render on demand. Attaching draws the first frame; after that a frame
+    // is drawn only after an invalidate, and damping keeps frames coming
+    // only while the glide still moves visibly.
+    const detachRender = scheduler.attach({
+      beforeRender: () => settleOrbitStep(controls, camera, renderer.domElement.height),
+      render: () => renderer.render(scene, camera),
+    });
+    const onVisible = (): void => { if (!document.hidden) invalidate(); };
+    renderer.domElement.addEventListener('webglcontextrestored', invalidate);
+    document.addEventListener('visibilitychange', onVisible);
+    // Public escape hatch (also used by scripts/visual-smoke.mjs).
+    window.addEventListener('opencad:invalidate-3d', invalidate);
 
     const ro = new ResizeObserver(() => {
       cancelHover();
@@ -1048,16 +1074,19 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
       camera.aspect = w / Math.max(1, h);
       camera.updateProjectionMatrix();
       renderer.setSize(w, h, false);
+      // setSize cleared the drawing buffer: redraw now, not next frame.
+      scheduler.renderNow();
     });
     ro.observe(mount);
 
     return () => {
+      // Stop drawing before anything is disposed.
+      detachRender();
+      renderer.domElement.removeEventListener('webglcontextrestored', invalidate);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('opencad:invalidate-3d', invalidate);
       cancelHover();
       cancelHoverRef.current = null;
-      if (animationRef.current !== null) {
-        cancelAnimationFrame(animationRef.current);
-        animationRef.current = null;
-      }
       if (walkHoldRef.current !== null) {
         window.clearInterval(walkHoldRef.current);
         walkHoldRef.current = null;
@@ -1077,6 +1106,7 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
       controls.removeEventListener('start', cancelHover);
       controls.removeEventListener('change', cancelHover);
       controls.removeEventListener('change', updateClippingPlanes);
+      controls.removeEventListener('change', invalidate);
       controls.dispose();
       orbitRef.current = null;
       // Dispose the active scene group via SceneControls
@@ -1107,21 +1137,30 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     const sun = sceneRef.current?.getObjectByName('site-key-light');
     if (sun instanceof THREE.DirectionalLight) sun.castShadow = true;
     if (groundRef.current) groundRef.current.visible = containmentOnly;
-  }, [containmentOnly]);
+    invalidate();
+  }, [containmentOnly, invalidate]);
 
   useEffect(() => {
     if (placement?.surface !== '3d') return;
     const scene = sceneRef.current, camera = cameraRef.current, canvas = rendererRef.current?.domElement, orbit = orbitRef.current;
     if (!scene || !camera || !canvas || !orbit) return;
     cancelHoverRef.current?.();
-    return attachScenePlacement({ scene, camera, canvas, orbit, root: sceneGroupRef.current, placement, pointerPosition: placementPointerRef });
-  }, [placement]);
+    return attachScenePlacement({
+      scene, camera, canvas, orbit, root: sceneGroupRef.current, placement, pointerPosition: placementPointerRef,
+      onSceneChange: invalidate,
+    });
+  }, [placement, invalidate]);
+
+  // Second safety net for the placement ghost: any placement store change
+  // (pending, position, connection) draws a frame.
+  useEffect(() => useComponentPlacement.subscribe(() => invalidate()), [invalidate]);
 
   const moveWalk = (direction: WalkDirection, multiplier = 1): void => {
     const camera = cameraRef.current;
     const orbit = orbitRef.current;
     if (!camera || !orbit) return;
-    walkStep(camera, orbit, direction, multiplier, walkBoundsRef.current);
+    // Also the 55 ms walk-hold interval and the WASD keys.
+    walkStep(camera, orbit, invalidate, direction, multiplier, walkBoundsRef.current);
   };
 
   const startWalkHold = (direction: WalkDirection): void => {
@@ -1165,6 +1204,9 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     const camera = cameraRef.current;
     const orbit = orbitRef.current;
     if (!scene || !camera || !orbit) return;
+    // The frame is drawn asynchronously, after this effect has finished, so
+    // asking first covers every exit path below, including a throw.
+    invalidate();
 
     if (lastProjectIdRef.current !== project.id) {
       framedOnceRef.current = false;
@@ -1181,7 +1223,10 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
       sceneGroupRef.current = null;
     }
 
-    const { group, controls } = buildBuildingScene(project, { containmentOnly });
+    const built = buildBuildingScene(project, { containmentOnly });
+    const group = built.group;
+    // Every SceneControls call, now and from future callers, requests a frame.
+    const controls = withInvalidate(built.controls, invalidate, ['dispose']);
     scene.add(group);
     sceneGroupRef.current = group;
     sceneControlsRef.current = controls;
@@ -1229,7 +1274,7 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     // when sheets get edited but the project structure stays the same.
     if (!framedOnceRef.current) {
       const frameTarget = activeSceneObject() ?? group;
-      frameObject(camera, orbit, frameTarget, cameraView);
+      frameObject(camera, orbit, invalidate, frameTarget, cameraView);
       framedOnceRef.current = true;
     }
     refreshWalkBounds();
@@ -1249,8 +1294,9 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     const camera = cameraRef.current;
     const orbit = orbitRef.current;
     if (obj && camera && orbit) {
-      frameObject(camera, orbit, obj, cameraView);
+      frameObject(camera, orbit, invalidate, obj, cameraView);
     }
+    invalidate();
   }, [singleFloor, floorId, cameraView]);
 
   useEffect(() => {
@@ -1259,13 +1305,15 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     c.filterSystem(systemId || null);
     refreshWalkBounds();
     syncSelectionHelpers();
+    invalidate();
   }, [systemId]);
 
   useEffect(() => {
     const c = sceneControlsRef.current;
     if (!c) return;
     c.setTransparency('walls', containmentOnly ? 1 : wallOpacity);
-  }, [wallOpacity, containmentOnly]);
+    invalidate();
+  }, [wallOpacity, containmentOnly, invalidate]);
 
   useEffect(() => {
     const controls = sceneControlsRef.current;
@@ -1280,6 +1328,7 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     controls.setExploded(singleFloor ? 0 : floorSeparation);
     controls.isolateEntity(isolatedId);
     syncSelectionHelpers();
+    invalidate();
   }, [project, appearance, installationFilter, panelsOpen, coversOpen, showCables, showSupports, showLabels, showFirestops, floorSeparation, singleFloor, isolatedId, containmentOnly]);
 
   useEffect(() => {
@@ -1305,11 +1354,14 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
       if (singleFloor && fid) sceneControlsRef.current?.isolateFloor(fid);
       setIsolatedId(isolate ? entityId : null);
       sceneControlsRef.current?.isolateEntity(isolate ? entityId : null);
+      invalidate();
       // Let the floor scope effect finish before applying the close inspection pose.
+      // This callback runs after the commit's frame, so it invalidates itself.
       requestAnimationFrame(() => {
-        frameObject(camera, orbit, obj, cameraView);
+        frameObject(camera, orbit, invalidate, obj, cameraView);
         refreshWalkBounds();
         syncSelectionHelpers();
+        invalidate();
         onFocused?.();
       });
     };
@@ -1341,6 +1393,7 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     distance = THREE.MathUtils.clamp(distance, orbit.minDistance, orbit.maxDistance);
     camera.position.copy(orbit.target).add(offset.setLength(distance));
     orbit.update();
+    invalidate();
     // The active scene scope is captured by activeSceneObject/refreshWalkBounds.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [singleFloor, floorId, isolatedId]);
@@ -1381,13 +1434,21 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
     const camera = cameraRef.current;
     const orbit = orbitRef.current;
     if (obj && camera && orbit) {
-      frameObject(camera, orbit, obj, cameraView);
+      frameObject(camera, orbit, invalidate, obj, cameraView);
       refreshWalkBounds();
     } else {
       framedOnceRef.current = false;
       setResetTick((t) => t + 1);
     }
+    invalidate();
   };
+
+  // Render-on-demand safety net: every commit of this component (props,
+  // toolbar state, selection, hover tooltip) draws a frame, even if an effect
+  // above forgets to invalidate. Must stay dependency-free and last.
+  useEffect(() => {
+    invalidate();
+  });
 
   return (
     <div className={`site-workspace${containmentOnly ? ' site-workspace-containment' : ''}${width < 850 ? ' site-workspace-compact' : ''}${width < 620 ? ' site-workspace-narrow' : ''}`}>
@@ -1509,7 +1570,8 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
                 <div className="site-display-section site-walk-setting">
                   <button type="button" onClick={() => {
                     const object = activeSceneObject();
-                    if (object && cameraRef.current && orbitRef.current) placeWalkCamera(cameraRef.current, orbitRef.current, object);
+                    if (object && cameraRef.current && orbitRef.current) placeWalkCamera(cameraRef.current, orbitRef.current, invalidate, object);
+                    invalidate();
                     if (displayMenuRef.current) displayMenuRef.current.open = false;
                   }}>Walk at eye level</button>
                   <span>WASD or arrow keys</span>
@@ -1522,8 +1584,8 @@ export function SiteSceneViewer({ project, width, height, containmentOnly = fals
       <div className="site-viewport">
         <div ref={mountRef} className="site-render-surface" />
         {renderError && <div className="canvas-3d-fallback">{renderError}</div>}
-        <SceneSelectionOverlay project={project} selection={selection} cameraRef={cameraRef} mountRef={mountRef} rootRef={sceneGroupRef} />
-        <SceneClearanceOverlay project={project} selection={selection} cameraRef={cameraRef} mountRef={mountRef} rootRef={sceneGroupRef} />
+        <SceneSelectionOverlay project={project} selection={selection} cameraRef={cameraRef} mountRef={mountRef} rootRef={sceneGroupRef} scheduler={scheduler} />
+        <SceneClearanceOverlay project={project} selection={selection} cameraRef={cameraRef} mountRef={mountRef} rootRef={sceneGroupRef} scheduler={scheduler} />
         <PlacementControls />
         <RunDrawingDialog project={project} />
         {isolatedId && (

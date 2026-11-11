@@ -61,13 +61,19 @@ export function renderScenePlacementPreview(entity: PhysicalEntity, floor?: Floo
   return preview;
 }
 
-/** Keep the installed scene unchanged during motion. Commit only on release/click. */
+/**
+ * Keep the installed scene unchanged during motion. Commit only on release/click.
+ * onSceneChange runs after every change this makes to the scene (ghost added,
+ * moved, shown, hidden or removed; installed parts hidden or restored), so a
+ * render-on-demand viewer draws it. It is required so a caller cannot forget it.
+ */
 export function attachScenePlacement({
-  scene, camera, canvas, orbit, root, placement, pointerPosition,
+  scene, camera, canvas, orbit, root, placement, pointerPosition, onSceneChange,
 }: {
   scene: THREE.Scene; camera: THREE.PerspectiveCamera; canvas: HTMLCanvasElement;
   orbit: OrbitControls; root: THREE.Group | null; placement: ComponentPlacement;
   pointerPosition: { current: ScenePointer | null };
+  onSceneChange: () => void;
 }): () => void {
   const sheet = placement.project.sheets[placement.sheetId];
   const floor = sheet?.floorId ? placement.project.floors?.[sheet.floorId] : undefined;
@@ -124,6 +130,7 @@ export function attachScenePlacement({
   if (!shaping) {
     const preview = componentPlacementPreview({ x: 0, y: 0 });
     if (isPhysicalEntity(preview ?? undefined)) replaceGhost(preview as PhysicalEntity, new THREE.Vector3());
+    onSceneChange();
   }
 
   if (placement.source && placement.operation !== 'duplicate') hideParts([placement.source.id]);
@@ -149,7 +156,7 @@ export function attachScenePlacement({
     ? placement.source.points[placement.endpointIndex ?? 0] : physicalAnchor(prototype);
   let frame = 0;
   let lastGeometry = '';
-  const previewAtPointer = (): RoutePoint | null => {
+  const computePreview = (): RoutePoint | null => {
     if (useComponentPlacement.getState().pending !== placement) return null;
     const bounds = canvas.getBoundingClientRect();
     const inside = lastPointer.clientX >= bounds.left && lastPointer.clientX <= bounds.right
@@ -187,6 +194,14 @@ export function attachScenePlacement({
     setComponentPlacementPosition(position, resolved.connection);
     return position;
   };
+  // Every path above may replace, move, show or hide the ghost.
+  const previewAtPointer = (): RoutePoint | null => {
+    try {
+      return computePreview();
+    } finally {
+      onSceneChange();
+    }
+  };
   const queuePreview = () => {
     if (!frame) frame = requestAnimationFrame(() => { frame = 0; previewAtPointer(); });
   };
@@ -218,6 +233,7 @@ export function attachScenePlacement({
     if (pointer || event.relatedTarget instanceof Element && event.relatedTarget.closest('.scene-placement-controls')) return;
     if (ghost) ghost.visible = false;
     setComponentPlacementPosition(null);
+    onSceneChange();
   };
   const onCancel = () => { pointer = null; cancelComponentPlacement(); };
   canvas.addEventListener('pointerdown', onDown, true);
@@ -240,5 +256,6 @@ export function attachScenePlacement({
     canvas.style.cursor = previousCursor;
     for (const item of hidden) item.object.visible = item.visible;
     if (ghost) { scene.remove(ghost); disposePreview(ghost); }
+    onSceneChange();
   };
 }

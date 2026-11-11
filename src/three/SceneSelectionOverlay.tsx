@@ -11,6 +11,7 @@ import { distance3, equipmentPorts, routePath } from '../lib/route-path';
 import { routeEndStates } from '../lib/route-connections';
 import { componentFromEntity } from '../lib/component-library';
 import { openRunDrawings } from '../ui/RunDrawingDialog';
+import type { RenderScheduler } from './render-scheduler';
 
 interface Mark { x: number; y: number; label?: string; index?: number; kind: 'point' | 'move' | 'label' | 'snap' | 'open' | 'broken' | 'port' | 'cursor'; }
 interface OverlayState { marks: Mark[]; line: string; }
@@ -19,9 +20,11 @@ const visibleInScene = (object: THREE.Object3D) => {
   return true;
 };
 
-export function SceneSelectionOverlay({ project, selection, cameraRef, mountRef, rootRef }: {
+export function SceneSelectionOverlay({ project, selection, cameraRef, mountRef, rootRef, scheduler }: {
   project: Project; selection: ReadonlySet<string>;
   cameraRef: RefObject<THREE.PerspectiveCamera>; mountRef: RefObject<HTMLDivElement>; rootRef: RefObject<THREE.Group>;
+  /** The viewer's render scheduler: marks are recomputed right after each frame, so they match the picture. */
+  scheduler: RenderScheduler;
 }) {
   const pending = useComponentPlacement(state => state.pending);
   const position = useComponentPlacement(state => state.position);
@@ -33,7 +36,6 @@ export function SceneSelectionOverlay({ project, selection, cameraRef, mountRef,
   const disabled = !entity || !!physicalEditProblem(entity, project);
 
   useEffect(() => {
-    let frame = 0;
     let last = '';
     const update = () => {
       const camera = cameraRef.current;
@@ -99,11 +101,13 @@ export function SceneSelectionOverlay({ project, selection, cameraRef, mountRef,
       const next = { marks, line };
       const key = JSON.stringify(next);
       if (key !== last) { last = key; setOverlay(next); }
-      frame = requestAnimationFrame(update);
     };
-    frame = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(frame);
-  }, [project, selection, entity, disabled, pending, position, connection, sheet, cameraRef, mountRef, rootRef]);
+    // Runs after every render of the 3D view, with the camera matrices that
+    // frame used. A change of this effect's inputs asks for a frame.
+    const off = scheduler.onFrame(update);
+    scheduler.invalidate();
+    return off;
+  }, [project, selection, entity, disabled, pending, position, connection, sheet, cameraRef, mountRef, rootRef, scheduler]);
 
   useEffect(() => {
     if (!entity || disabled || pending) return;
