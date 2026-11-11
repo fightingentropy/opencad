@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { defaultElevation } from './elevations';
 import { subscribeTo3DViewCommands } from '../lib/commands';
+import { useRenderScheduler } from './render-scheduler';
 import type {
   Project,
   Sheet,
@@ -1666,10 +1667,13 @@ interface OrbitState {
   apply(camera: THREE.PerspectiveCamera): void;
 }
 
-function makeOrbitControls(
+// onChange runs after every user-driven camera move, so the render-on-demand
+// scheduler can draw the new pose.
+export function makeOrbitControls(
   camera: THREE.PerspectiveCamera,
   domElement: HTMLElement,
-  initialTarget: THREE.Vector3
+  initialTarget: THREE.Vector3,
+  onChange: () => void
 ): { state: OrbitState; dispose: () => void } {
   const state: OrbitState = {
     target: initialTarget.clone(),
@@ -1728,6 +1732,7 @@ function makeOrbitControls(
         Math.min(Math.PI - 0.05, state.polar - dy * 0.005)
       );
       state.apply(camera);
+      onChange();
     } else if (isPanning) {
       // Pan in camera-relative axes
       const panX = -dx * state.distance * 0.0015;
@@ -1740,6 +1745,7 @@ function makeOrbitControls(
       state.target.addScaledVector(right, panX);
       state.target.addScaledVector(up, panY);
       state.apply(camera);
+      onChange();
     }
   };
   const onMouseUp = () => {
@@ -1761,6 +1767,7 @@ function makeOrbitControls(
       Math.min(state.maxDistance, state.distance * factor)
     );
     state.apply(camera);
+    onChange();
   };
   const onContextMenu = (e: MouseEvent) => e.preventDefault();
 
@@ -2213,6 +2220,8 @@ export function Panel3D({
   const selectionCallbackRef = useRef(onSelectEntity);
   selectionCallbackRef.current = onSelectEntity;
   const renderedSheetRef = useRef('');
+  // Render on demand: anything that changes the 3D view calls invalidate().
+  const scheduler = useRenderScheduler();
 
   // Persistent three.js refs across renders/effects
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -2221,7 +2230,6 @@ export function Panel3D({
   const orbitRef = useRef<{ state: OrbitState; dispose: () => void } | null>(
     null
   );
-  const animationRef = useRef<number | null>(null);
   const contentRootRef = useRef<THREE.Group | null>(null);
   const materialsRef = useRef<MaterialBag | null>(null);
   // Last-built panel dimensions, so view-preset effect can reframe correctly.
@@ -2452,7 +2460,8 @@ export function Panel3D({
     orbitRef.current = makeOrbitControls(
       camera,
       renderer.domElement,
-      new THREE.Vector3(400, 250, 0)
+      new THREE.Vector3(400, 250, 0),
+      scheduler.invalidate
     );
 
     let pointerDown: { x: number; y: number; pointerId: number } | null = null;
@@ -2480,12 +2489,15 @@ export function Panel3D({
     renderer.domElement.addEventListener('pointercancel', cancelPointer);
     renderer.domElement.addEventListener('pointerleave', cancelPointer);
 
-    // Animation loop
-    const animate = () => {
-      animationRef.current = requestAnimationFrame(animate);
-      renderer.render(scene, camera);
-    };
-    animate();
+    // Render on demand. Attaching draws the first frame; after that a frame
+    // is drawn only when something calls scheduler.invalidate().
+    const detachRender = scheduler.attach({ render: () => renderer.render(scene, camera) });
+    const invalidate = scheduler.invalidate;
+    const onVisible = (): void => { if (!document.hidden) invalidate(); };
+    renderer.domElement.addEventListener('webglcontextrestored', invalidate);
+    document.addEventListener('visibilitychange', onVisible);
+    // Public escape hatch (also used by scripts/visual-smoke.mjs).
+    window.addEventListener('opencad:invalidate-3d', invalidate);
 
     // Resize observer
     const ro = new ResizeObserver(() => {
@@ -2494,15 +2506,18 @@ export function Panel3D({
       camera.aspect = w / Math.max(1, h);
       camera.updateProjectionMatrix();
       renderer.setSize(w, h, false);
+      // setSize cleared the drawing buffer: redraw now, not next frame.
+      scheduler.renderNow();
     });
     ro.observe(mount);
     resizeObsRef.current = ro;
 
     return () => {
-      if (animationRef.current !== null) {
-        cancelAnimationFrame(animationRef.current);
-        animationRef.current = null;
-      }
+      // Stop drawing before anything is disposed.
+      detachRender();
+      renderer.domElement.removeEventListener('webglcontextrestored', invalidate);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('opencad:invalidate-3d', invalidate);
       orbitRef.current?.dispose();
       orbitRef.current = null;
       renderer.domElement.removeEventListener('pointerdown', handlePointerDown);
@@ -2554,6 +2569,9 @@ export function Panel3D({
     const orbit = orbitRef.current;
     const mats = materialsRef.current;
     if (!scene || !camera || !orbit || !mats) return;
+    // The frame is drawn asynchronously, after this effect has finished, so
+    // asking first covers every exit path below, including a throw.
+    scheduler.invalidate();
 
     // Lazily create the persistent root + sub-groups on first run.
     let root = contentRootRef.current;
@@ -2920,7 +2938,8 @@ export function Panel3D({
   // ---- React to door-mode prop without rebuilding the scene ------------
   useEffect(() => {
     applyDoorMode(contentRootRef.current, doorMode);
-  }, [doorMode]);
+    scheduler.invalidate();
+  }, [doorMode, scheduler]);
 
   // Search and the inspector share the same physical-component focus request.
   useEffect(() => {
@@ -2950,11 +2969,13 @@ export function Panel3D({
       camera.far = Math.max(5000, orbit.distance * 20);
       camera.updateProjectionMatrix();
       orbit.apply(camera);
+      // Runs outside a React commit.
+      scheduler.invalidate();
       onFocused?.();
     };
     window.addEventListener('opencad:focus-entity', onFocus);
     return () => window.removeEventListener('opencad:focus-entity', onFocus);
-  }, []);
+  }, [scheduler]);
 
   useEffect(() => subscribeTo3DViewCommands((command) => {
     const camera = cameraRef.current;
@@ -2986,7 +3007,8 @@ export function Panel3D({
     camera.far = Math.max(5000, orbit.distance * 20);
     camera.updateProjectionMatrix();
     orbit.apply(camera);
-  }), []);
+    scheduler.invalidate();
+  }), [scheduler]);
 
   // ---- React to view-preset requests (bumped via viewKey) --------------
   useEffect(() => {
@@ -2995,8 +3017,17 @@ export function Panel3D({
     if (!camera || !orbit) return;
     const { w, h } = sizeRef.current;
     applyViewPreset(viewPreset, w, h, camera, orbit.state, lastSceneStyleRef.current);
+    scheduler.invalidate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewKey]);
+
+  // Render-on-demand safety net: every commit of this component (project,
+  // size, appearance, door mode, view preset, error state) draws a frame,
+  // even if an effect above forgets to invalidate. Must stay dependency-free
+  // and last.
+  useEffect(() => {
+    scheduler.invalidate();
+  });
 
   const style: React.CSSProperties = {
     width: width ? `${width}px` : '100%',
