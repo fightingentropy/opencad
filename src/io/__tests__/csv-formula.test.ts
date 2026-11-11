@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { splitRestoredLine, neutralizeFormula } from '../csv-safe';
+import { neutralizeFormula, restoreFormula, splitRestoredLine } from '../csv-safe';
 import { bomToCSV } from '../bom';
 import { createEmptyProject } from '../../state/store';
 
@@ -19,6 +19,12 @@ describe('csv formula neutralisation', () => {
       createEmptyProject(),
     );
     expect(csv).toContain(`"'=HYPERLINK(""x"")"`);
+  });
+
+  it('round-trips formula-looking tags through export and import', () => {
+    for (const v of ['-F1', '=Q3', "'-F1", "''@x", "'-1.5", '-1.5', 'plain', "'quoted"]) {
+      expect(restoreFormula(neutralizeFormula(v))).toBe(v);
+    }
   });
 
   it('restores neutralised cells when the modal splits an imported line', () => {
