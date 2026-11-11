@@ -14,11 +14,11 @@ import type {
 } from '../types';
 import type { Cable } from '../models/cable';
 import type { PenetrationSeal } from '../models/fire';
+import { supportSpanFor } from '../calc/supports';
 import { computeContainmentFill } from '../calc/fill';
 import { dist, distToSegment, segIntersect } from '../lib/math';
 import {
   DEFAULT_STANDARDS,
-  SUPPORT_SPANS_HORIZONTAL_MM,
   SEGREGATION_MIN_MM,
   VDROP_LIMITS,
   createStandardsTrace,
@@ -56,27 +56,8 @@ const routeLengthMm = (c: ContainmentEntity): number => {
   return n;
 };
 
-const supportSpanMm = (c: ContainmentEntity): number => {
-  const spans = SUPPORT_SPANS_HORIZONTAL_MM as Record<string, Record<number, number>>;
-  const widthKey = c.width ?? 100;
-  const lookup = (table: Record<number, number>): number => {
-    const widths = Object.keys(table).map(Number).sort((a, b) => a - b);
-    let pick = widths[0] ?? widthKey;
-    for (const w of widths) if (w <= widthKey) pick = w;
-    return table[pick] ?? 1500;
-  };
-  switch (c.containmentType) {
-    case 'tray': return lookup(spans.tray);
-    case 'ladder': return lookup(spans.ladder);
-    case 'basket': return lookup(spans.basket);
-    case 'trunking': return lookup(spans.trunking);
-    case 'conduit': {
-      const isPvc = c.material === 'pvc' || c.material === 'lsoh';
-      return lookup(isPvc ? spans.conduit_pvc : spans.conduit_steel);
-    }
-    default: return 1500;
-  }
-};
+const supportSpanMm = (c: ContainmentEntity): number =>
+  supportSpanFor(c.containmentType, c.width ?? 100, c.subType, c.material);
 
 const collectContainments = (project: Project): ContainmentEntity[] => {
   const out: ContainmentEntity[] = [];
