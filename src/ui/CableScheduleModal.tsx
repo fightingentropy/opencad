@@ -12,6 +12,7 @@ import { notify } from '../state/notifications';
 import { nanoid } from 'nanoid';
 import type { Cable, CableCircuitType, CableSchedule } from '../models/cable';
 import type { ContainmentEntity, EquipmentEntity, Vec2 } from '../types';
+import { neutralizeFormula } from '../io/csv-safe';
 import { CableEditDialog } from './CableEditDialog';
 import { cableVoltageDrop, estimateAmpacity, estimateCableLength, estimateVdrop, fmtNum } from './whole-site-helpers';
 import { buildContainmentGraph } from '../lib/containment-graph';
@@ -103,13 +104,17 @@ export function CableScheduleModal({ onClose }: { onClose: () => void }) {
 
   const onCsv = () => {
     const head = 'ref,from,to,system,circuit,construction,cores,csa,od,voltage,Ib,length\n';
+    const cell = (v: unknown): string => {
+      const t = neutralizeFormula(String(v ?? ''));
+      return /[",\n\r]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+    };
     const body = visible.map((c) => [
       c.reference, c.from, c.to,
       c.systemId ?? '', c.circuitType, c.construction,
       c.cores, c.csa, c.outerDiameter, c.voltage,
       c.designCurrent ?? '',
       estimateCableLength(c, project).toFixed(1),
-    ].join(',')).join('\n');
+    ].map(cell).join(',')).join('\n');
     const blob = new Blob([head + body], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);

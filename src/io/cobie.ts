@@ -3,12 +3,13 @@
 // into a CAFM/CMMS without needing a true .xlsx writer.
 
 import type { Project } from '../types';
+import { neutralizeFormula } from './csv-safe';
 import { buildExportMetadata } from './export-metadata';
 
 const csv = (rows: unknown[][]): string =>
   rows.map((r) =>
     r.map((v) => {
-      const s = String(v ?? '');
+      const s = neutralizeFormula(String(v ?? ''));
       if (s.includes(',') || s.includes('"') || s.includes('\n')) {
         return `"${s.replace(/"/g, '""')}"`;
       }

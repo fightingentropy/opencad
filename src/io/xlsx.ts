@@ -6,10 +6,11 @@ import type { Cable, CableId } from '../models/cable';
 import type { Project } from '../types';
 import type { BOMRow } from './bom';
 import { assertImportTextLimits, IMPORT_LIMITS, ImportLimitError } from './import-limits';
+import { neutralizeFormula } from './csv-safe';
 import { prependCSVExportMetadata } from './export-metadata';
 
 const csvEscape = (v: unknown): string => {
-  const s = String(v ?? '');
+  const s = neutralizeFormula(String(v ?? ''));
   if (s.includes(',') || s.includes('"') || s.includes('\n')) {
     return `"${s.replace(/"/g, '""')}"`;
   }
