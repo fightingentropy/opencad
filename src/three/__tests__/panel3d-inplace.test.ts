@@ -5,6 +5,7 @@ import {
   buildContainmentGroup,
   buildMaterials,
   buildWireMesh,
+  disposeObject,
   updateContainmentGroupInPlace,
   updateWireGeometryInPlace,
 } from '../Panel3D';
