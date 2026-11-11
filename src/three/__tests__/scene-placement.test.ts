@@ -42,32 +42,41 @@ describe('3D placement preview', () => {
   });
 });
 
+function placementFixture() {
+  const board: EquipmentEntity = {
+    id: 'board', kind: 'equipment', equipmentKind: 'distribution-board', tag: 'DB01',
+    layerId: 'layer', visible: true, locked: false, elevation: 1200,
+    a: { x: -600, y: -225 }, b: { x: 600, y: 225 }, height: 2000,
+  };
+  const project = createEmptyProject();
+  const placement = {
+    component: {}, prototype: board, project, sheetId: project.activeSheetId, layerId: project.activeLayerId,
+    viewMode: '3d', surface: '3d', hint: '', operation: 'insert', rotation: 0, repeat: false,
+  } as unknown as ComponentPlacement;
+  useComponentPlacement.setState({ pending: placement, position: null, connection: null });
+  const canvas = Object.assign(new EventTarget(), {
+    style: { cursor: '' },
+    getBoundingClientRect: () => ({ left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600 }),
+    setPointerCapture() {}, releasePointerCapture() {}, hasPointerCapture: () => false,
+  }) as unknown as HTMLCanvasElement;
+  const orbit = Object.assign(new EventTarget(), { enabled: true }) as unknown as OrbitControls;
+  const camera = new THREE.PerspectiveCamera(45, 800 / 600, 10, 400000);
+  camera.up.set(0, 0, 1);
+  camera.position.set(0, -8000, 9000);
+  camera.lookAt(0, 0, 0);
+  camera.updateMatrixWorld(true);
+  const scene = new THREE.Scene();
+  const onSceneChange = vi.fn();
+  return { placement, canvas, orbit, camera, scene, onSceneChange };
+}
+
+function pointerEvent(type: string, clientX: number, clientY: number, extra: Record<string, unknown> = {}): Event {
+  return Object.assign(new Event(type), { clientX, clientY, pointerId: 1, button: 0, ...extra });
+}
+
 describe('3D placement requests a frame for every scene change', () => {
-  it('calls onSceneChange when the ghost appears, moves, hides and is removed', () => {
-    const board: EquipmentEntity = {
-      id: 'board', kind: 'equipment', equipmentKind: 'distribution-board', tag: 'DB01',
-      layerId: 'layer', visible: true, locked: false, elevation: 1200,
-      a: { x: -600, y: -225 }, b: { x: 600, y: 225 }, height: 2000,
-    };
-    const project = createEmptyProject();
-    const placement = {
-      component: {}, prototype: board, project, sheetId: project.activeSheetId, layerId: project.activeLayerId,
-      viewMode: '3d', surface: '3d', hint: '', operation: 'insert', rotation: 0, repeat: false,
-    } as unknown as ComponentPlacement;
-    useComponentPlacement.setState({ pending: placement, position: null, connection: null });
-    const canvas = Object.assign(new EventTarget(), {
-      style: { cursor: '' },
-      getBoundingClientRect: () => ({ left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600 }),
-      setPointerCapture() {}, releasePointerCapture() {}, hasPointerCapture: () => false,
-    }) as unknown as HTMLCanvasElement;
-    const orbit = Object.assign(new EventTarget(), { enabled: true }) as unknown as OrbitControls;
-    const camera = new THREE.PerspectiveCamera(45, 800 / 600, 10, 400000);
-    camera.up.set(0, 0, 1);
-    camera.position.set(0, -8000, 9000);
-    camera.lookAt(0, 0, 0);
-    camera.updateMatrixWorld(true);
-    const scene = new THREE.Scene();
-    const onSceneChange = vi.fn();
+  it('calls onSceneChange when the ghost appears, hides and is removed', () => {
+    const { placement, canvas, orbit, camera, scene, onSceneChange } = placementFixture();
     // The leave handler checks relatedTarget instanceof Element.
     vi.stubGlobal('Element', class {});
     try {
@@ -88,6 +97,63 @@ describe('3D placement requests a frame for every scene change', () => {
       detach();
       expect(scene.getObjectByName('component-placement-preview')).toBeUndefined();
       expect(onSceneChange).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+      useComponentPlacement.setState({ pending: null, position: null, connection: null });
+    }
+  });
+
+  it('calls onSceneChange after the ghost moves on pointer move, orbit change, pointer down and pointer up', () => {
+    const { placement, canvas, orbit, camera, scene, onSceneChange } = placementFixture();
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => frames.push(callback));
+    vi.stubGlobal('cancelAnimationFrame', () => {});
+    vi.stubGlobal('Element', class {});
+    const runFrames = () => { for (const callback of frames.splice(0)) callback(0); };
+    try {
+      const detach = attachScenePlacement({
+        scene, camera, canvas, orbit, root: null, placement, pointerPosition: { current: null }, onSceneChange,
+      });
+      const ghost = scene.getObjectByName('component-placement-preview')!;
+      const before = ghost.position.clone();
+
+      // Pointer move: the preview runs on the next animation frame.
+      onSceneChange.mockClear();
+      canvas.dispatchEvent(pointerEvent('pointermove', 300, 250));
+      expect(frames).toHaveLength(1);
+      expect(onSceneChange).not.toHaveBeenCalled();
+      runFrames();
+      expect(ghost.position.equals(before)).toBe(false);
+      expect(onSceneChange).toHaveBeenCalledTimes(1);
+
+      // Orbit change: the camera moved, so the ghost is recomputed on the next frame.
+      const afterMove = ghost.position.clone();
+      camera.position.set(2000, -8000, 9000);
+      camera.lookAt(0, 0, 0);
+      camera.updateMatrixWorld(true);
+      onSceneChange.mockClear();
+      orbit.dispatchEvent(new Event('change'));
+      expect(frames).toHaveLength(1);
+      runFrames();
+      expect(ghost.position.equals(afterMove)).toBe(false);
+      expect(onSceneChange).toHaveBeenCalledTimes(1);
+
+      // Pointer down previews synchronously.
+      const afterOrbit = ghost.position.clone();
+      onSceneChange.mockClear();
+      canvas.dispatchEvent(pointerEvent('pointerdown', 450, 350));
+      expect(ghost.position.equals(afterOrbit)).toBe(false);
+      expect(onSceneChange).toHaveBeenCalledTimes(1);
+
+      // Pointer up after a drag previews synchronously and does not commit.
+      const afterDown = ghost.position.clone();
+      onSceneChange.mockClear();
+      canvas.dispatchEvent(pointerEvent('pointerup', 550, 400));
+      expect(ghost.position.equals(afterDown)).toBe(false);
+      expect(onSceneChange).toHaveBeenCalledTimes(1);
+      expect(useComponentPlacement.getState().pending).toBe(placement);
+
+      detach();
     } finally {
       vi.unstubAllGlobals();
       useComponentPlacement.setState({ pending: null, position: null, connection: null });
