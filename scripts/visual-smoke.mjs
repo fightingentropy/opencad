@@ -128,7 +128,11 @@ async function waitForCanvas(client) {
   const deadline = Date.now() + 15000;
   let latest;
   while (Date.now() < deadline) {
-    latest = await evaluate(client, `new Promise(resolve => requestAnimationFrame(() => {
+    // The viewer renders on demand and has no preserveDrawingBuffer, so an
+    // idle canvas cannot be read back. Ask it for a frame first: its frame
+    // callback is then queued ahead of ours, and readPixels below sees the
+    // buffer that frame just drew.
+    latest = await evaluate(client, `(window.dispatchEvent(new Event('opencad:invalidate-3d')), new Promise(resolve => requestAnimationFrame(() => {
       const canvas = document.querySelector('.site-render-surface canvas');
       const bodyText = document.body?.innerText || '';
       if (!canvas) return resolve({ ready: false, reason: '3D renderer not mounted', bodyText: bodyText.slice(0, 160) });
@@ -153,13 +157,15 @@ async function waitForCanvas(client) {
         pixelSignal = String(error?.message || error);
       }
       resolve({
-        ready: rect.width > 200 && rect.height > 200 && Array.isArray(pixelSignal) && pixelSignal[3] > 0
+        // alpha:false buffers read alpha 255 even when nothing was drawn, so
+        // require colour: the site background (0xe3e5e7) is never black.
+        ready: rect.width > 200 && rect.height > 200 && Array.isArray(pixelSignal) && pixelSignal.slice(0, 3).some(v => v > 0)
           && !document.querySelector('.canvas-3d-fallback'),
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
         pixelSignal,
         bodyText: bodyText.slice(0, 160)
       });
-    }))`);
+    })))`);
     if (latest?.ready) return latest;
     await sleep(250);
   }
